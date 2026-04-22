@@ -1,8 +1,8 @@
 """Orchestrator for the Bench governance pipeline.
 
 Loads the constitution snapshot, drives Challenger -> Defender -> Oracle in
-sequence, and returns a consolidated result dict for the hook to translate
-into a permissionDecision and for the ledger to append.
+sequence, appends a hash-chained receipt to the ledger, and returns a
+consolidated result dict for the hook to translate into a permissionDecision.
 
 Fail-open policy:
   * Any stage returning PIPELINE_ERROR short-circuits to a PASS verdict.
@@ -11,14 +11,26 @@ Fail-open policy:
     the hook and ledger can flag the incident for the developer. A broken
     governance layer must not block work.
 
+Ledger policy:
+  * Every exit path records a ledger entry via append_entry before
+    returning — PASS, VETO, and fail-open alike. Fail-open entries carry
+    pipeline_error=True so the evidence chain distinguishes them from
+    adjudicated verdicts.
+  * If the ledger write itself raises, the exception is logged to stderr
+    and the verdict is returned anyway. A broken ledger must not block
+    the developer (same motivation as the fail-open verdict policy).
+
 Optimization:
   * Challenger CLEAR skips the Defender (saves one model call). A synthetic
     CONFIRM_CLEAR defender result is fabricated so the Oracle sees a
     consistent three-input payload.
 """
 
+import sys
+import traceback
 from typing import Any
 
+from ledger.chain import append_entry
 from pipeline.challenger import run_challenger
 from pipeline.constitution import (
     ConstitutionError,
@@ -38,10 +50,11 @@ def run_governance_pipeline(
 ) -> dict[str, Any]:
     """Run the full Challenger -> Defender -> Oracle pipeline.
 
-    tool_name and tool_input are accepted for signature uniformity with the
-    hook and future ledger recording; this function operates on diff_info.
+    tool_name and diff_info are used to tag the ledger entry. tool_input
+    is accepted for signature uniformity with the hook but is not recorded
+    separately — diff_info already carries the extracted change payload.
     """
-    del tool_name, tool_input  # reserved for ledger context; not used here
+    del tool_input  # accepted for signature uniformity; not recorded
 
     accumulated: dict[str, int] = {"input": 0, "output": 0}
 
@@ -50,28 +63,36 @@ def run_governance_pipeline(
             _CONSTITUTION_PATH
         )
     except ConstitutionError as e:
-        return {
-            "verdict": "PASS",
-            "reason": f"Constitution load failure — failing open: {e}",
-            "remediation": None,
-            "pipeline_error": True,
-            "_tokens": accumulated,
-        }
+        return _finalize(
+            {
+                "verdict": "PASS",
+                "reason": f"Constitution load failure — failing open: {e}",
+                "remediation": None,
+                "pipeline_error": True,
+                "_tokens": accumulated,
+            },
+            tool_name,
+            diff_info,
+        )
 
     challenger_result: dict[str, Any] = run_challenger(
         diff_info, constitution, constitution_hash
     )
     _accumulate_tokens(accumulated, challenger_result.get("_tokens"))
     if challenger_result.get("status") == "PIPELINE_ERROR":
-        return {
-            "verdict": "PASS",
-            "reason": "Challenger pipeline error — failing open",
-            "remediation": None,
-            "challenger": challenger_result,
-            "constitution_hash": constitution_hash,
-            "pipeline_error": True,
-            "_tokens": accumulated,
-        }
+        return _finalize(
+            {
+                "verdict": "PASS",
+                "reason": "Challenger pipeline error — failing open",
+                "remediation": None,
+                "challenger": challenger_result,
+                "constitution_hash": constitution_hash,
+                "pipeline_error": True,
+                "_tokens": accumulated,
+            },
+            tool_name,
+            diff_info,
+        )
 
     if challenger_result.get("status") == "CLEAR":
         defender_result: dict[str, Any] = {
@@ -86,16 +107,20 @@ def run_governance_pipeline(
         )
         _accumulate_tokens(accumulated, defender_result.get("_tokens"))
         if defender_result.get("status") == "PIPELINE_ERROR":
-            return {
-                "verdict": "PASS",
-                "reason": "Defender pipeline error — failing open",
-                "remediation": None,
-                "challenger": challenger_result,
-                "defender": defender_result,
-                "constitution_hash": constitution_hash,
-                "pipeline_error": True,
-                "_tokens": accumulated,
-            }
+            return _finalize(
+                {
+                    "verdict": "PASS",
+                    "reason": "Defender pipeline error — failing open",
+                    "remediation": None,
+                    "challenger": challenger_result,
+                    "defender": defender_result,
+                    "constitution_hash": constitution_hash,
+                    "pipeline_error": True,
+                    "_tokens": accumulated,
+                },
+                tool_name,
+                diff_info,
+            )
 
     oracle_result: dict[str, Any] = run_oracle(
         diff_info,
@@ -106,28 +131,65 @@ def run_governance_pipeline(
     )
     _accumulate_tokens(accumulated, oracle_result.get("_tokens"))
     if oracle_result.get("status") == "PIPELINE_ERROR":
-        return {
-            "verdict": "PASS",
-            "reason": "Oracle pipeline error — failing open",
-            "remediation": None,
+        return _finalize(
+            {
+                "verdict": "PASS",
+                "reason": "Oracle pipeline error — failing open",
+                "remediation": None,
+                "challenger": challenger_result,
+                "defender": defender_result,
+                "oracle": oracle_result,
+                "constitution_hash": constitution_hash,
+                "pipeline_error": True,
+                "_tokens": accumulated,
+            },
+            tool_name,
+            diff_info,
+        )
+
+    return _finalize(
+        {
+            "verdict": oracle_result["verdict"],
+            "reason": oracle_result["reasoning"],
+            "remediation": oracle_result["remediation"],
             "challenger": challenger_result,
             "defender": defender_result,
             "oracle": oracle_result,
             "constitution_hash": constitution_hash,
-            "pipeline_error": True,
             "_tokens": accumulated,
-        }
+        },
+        tool_name,
+        diff_info,
+    )
 
-    return {
-        "verdict": oracle_result["verdict"],
-        "reason": oracle_result["reasoning"],
-        "remediation": oracle_result["remediation"],
-        "challenger": challenger_result,
-        "defender": defender_result,
-        "oracle": oracle_result,
-        "constitution_hash": constitution_hash,
-        "_tokens": accumulated,
+
+def _finalize(
+    result: dict[str, Any],
+    tool_name: str,
+    diff_info: dict,
+) -> dict[str, Any]:
+    """Attach change context, record to the ledger, and return the result.
+
+    The ledger append is wrapped in a best-effort guard: any exception is
+    logged with a full traceback to stderr but is swallowed so the verdict
+    still reaches the hook. A broken ledger must not block the developer
+    (constitutional fail-open policy).
+    """
+    result["change"] = {
+        "file": diff_info.get("file_path", "unknown"),
+        "tool": tool_name,
+        "diff_summary": diff_info,
     }
+    try:
+        append_entry(result)
+    except Exception as e:
+        print(
+            f"[bench runner] ledger append failed; returning verdict "
+            f"without receipt: {e}",
+            file=sys.stderr,
+        )
+        traceback.print_exc(file=sys.stderr)
+    return result
 
 
 def _accumulate_tokens(
