@@ -2101,5 +2101,892 @@
       }
     },
     "entry_hash": "55237ae29981e086559bb4478b83809bbb3e6bf602160b01cc71bcde578cde32"
+  },
+  {
+    "entry_id": "67c9f765-4035-40ae-a8de-f4005648f978",
+    "timestamp": "2026-04-22T05:56:34.700052+00:00",
+    "previous_hash": "55237ae29981e086559bb4478b83809bbb3e6bf602160b01cc71bcde578cde32",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "C:\\Users\\mstar\\.claude\\plans\\rail-receipt-filecli-commands-py-edit-iridescent-shore.md",
+      "tool": "Write",
+      "diff_summary": {
+        "file_path": "C:\\Users\\mstar\\.claude\\plans\\rail-receipt-filecli-commands-py-edit-iridescent-shore.md",
+        "change_type": "create",
+        "content": "# Plan: `python -m cli viewer` \u00e2\u20ac\u201d HTML verdict viewer\n\n## Context\n\nBench records every governed code change as a hash-chained entry in `ledger/bench-ledger.json`. The existing CLI exposes four read-only reports (`verify`, `ledger`, `stats`, `constitution`) that print to the terminal. The terminal format is scannable but not ideal for reading full Challenger findings, Defender rebuttals, and Oracle reasoning \u00e2\u20ac\u201d which are often multi-paragraph. The ask is a fifth command, `viewer`, that generates a single self-contained HTML file, opens it in the default browser, and presents the same ledger data with stats banner, filters, and expandable per-entry detail panels. Output is read-only; nothing touches the chain or the pipeline.\n\n## Schema reality vs. user spec\n\nThe user's spec describes a cleaner ledger schema than what is actually on disk. The viewer must tolerate both. Confirmed discrepancies after reading `ledger/bench-ledger.json`:\n\n| Spec said | Reality |\n|---|---|\n| `tokens_used: {input, output}` | Field is `_tokens` (leading underscore), same inner shape |\n| `constraint_citations: []` (strings) | List of **dicts**: `{constraint_id, disposition, note}` where `disposition \u00e2\u02c6\u02c6 {VIOLATED, NOT_APPLICABLE, ...}` |\n| `change.task_description` | Field does not exist; `change` is `{file, tool, diff_summary}` only |\n| `diff_summary: \"string\"` | Sometimes a string, sometimes a dict `{file_path, content}` |\n| (not mentioned) | Oracle also has `advisories: []` and `remediation: string` |\n| (not mentioned) | Defender has `rebuttals: [{argument, evidence, finding_index, position}]` and `summary` |\n| Stage objects always present | Pipeline-error entries have `defender: {}` and `oracle: {}` \u00e2\u20ac\u201d 5 of 23 entries |\n| Challenger `findings: []` (shape unspecified) | List of dicts `{constraint_id, severity, location, evidence, reasoning}` |\n\nDesign rule: every field access goes through a `isinstance(..., dict)`/`.get()` guard, mirroring the style in `cli/commands.py:198-235`. On missing data render `N/A`, never crash.\n\n## Files\n\n| File | Action |\n|---|---|\n| `utils/viewer.py` | **New.** Public `generate_viewer_html()` and private helpers. |\n| `cli/commands.py` | **Edit.** Add `cmd_viewer()` function. |\n| `cli/__main__.py` | **Edit.** Import `cmd_viewer`, add to dispatch, add to `_USAGE`. |\n\nOut of scope (per user): `ledger/`, `pipeline/`, `hooks/`, `utils/diff.py`, `utils/formatting.py`, `bench.json`, `README.md`, `requirements.txt`.\n\n## Approach\n\n### `utils/viewer.py` \u00e2\u20ac\u201d self-contained HTML generator\n\nModule structure mirrors `utils/diff.py`:\n- Triple-quoted module docstring explaining purpose and the fail-open contract.\n- Stdlib-only imports: `html`, `json`, `sys`, `traceback`, `typing`.\n- Module constants in UPPER_CASE (color palette, truncation lengths).\n- Public function at top, private helpers below.\n- Top-level `try/except` with `traceback.print_exc(file=sys.stderr)` on any failure \u00e2\u20ac\u201d returns a minimal error HTML page rather than raising (C-001 compliance: no silent swallowing, no crash-out).\n\nPublic surface:\n\n```python\ndef generate_viewer_html(ledger_path: str = \"ledger/bench-ledger.json\") -> str:\n    \"\"\"Return a complete self-contained HTML string rendering the ledger.\"\"\"\n```\n\nInternal helpers:\n\n- `_load_entries(ledger_path: str) -> list[dict]` \u00e2\u20ac\u201d reuses `ledger.chain.load_ledger` so behavior matches the rest of the CLI (returns `[]` on missing/corrupt, already logs to stderr).\n- `_compute_chain_status(ledger_path: str) -> dict` \u00e2\u20ac\u201d calls `ledger.verify.verify_chain`. Returns `{\"status\": \"VALID\" | \"BROKEN\" | \"EMPTY\", \"failure_index\": int | None, \"message\": str}`. **Chain integrity is computed in Python, not JS** \u00e2\u20ac\u201d replicating `json.dumps(..., sort_keys=True, default=str)` + SHA-256 in the browser is fragile and adds zero value; we just embed the already-computed verdict as a JS constant.\n- `_compute_stats(entries: list[dict]) -> dict` \u00e2\u20ac\u201d mirrors `cmd_stats` logic exactly (from `cli/commands.py:100-159`) so the banner totals match `python -m cli stats`: same PASS/VETO counts, same `isinstance(cid, str)` check for most-cited-constraint. For parity with the terminal stats command, I will match its logic verbatim, including the existing limitation that it only counts *string* citations (real entries have dict citations, so the \"most cited\" number today is n/a \u00e2\u20ac\u201d this is the current behavior and the viewer should not silently diverge from it). Noted as a follow-up opportunity but out of this task's scope.\n- `_build_html(stats: dict, chain_status: dict, entries: list[dict]) -> str` \u00e2\u20ac\u201d assembles the HTML string using f-string interpolation + JSON embedding.\n\nEmbedding safety:\n- Ledger data embedded via `json.dumps(entries)` and injected inside a `<script>` block as `const LEDGER_DATA = {...};`.\n- Defense against `</script>` breakouts in user content: after `json.dumps`, apply `.replace(\"</\", \"<\\\\/\")` on the resulting string before injection. Standard stdlib pattern, no extra deps.\n- All HTML-context text (page title, labels) is literal and trusted; only entry content reaches the DOM via the JS renderer which uses `textContent` (not `innerHTML`) for user-controlled strings. Hash values and constraint IDs get `<code>` wrappers but still via `textContent`.\n\n### HTML document layout\n\nSingle `<!doctype html>` document, ~400 lines including embedded CSS and JS. Sections:\n\n1. **`<head>`** \u00e2\u20ac\u201d `<title>Bench Verdict Viewer</title>`, inline `<style>`.\n2. **Stats banner** \u00e2\u20ac\u201d flexbox row of stat tiles at the top:\n   - Total governed changes\n   - Passed (green, with `%`)\n   - Vetoed (red, with `%`)\n   - Most cited constraint (or \"n/a\")\n   - Chain status: `VALID` (green) / `BROKEN AT ENTRY #N` (red) / `EMPTY` (dim)\n3. **Filter bar** \u00e2\u20ac\u201d three buttons: `All` / `PASS` / `VETO`. Active button styled with inset border and brighter bg. JS toggles a data-attribute on the entries container; CSS hides non-matching rows via `[data-filter=\"veto\"] .entry[data-verdict=\"PASS\"] { display: none; }` \u00e2\u20ac\u201d zero DOM rebuild, instant filter.\n4. **Entry list** \u00e2\u20ac\u201d `<ol reversed>` so newest-first without array manipulation. Each `<li class=\"entry\" data-verdict=\"PASS|VETO|NONE\">` has a summary row (entry #, timestamp, file path, tool, verdict badge, short hash) and a collapsed detail panel. Click the summary row to toggle `.entry.expanded`.\n5. **Detail panel** \u00e2\u20ac\u201d four subsections per entry:\n   - **Change**: file, tool, diff summary (if dict \u00e2\u2020\u2019 render `file_path` + truncated `content`; if string \u00e2\u2020\u2019 render directly). Content in a `<pre>` with `white-space: pre-wrap`, max-height with scroll.\n   - **Challenger**: status, then each finding as a card (`constraint_id`, severity badge, location, evidence, reasoning).\n   - **Defender**: status, summary, then each rebuttal as a card (`position` badge, `finding_index`, argument, evidence).\n   - **Oracle**: verdict, confidence, reasoning (full, not truncated), constraint citations table (`constraint_id` + `disposition` + `note`), advisories list, remediation block. Dict-shaped citations render as table rows; fallback to string rendering if a citation is a plain string.\n   - **Metadata**: entry #, entry hash (click-to-copy via `navigator.clipboard.writeText`, short preview), previous hash (same), constitution hash if present, token usage summed across stages reading `_tokens` (with fallback to `tokens_used` for forward-compat).\n\nVisual design:\n- Dark background `#1a1a2e`, light text `#e8e8f0`.\n- Monospace (`ui-monospace, Menlo, Consolas, monospace`) for hashes, file paths, code.\n- Sans-serif (`system-ui, -apple-system, sans-serif`) for prose.\n- PASS badge: `background: #4ade80; color: #0a0a14;`.\n- VETO badge: `background: #f87171; color: #1a1a2e;`.\n- Expanded PASS entry: `border-left: 3px solid #4ade80;`.\n- Expanded VETO entry: `border-left: 3px solid #f87171;`.\n- Pipeline-error (no verdict) entry: `border-left: 3px solid #94a3b8;`, badge reads `FAIL-OPEN` matching `_print_entry_line` at `cli/commands.py:210`.\n\nEdge cases handled in the JS renderer:\n- Empty ledger: `entries.length === 0` \u00e2\u2020\u2019 stats tiles all show `0`, entry list area shows `<p>No governed changes recorded yet.</p>`.\n- VETO filter with zero vetoes: entries container shows `<p>No VETO entries.</p>` via CSS `:empty` sibling or a JS-toggled message node.\n- Missing stage objects: renderer reads with `obj && obj.field`; all nullish reads fall through to rendering `N/A` in the appropriate slot.\n- Long strings: no truncation in the detail panel \u00e2\u20ac\u201d the whole point is full-text audit. `<pre>` uses `white-space: pre-wrap; word-break: break-word;`.\n\n### `cli/commands.py` \u00e2\u20ac\u201d add `cmd_viewer`\n\nImports added at the top alongside existing ones:\n\n```python\nimport tempfile\nimport webbrowser\nfrom utils.viewer import generate_viewer_html\n```\n\nFunction added after `cmd_constitution`, before the private helpers (`_print_entry_line`, etc.):\n\n```python\ndef cmd_viewer() -> int:\n    \"\"\"Generate the HTML ledger viewer, write it, and open it in the browser.\"\"\"\n    try:\n        html_content: str = generate_viewer_html()\n    except Exception as e:\n        print(f\"[bench cli] viewer generation failed: {e}\", file=sys.stderr)\n        return 1\n\n    try:\n        with tempfile.NamedTemporaryFile(\n            mode=\"w\",\n            suffix=\".html\",\n            prefix=\"bench-viewer-\",\n            delete=False,\n            encoding=\"utf-8\",\n        ) as fh:\n            fh.write(html_content)\n            tmp_path: str = fh.name\n    except OSError as e:\n        print(f\"[bench cli] viewer write failed: {e}\", file=sys.stderr)\n        return 1\n\n    print(f\"Bench viewer written to: {tmp_path}\")\n    if not webbrowser.open(f\"file://{tmp_path}\"):\n        print(\n            \"[bench cli] could not auto-open browser; open the path above manually.\",\n            file=sys.stderr,\n        )\n    return 0\n```\n\nError handling matches C-001: every failure path logs to stderr and returns a typed int \u00e2\u20ac\u201d no silent swallow, no bare `except: pass`. The `webbrowser.open` false-return is surfaced but non-fatal (user can still open the file by hand; the path was already printed).\n\n### `cli/__main__.py` \u00e2\u20ac\u201d register the command\n\nThree edits:\n1. Import `cmd_viewer` in the existing import block.\n2. Add `\"  viewer                     Open the ledger in a browser\\n\"` to `_USAGE`.\n3. Add dispatch branch after `constitution`:\n   ```python\n   if command == \"viewer\":\n       return cmd_viewer()\n   ```\n\n## Critical files (for the implementation phase)\n\n- `C:\\Users\\mstar\\Bench\\cli\\__main__.py` (58 lines) \u00e2\u20ac\u201d registration.\n- `C:\\Users\\mstar\\Bench\\cli\\commands.py` (250 lines) \u00e2\u20ac\u201d `cmd_viewer` added.\n- `C:\\Users\\mstar\\Bench\\utils\\viewer.py` \u00e2\u20ac\u201d new, ~450 lines including embedded CSS/JS.\n- `C:\\Users\\mstar\\Bench\\ledger\\chain.py:44-81` \u00e2\u20ac\u201d `load_ledger` reused as-is.\n- `C:\\Users\\mstar\\Bench\\ledger\\verify.py:26-178` \u00e2\u20ac\u201d `verify_chain` reused as-is.\n- `C:\\Users\\mstar\\Bench\\cli\\commands.py:100-159` \u00e2\u20ac\u201d `cmd_stats` logic replicated verbatim in `_compute_stats` for banner parity.\n\n## Governance note\n\nThis touches `cli/` and a new `utils/` module but not `pipeline/`, `hooks/`, or `ledger/` source files, so C-007 (governance pipeline integrity) does not apply. Every file change will pass through the Challenger \u00e2\u2020\u2019 Defender \u00e2\u2020\u2019 Oracle pipeline itself per the project CLAUDE.md contract \u00e2\u20ac\u201d that is Bench governing Bench, as expected.\n\n## Verification (manual, end-to-end)\n\nAfter implementation:\n\n1. `python -m cli viewer` \u00e2\u20ac\u201d expect stdout like `Bench viewer written to: /tmp/bench-viewer-XXXX.html` and a browser tab opens on that file.\n2. Open browser devtools \u00e2\u2020\u2019 Console tab \u00e2\u20ac\u201d expect **zero** JS errors or warnings.\n3. Stats banner numbers match `python -m cli stats` output exactly (total=23, passed=15, vetoed=3 on current ledger state).\n4. Chain status in banner matches `python -m cli verify` (expect `VALID`).\n5. Click a PASS entry \u00e2\u20ac\u201d detail panel expands with Challenger findings, Defender rebuttals, Oracle reasoning all visible, no `undefined` strings.\n6. Click a VETO entry \u00e2\u20ac\u201d same but with red left-border and populated `constraint_citations`, `advisories`, `remediation` sections.\n7. Click a pipeline-error entry (one with empty `oracle: {}`) \u00e2\u20ac\u201d expands, shows `N/A` in the Oracle section, no crash.\n8. Click `VETO` filter \u00e2\u20ac\u201d only the 3 VETO entries remain visible. Click `All` \u00e2\u20ac\u201d all 23 return.\n9. Click an entry hash \u00e2\u20ac\u201d clipboard contains the full 64-char hex (verify by pasting into the address bar or another editor).\n10. `python -m cli verify` post-run \u00e2\u20ac\u201d chain still `VALID` (the viewer writes no files to the repo; the pipeline will record entries for the two edits and one new file, but those are normal governed appends, not tampering).\n\n## What I am deliberately NOT doing\n\n- Not computing SHA-256 in the browser. Python already validated the chain; JS just displays the verdict.\n- Not adding argparse or Click. The existing CLI uses minimal flag membership checks; `viewer` takes no flags yet, so no new parsing is needed.\n- Not paginating. Current ledger has 23 entries; even hundreds of entries with collapsed-by-default detail panels will render instantly. If the ledger ever grows into the thousands, virtualization becomes a separate task.\n- Not fixing the `isinstance(cid, str)` citation-counting bug in `cmd_stats` \u00e2\u20ac\u201d out of scope and would break stats-banner parity if only one side is changed.\n- Not adding tests. The user did not ask for them and the existing `tests/` only covers `diff` and `formatting`. C-005 is a warning-severity constraint, not veto; a justified deferral is acceptable given pure-rendering logic is hard to unit-test meaningfully and the verification steps above are end-to-end.\n- Not touching `requirements.txt`. All stdlib: `html`, `json`, `sys`, `traceback`, `typing`, `tempfile`, `webbrowser`, plus the existing `ledger.chain` / `ledger.verify` imports.\n",
+        "formatted_diff": "+# Plan: `python -m cli viewer` \u00e2\u20ac\u201d HTML verdict viewer\n+\n+## Context\n+\n+Bench records every governed code change as a hash-chained entry in `ledger/bench-ledger.json`. The existing CLI exposes four read-only reports (`verify`, `ledger`, `stats`, `constitution`) that print to the terminal. The terminal format is scannable but not ideal for reading full Challenger findings, Defender rebuttals, and Oracle reasoning \u00e2\u20ac\u201d which are often multi-paragraph. The ask is a fifth command, `viewer`, that generates a single self-contained HTML file, opens it in the default browser, and presents the same ledger data with stats banner, filters, and expandable per-entry detail panels. Output is read-only; nothing touches the chain or the pipeline.\n+\n+## Schema reality vs. user spec\n+\n+The user's spec describes a cleaner ledger schema than what is actually on disk. The viewer must tolerate both. Confirmed discrepancies after reading `ledger/bench-ledger.json`:\n+\n+| Spec said | Reality |\n+|---|---|\n+| `tokens_used: {input, output}` | Field is `_tokens` (leading underscore), same inner shape |\n+| `constraint_citations: []` (strings) | List of **dicts**: `{constraint_id, disposition, note}` where `disposition \u00e2\u02c6\u02c6 {VIOLATED, NOT_APPLICABLE, ...}` |\n+| `change.task_description` | Field does not exist; `change` is `{file, tool, diff_summary}` only |\n+| `diff_summary: \"string\"` | Sometimes a string, sometimes a dict `{file_path, content}` |\n+| (not mentioned) | Oracle also has `advisories: []` and `remediation: string` |\n+| (not mentioned) | Defender has `rebuttals: [{argument, evidence, finding_index, position}]` and `summary` |\n+| Stage objects always present | Pipeline-error entries have `defender: {}` and `oracle: {}` \u00e2\u20ac\u201d 5 of 23 entries |\n+| Challenger `findings: []` (shape unspecified) | List of dicts `{constraint_id, severity, location, evidence, reasoning}` |\n+\n+Design rule: every field access goes through a `isinstance(..., dict)`/`.get()` guard, mirroring the style in `cli/commands.py:198-235`. On missing data render `N/A`, never crash.\n+\n+## Files\n+\n+| File | Action |\n+|---|---|\n+| `utils/viewer.py` | **New.** Public `generate_viewer_html()` and private helpers. |\n+| `cli/commands.py` | **Edit.** Add `cmd_viewer()` function. |\n+| `cli/__main__.py` | **Edit.** Import `cmd_viewer`, add to dispatch, add to `_USAGE`. |\n+\n+Out of scope (per user): `ledger/`, `pipeline/`, `hooks/`, `utils/diff.py`, `utils/formatting.py`, `bench.json`, `README.md`, `requirements.txt`.\n+\n+## Approach\n+\n+### `utils/viewer.py` \u00e2\u20ac\u201d self-contained HTML generator\n+\n+Module structure mirrors `utils/diff.py`:\n+- Triple-quoted module docstring explaining purpose and the fail-open contract.\n+- Stdlib-only imports: `html`, `json`, `sys`, `traceback`, `typing`.\n+- Module constants in UPPER_CASE (color palette, truncation lengths).\n+- Public function at top, private helpers below.\n+- Top-level `try/except` with `traceback.print_exc(file=sys.stderr)` on any failure \u00e2\u20ac\u201d returns a minimal error HTML page rather than raising (C-001 compliance: no silent swallowing, no crash-out).\n+\n+Public surface:\n+\n+```python\n+def generate_viewer_html(ledger_path: str = \"ledger/bench-ledger.json\") -> str:\n+    \"\"\"Return a complete self-contained HTML string rendering the ledger.\"\"\"\n+```\n+\n+Internal helpers:\n+\n+- `_load_entries(ledger_path: str) -> list[dict]` \u00e2\u20ac\u201d reuses `ledger.chain.load_ledger` so behavior matches the rest of the CLI (returns `[]` on missing/corrupt, already logs to stderr).\n+- `_compute_chain_status(ledger_path: str) -> dict` \u00e2\u20ac\u201d calls `ledger.verify.verify_chain`. Returns `{\"status\": \"VALID\" | \"BROKEN\" | \"EMPTY\", \"failure_index\": int | None, \"message\": str}`. **Chain integrity is computed in Python, not JS** \u00e2\u20ac\u201d replicating `json.dumps(..., sort_keys=True, default=str)` + SHA-256 in the browser is fragile and adds zero value; we just embed the already-computed verdict as a JS constant.\n+- `_compute_stats(entries: list[dict]) -> dict` \u00e2\u20ac\u201d mirrors `cmd_stats` logic exactly (from `cli/commands.py:100-159`) so the banner totals match `python -m cli stats`: same PASS/VETO counts, same `isinstance(cid, str)` check for most-cited-constraint. For parity with the terminal stats command, I will match its logic verbatim, including the existing limitation that it only counts *string* citations (real entries have dict citations, so the \"most cited\" number today is n/a \u00e2\u20ac\u201d this is the current behavior and the viewer should not silently diverge from it). Noted as a follow-up opportunity but out of this task's scope.\n+- `_build_html(stats: dict, chain_status: dict, entries: list[dict]) -> str` \u00e2\u20ac\u201d assembles the HTML string using f-string interpolation + JSON embedding.\n+\n+Embedding safety:\n+- Ledger data embedded via `json.dumps(entries)` and injected inside a `<script>` block as `const LEDGER_DATA = {...};`.\n+- Defense against `</script>` breakouts in user content: after `json.dumps`, apply `.replace(\"</\", \"<\\\\/\")` on the resulting string before injection. Standard stdlib pattern, no extra deps.\n+- All HTML-context text (page title, labels) is literal and trusted; only entry content reaches the DOM via the JS renderer which uses `textContent` (not `innerHTML`) for user-controlled strings. Hash values and constraint IDs get `<code>` wrappers but still via `textContent`.\n+\n+### HTML document layout\n+\n+Single `<!doctype html>` document, ~400 lines including embedded CSS and JS. Sections:\n+\n+1. **`<head>`** \u00e2\u20ac\u201d `<title>Bench Verdict Viewer</title>`, inline `<style>`.\n+2. **Stats banner** \u00e2\u20ac\u201d flexbox row of stat tiles at the top:\n+   - Total governed changes\n+   - Passed (green, with `%`)\n+   - Vetoed (red, with `%`)\n+   - Most cited constraint (or \"n/a\")\n+   - Chain status: `VALID` (green) / `BROKEN AT ENTRY #N` (red) / `EMPTY` (dim)\n+3. **Filter bar** \u00e2\u20ac\u201d three buttons: `All` / `PASS` / `VETO`. Active button styled with inset border and brighter bg. JS toggles a data-attribute on the entries container; CSS hides non-matching rows via `[data-filter=\"veto\"] .entry[data-verdict=\"PASS\"] { display: none; }` \u00e2\u20ac\u201d zero DOM rebuild, instant filter.\n+4. **Entry list** \u00e2\u20ac\u201d `<ol reversed>` so newest-first without array manipulation. Each `<li class=\"entry\" data-verdict=\"PASS|VETO|NONE\">` has a summary row (entry #, timestamp, file path, tool, verdict badge, short hash) and a collapsed detail panel. Click the summary row to toggle `.entry.expanded`.\n+5. **Detail panel** \u00e2\u20ac\u201d four subsections per entry:\n+   - **Change**: file, tool, diff summary (if dict \u00e2\u2020\u2019 render `file_path` + truncated `content`; if string \u00e2\u2020\u2019 render directly). Content in a `<pre>` with `white-space: pre-wrap`, max-height with scroll.\n+   - **Challenger**: status, then each finding as a card (`constraint_id`, severity badge, location, evidence, reasoning).\n+   - **Defender**: status, summary, then each rebuttal as a card (`position` badge, `finding_index`, argument, evidence).\n+   - **Oracle**: verdict, confidence, reasoning (full, not truncated), constraint citations table (`constraint_id` + `disposition` + `note`), advisories list, remediation block. Dict-shaped citations render as table rows; fallback to string rendering if a citation is a plain string.\n+   - **Metadata**: entry #, entry hash (click-to-copy via `navigator.clipboard.writeText`, short preview), previous hash (same), constitution hash if present, token usage summed across stages reading `_tokens` (with fallback to `tokens_used` for forward-compat).\n+\n+Visual design:\n+- Dark background `#1a1a2e`, light text `#e8e8f0`.\n+- Monospace (`ui-monospace, Menlo, Consolas, monospace`) for hashes, file paths, code.\n+- Sans-serif (`system-ui, -apple-system, sans-serif`) for prose.\n+- PASS badge: `background: #4ade80; color: #0a0a14;`.\n+- VETO badge: `background: #f87171; color: #1a1a2e;`.\n+- Expanded PASS entry: `border-left: 3px solid #4ade80;`.\n+- Expanded VETO entry: `border-left: 3px solid #f87171;`.\n+- Pipeline-error (no verdict) entry: `border-left: 3px solid #94a3b8;`, badge reads `FAIL-OPEN` matching `_print_entry_line` at `cli/commands.py:210`.\n+\n+Edge cases handled in the JS renderer:\n+- Empty ledger: `entries.length === 0` \u00e2\u2020\u2019 stats tiles all show `0`, entry list area shows `<p>No governed changes recorded yet.</p>`.\n+- VETO filter with zero vetoes: entries container shows `<p>No VETO entries.</p>` via CSS `:empty` sibling or a JS-toggled message node.\n+- Missing stage objects: renderer reads with `obj && obj.field`; all nullish reads fall through to rendering `N/A` in the appropriate slot.\n+- Long strings: no truncation in the detail panel \u00e2\u20ac\u201d the whole point is full-text audit. `<pre>` uses `white-space: pre-wrap; word-break: break-word;`.\n+\n+### `cli/commands.py` \u00e2\u20ac\u201d add `cmd_viewer`\n+\n+Imports added at the top alongside existing ones:\n+\n+```python\n+import tempfile\n+import webbrowser\n+from utils.viewer import generate_viewer_html\n+```\n+\n+Function added after `cmd_constitution`, before the private helpers (`_print_entry_line`, etc.):\n+\n+```python\n+def cmd_viewer() -> int:\n+    \"\"\"Generate the HTML ledger viewer, write it, and open it in the browser.\"\"\"\n+    try:\n+        html_content: str = generate_viewer_html()\n+    except Exception as e:\n+        print(f\"[bench cli] viewer generation failed: {e}\", file=sys.stderr)\n+        return 1\n+\n+    try:\n+        with tempfile.NamedTemporaryFile(\n+            mode=\"w\",\n+            suffix=\".html\",\n+            prefix=\"bench-viewer-\",\n+            delete=False,\n+            encoding=\"utf-8\",\n+        ) as fh:\n+            fh.write(html_content)\n+            tmp_path: str = fh.name\n+    except OSError as e:\n+        print(f\"[bench cli] viewer write failed: {e}\", file=sys.stderr)\n+        return 1\n+\n+    print(f\"Bench viewer written to: {tmp_path}\")\n+    if not webbrowser.open(f\"file://{tmp_path}\"):\n+        print(\n+            \"[bench cli] could not auto-open browser; open the path above manually.\",\n+            file=sys.stderr,\n+        )\n+    return 0\n+```\n+\n+Error handling matches C-001: every failure path logs to stderr and returns a typed int \u00e2\u20ac\u201d no silent swallow, no bare `except: pass`. The `webbrowser.open` false-return is surfaced but non-fatal (user can still open the file by hand; the path was already printed).\n+\n+### `cli/__main__.py` \u00e2\u20ac\u201d register the command\n+\n+Three edits:\n+1. Import `cmd_viewer` in the existing import block.\n+2. Add `\"  viewer                     Open the ledger in a browser\\n\"` to `_USAGE`.\n+3. Add dispatch branch after `constitution`:\n+   ```python\n+   if command == \"viewer\":\n+       return cmd_viewer()\n+   ```\n+\n+## Critical files (for the implementation phase)\n+\n+- `C:\\Users\\mstar\\Bench\\cli\\__main__.py` (58 lines) \u00e2\u20ac\u201d registration.\n+- `C:\\Users\\mstar\\Bench\\cli\\commands.py` (250 lines) \u00e2\u20ac\u201d `cmd_viewer` added.\n+- `C:\\Users\\mstar\\Bench\\utils\\viewer.py` \u00e2\u20ac\u201d new, ~450 lines including embedded CSS/JS.\n+- `C:\\Users\\mstar\\Bench\\ledger\\chain.py:44-81` \u00e2\u20ac\u201d `load_ledger` reused as-is.\n+- `C:\\Users\\mstar\\Bench\\ledger\\verify.py:26-178` \u00e2\u20ac\u201d `verify_chain` reused as-is.\n+- `C:\\Users\\mstar\\Bench\\cli\\commands.py:100-159` \u00e2\u20ac\u201d `cmd_stats` logic replicated verbatim in `_compute_stats` for banner parity.\n+\n+## Governance note\n+\n+This touches `cli/` and a new `utils/` module but not `pipeline/`, `hooks/`, or `ledger/` source files, so C-007 (governance pipeline integrity) does not apply. Every file change will pass through the Challenger \u00e2\u2020\u2019 Defender \u00e2\u2020\u2019 Oracle pipeline itself per the project CLAUDE.md contract \u00e2\u20ac\u201d that is Bench governing Bench, as expected.\n+\n+## Verification (manual, end-to-end)\n+\n+After implementation:\n+\n+1. `python -m cli viewer` \u00e2\u20ac\u201d expect stdout like `Bench viewer written to: /tmp/bench-viewer-XXXX.html` and a browser tab opens on that file.\n+2. Open browser devtools \u00e2\u2020\u2019 Console tab \u00e2\u20ac\u201d expect **zero** JS errors or warnings.\n+3. Stats banner numbers match `python -m cli stats` output exactly (total=23, passed=15, vetoed=3 on current ledger state).\n+4. Chain status in banner matches `python -m cli verify` (expect `VALID`).\n+5. Click a PASS entry \u00e2\u20ac\u201d detail panel expands with Challenger findings, Defender rebuttals, Oracle reasoning all visible, no `undefined` strings.\n+6. Click a VETO entry \u00e2\u20ac\u201d same but with red left-border and populated `constraint_citations`, `advisories`, `remediation` sections.\n+7. Click a pipeline-error entry (one with empty `oracle: {}`) \u00e2\u20ac\u201d expands, shows `N/A` in the Oracle section, no crash.\n+8. Click `VETO` filter \u00e2\u20ac\u201d only the 3 VETO entries remain visible. Click `All` \u00e2\u20ac\u201d all 23 return.\n+9. Click an entry hash \u00e2\u20ac\u201d clipboard contains the full 64-char hex (verify by pasting into the address bar or another editor).\n+10. `python -m cli verify` post-run \u00e2\u20ac\u201d chain still `VALID` (the viewer writes no files to the repo; the pipeline will record entries for the two edits and one new file, but those are normal governed appends, not tampering).\n+\n+## What I am deliberately NOT doing\n+\n+- Not computing SHA-256 in the browser. Python already validated the chain; JS just displays the verdict.\n+- Not adding argparse or Click. The existing CLI uses minimal flag membership checks; `viewer` takes no flags yet, so no new parsing is needed.\n+- Not paginating. Current ledger has 23 entries; even hundreds of entries with collapsed-by-default detail panels will render instantly. If the ledger ever grows into the thousands, virtualization becomes a separate task.\n+- Not fixing the `isinstance(cid, str)` citation-counting bug in `cmd_stats` \u00e2\u20ac\u201d out of scope and would break stats-banner parity if only one side is changed.\n+- Not adding tests. The user did not ask for them and the existing `tests/` only covers `diff` and `formatting`. C-005 is a warning-severity constraint, not veto; a justified deferral is acceptable given pure-rendering logic is hard to unit-test meaningfully and the verification steps above are end-to-end.\n+- Not touching `requirements.txt`. All stdlib: `html`, `json`, `sys`, `traceback`, `typing`, `tempfile`, `webbrowser`, plus the existing `ledger.chain` / `ledger.verify` imports.\n"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-002",
+          "severity": "OBSERVATION",
+          "location": "Plan file path: plans/rail-receipt-filecli-commands-py-edit-iridescent-shore.md",
+          "evidence": "The change being governed is the creation of a plan document (a .md file in a plans/ directory), not the actual implementation files (utils/viewer.py, cli/commands.py, cli/__main__.py) described within it.",
+          "reasoning": "The diff creates only the plan file. The actual code modifications described in the plan \u2014 edits to cli/commands.py, cli/__main__.py, and creation of utils/viewer.py \u2014 are not present in this diff. This is not a violation of C-002 in itself (the plan document creation is presumably within scope), but it means this governance entry is reviewing a planning artifact rather than executable code. The Challenger's analysis of the actual implementation cannot be performed here; a separate governed change submission will be required for each implementation file. This is an observation to ensure those subsequent changes are also governed."
+        },
+        {
+          "constraint_id": "C-005",
+          "severity": "CONCERN",
+          "location": "Plan section: 'What I am deliberately NOT doing'",
+          "evidence": "- Not adding tests. The user did not ask for them and the existing `tests/` only covers `diff` and `formatting`. C-005 is a warning-severity constraint, not veto; a justified deferral is acceptable given pure-rendering logic is hard to unit-test meaningfully and the verification steps above are end-to-end.",
+          "reasoning": "The plan explicitly defers test coverage for all new logic: generate_viewer_html(), _load_entries(), _compute_chain_status(), _compute_stats(), _build_html(), and cmd_viewer(). While C-005 is warning-severity and the plan offers a justification (rendering logic is hard to unit-test, end-to-end verification steps are provided), the justification is partially weak: _compute_stats() is described as replicating cmd_stats logic verbatim, and _compute_chain_status() calls existing ledger functions \u2014 both are unit-testable without browser involvement. The 'pure rendering is hard to test' rationale applies strongly to _build_html() but less strongly to the data-transformation helpers. The Oracle should weigh whether the justification is sufficient under C-005."
+        },
+        {
+          "constraint_id": "C-003",
+          "severity": "OBSERVATION",
+          "location": "Plan section: utils/viewer.py imports and cli/commands.py imports",
+          "evidence": "Imports added at the top alongside existing ones:\n```python\nimport tempfile\nimport webbrowser\nfrom utils.viewer import generate_viewer_html\n```\nStdlib-only imports: `html`, `json`, `sys`, `traceback`, `typing`.",
+          "reasoning": "The plan explicitly declares all new imports (tempfile, webbrowser, html, json, sys, traceback, typing) and confirms they are all stdlib \u2014 no new entries to requirements.txt are required. The plan also explicitly states 'Not touching requirements.txt.' This is NOT a violation; the plan handles C-003 correctly. Recorded as an observation confirming compliance, so the Oracle has a clear record that this was examined."
+        },
+        {
+          "constraint_id": "C-008",
+          "severity": "OBSERVATION",
+          "location": "Plan section: Verification step 10 and cmd_viewer() implementation",
+          "evidence": "The viewer writes no files to the repo; the pipeline will record entries for the two edits and one new file, but those are normal governed appends, not tampering. tempfile.NamedTemporaryFile(..., delete=False) writes to the OS temp directory.",
+          "reasoning": "The plan correctly identifies that the HTML output is written to a system temp directory (not the ledger or repo), so no ledger mutation occurs. The plan also correctly notes that governed pipeline entries for the implementation changes are normal appends. C-008 is not implicated. Recorded as an observation confirming the plan's own analysis is accurate."
+        },
+        {
+          "constraint_id": "C-001",
+          "severity": "CONCERN",
+          "location": "Plan section: generate_viewer_html() top-level try/except design",
+          "evidence": "Top-level `try/except` with `traceback.print_exc(file=sys.stderr)` on any failure \u2014 returns a minimal error HTML page rather than raising (C-001 compliance: no silent swallowing, no crash-out).",
+          "reasoning": "The plan describes a broad top-level try/except in generate_viewer_html() that catches all exceptions and returns an error HTML string instead of propagating. While traceback.print_exc(file=sys.stderr) satisfies the 'log' requirement of C-001 (not silent), cmd_viewer() in commands.py also wraps generate_viewer_html() in its own try/except. If generate_viewer_html() never raises (because it catches everything internally), the outer try/except in cmd_viewer() becomes dead code and the function will always return the HTML string (potentially an error-HTML), write it to disk, and attempt to open it in a browser \u2014 displaying an error page to the user rather than returning exit code 1. This is not a silent swallow, but it does mean error signaling through the return code path is degraded. The actual implementation (not yet present in this diff) will determine whether this is a real issue; flagged for Oracle awareness."
+        }
+      ],
+      "_tokens": {
+        "input": 11025,
+        "output": 1331
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "REBUT",
+          "argument": "The Challenger correctly identifies that this diff is a plan document, not executable code, and correctly concludes it is NOT a C-002 violation. The observation is accurate and the Challenger's own reasoning supports clearance. Plan documents are legitimate governed artifacts \u2014 they establish intent, schema analysis, error-handling contracts, and scope boundaries that will govern the subsequent implementation diffs. Governing the plan itself is consistent with the 'Bench governing Bench' model described in the governance note. No violation exists; the observation is purely procedural.",
+          "evidence": "Challenger states explicitly: 'This is not a violation of C-002 in itself (the plan document creation is presumably within scope).' The plan's scope table explicitly lists cli/commands.py, cli/__main__.py, and utils/viewer.py as the implementation targets \u2014 establishing the scope boundary for those future governed diffs."
+        },
+        {
+          "finding_index": 1,
+          "position": "MITIGATE",
+          "argument": "The Challenger correctly identifies that _compute_stats() and _compute_chain_status() are unit-testable without browser involvement, and this is a fair critique of the blanket 'rendering is hard to test' justification. However, C-005 is warning-severity (not veto), and the plan does provide an explicit justification as required by the constraint text ('an explicit justification for why testing is deferred'). The plan also references end-to-end verification steps that cover these helpers indirectly (stats banner must match python -m cli stats exactly, chain status must match python -m cli verify). The justification is partially weak but not absent. The Oracle should note this as a follow-up item for the implementation phase rather than a blocking issue. The plan itself acknowledges it as a known deferral.",
+          "evidence": "C-005 text: 'New functions or branches of logic must have corresponding test cases or an explicit justification for why testing is deferred.' The plan states: 'C-005 is a warning-severity constraint, not veto; a justified deferral is acceptable.' Verification steps 3 and 4 provide end-to-end coverage of _compute_stats and _compute_chain_status outputs."
+        },
+        {
+          "finding_index": 2,
+          "position": "REBUT",
+          "argument": "The Challenger confirms C-003 compliance and records it as an observation. No rebuttal needed \u2014 this is a confirmation of correctness. The plan explicitly declares every new import and confirms stdlib-only additions requiring no requirements.txt changes. This finding supports clearance.",
+          "evidence": "Plan states: 'Stdlib-only imports: html, json, sys, traceback, typing' and 'Not touching requirements.txt. All stdlib.' The plan also explicitly lists tempfile and webbrowser as the only additions to cli/commands.py imports."
+        },
+        {
+          "finding_index": 3,
+          "position": "REBUT",
+          "argument": "The Challenger confirms C-008 compliance and records it as an observation. The analysis is correct: NamedTemporaryFile writes to the OS temp directory, not the repo or ledger directory. The ledger is read-only from the viewer's perspective. This finding supports clearance.",
+          "evidence": "tempfile.NamedTemporaryFile with default dir parameter writes to the system temp directory (e.g., /tmp on Linux, %TEMP% on Windows). The plan explicitly states 'the viewer writes no files to the repo.' The ledger is accessed only through load_ledger (read) and verify_chain (read)."
+        },
+        {
+          "finding_index": 4,
+          "position": "MITIGATE",
+          "argument": "The Challenger raises a legitimate design tension: generate_viewer_html() catches all exceptions internally and returns error-HTML, so cmd_viewer()'s outer try/except becomes dead code and errors surface as a browser error page rather than exit code 1. This is a real architectural concern worth noting, but it does not violate C-001 at the plan level. C-001 prohibits silent swallowing \u2014 the plan explicitly mandates traceback.print_exc(file=sys.stderr), which satisfies the 'log' requirement. The error is visible on stderr AND in the browser. The tradeoff (always returning a renderable artifact vs. failing with exit code 1) is a deliberate design choice for a read-only reporting tool: even a partial or error result is more useful than a raw exception. The plan could be clearer that cmd_viewer() should check whether the returned string is an error page and return exit code 1 in that case \u2014 this is a refinement for the implementation phase, not a plan-level C-001 violation.",
+          "evidence": "C-001 rule: 'All catch blocks must log, re-throw, or return a typed error.' The plan specifies traceback.print_exc(file=sys.stderr) satisfying the 'log' requirement. cmd_viewer() returns int (0 or 1) as a typed error. The dual-catch design means the inner catch logs+returns error-HTML while the outer catch is dead \u2014 not silent, just redundant."
+        }
+      ],
+      "summary": "The plan is a well-structured, read-only governance artifact that correctly addresses schema discrepancies, error-handling contracts, XSS mitigations, and scope boundaries; the Challenger's findings are either confirmations of compliance or minor design tensions (test deferral justification quality, dual-catch architecture) that are appropriate for implementation-phase refinement rather than blocking the plan itself.",
+      "_tokens": {
+        "input": 12410,
+        "output": 1338
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The proposed change is the creation of a planning document describing a future implementation of a `viewer` CLI command. The Challenger raised five findings, three of which (C-002, C-003, C-008) were explicitly recorded as OBSERVATIONS confirming compliance, and two (C-005, C-001) as CONCERNs addressed adequately by the Defender. C-002 is not violated because the diff creates only a plan file within the `plans/` directory, which is within scope; the plan itself establishes scope boundaries for subsequent implementation diffs that will be governed independently. C-003 is satisfied: all new imports (tempfile, webbrowser, html, json, sys, traceback, typing) are stdlib, and the plan explicitly states no changes to requirements.txt. C-008 is satisfied: the viewer reads the ledger and writes HTML only to the OS temp directory via NamedTemporaryFile, not to the repo or ledger. C-001 is satisfied at the plan level: all documented error paths log to stderr via traceback.print_exc or explicit print statements and return typed int exit codes \u2014 no silent swallow is proposed. The Defender's MITIGATE on the dual-catch design tension is reasonable; the design is redundant but not silent, and refinement is appropriate at implementation time. C-005 is warning-severity only, and the plan provides the explicit justification the constraint requires ('an explicit justification for why testing is deferred'); the Defender concedes the justification is partially weak for _compute_stats and _compute_chain_status, which is noted as an advisory. C-007 does not apply: the plan does not touch pipeline/, hooks/, challenger, defender, oracle, ledger source, or the constitution; it adds a read-only reporting command. C-004 and C-006 are not implicated (no type weakening, no credentials). Since this is a plan artifact, no executable code is being merged; the actual implementation diffs will be governed separately and must be evaluated on their own merits.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "SATISFIED",
+          "note": "Plan mandates traceback.print_exc(file=sys.stderr) and typed int returns on all error paths; Defender's MITIGATE on dual-catch redundancy is a design refinement, not a C-001 violation."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Diff creates only a plan .md file; scope table explicitly enumerates future implementation targets. Challenger concurred this is not a violation."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "SATISFIED",
+          "note": "All new imports are stdlib and explicitly declared; plan states no requirements.txt changes."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No existing type annotations are modified; plan adds type hints on new functions."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "SATISFIED",
+          "note": "Warning-severity constraint; plan provides the explicit deferral justification required by the rule text. Justification for _compute_stats/_compute_chain_status is weaker than for _build_html (see advisory)."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No credentials, keys, or tokens in the plan."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Plan touches cli/ and a new utils/ module only; pipeline/, hooks/, ledger/ source, challenger, defender, oracle, and constitution are not modified. Viewer is read-only."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "SATISFIED",
+          "note": "HTML output written to OS temp dir via NamedTemporaryFile; ledger is accessed read-only through load_ledger and verify_chain."
+        }
+      ],
+      "advisories": [
+        "Implementation-phase advisory: the Challenger's C-005 concern about _compute_stats() and _compute_chain_status() being unit-testable without browser involvement is well-founded. Consider adding at least minimal unit tests for these pure data-transformation helpers during implementation; the 'rendering is hard to test' justification does not extend to them.",
+        "Implementation-phase advisory: the Challenger's C-001 concern about the dual try/except architecture (inner catch in generate_viewer_html returns error-HTML, making the outer catch in cmd_viewer dead code) is a legitimate design tension. Consider having cmd_viewer detect an error-HTML sentinel from generate_viewer_html and return exit code 1 in that case, so error signaling through the process exit code is preserved.",
+        "The plan notes an existing bug in cmd_stats (isinstance(cid, str) check fails to count dict-shaped citations) and deliberately mirrors it for parity. This is acceptable for this task but should be tracked as a follow-up; the banner will show 'n/a' for most-cited-constraint despite real data being present.",
+        "Each of the three implementation diffs (utils/viewer.py create, cli/commands.py edit, cli/__main__.py edit) must pass through the governance pipeline independently. This plan's PASS does not pre-authorize the implementation."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 19084,
+        "output": 1889
+      }
+    },
+    "entry_hash": "2e0f9d57041bf7b41b5b43d8d2b5af8a12073799290a9af5fc27302b068a6ba5"
+  },
+  {
+    "entry_id": "42a1d4b2-627a-42ac-8779-bd20f4e8dfc9",
+    "timestamp": "2026-04-22T06:03:12.331178+00:00",
+    "previous_hash": "2e0f9d57041bf7b41b5b43d8d2b5af8a12073799290a9af5fc27302b068a6ba5",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "C:\\Users\\mstar\\Bench\\utils\\viewer.py",
+      "tool": "Write",
+      "diff_summary": {
+        "file_path": "C:\\Users\\mstar\\Bench\\utils\\viewer.py",
+        "change_type": "create",
+        "content": "\"\"\"Self-contained HTML verdict viewer for the Bench ledger.\n\nTurns the on-disk ``bench-ledger.json`` into a single HTML document with a\nstats banner, filter bar, and expandable per-entry detail panels. All\nstyles, scripts, and ledger data are inlined into the returned string \u00e2\u20ac\u201d\nno external CDN, no fetch, no separate files. The caller (``cmd_viewer``\nin ``cli/commands.py``) writes the returned string to a tempfile and\nopens it in the browser.\n\n``generate_viewer_html`` is the only public surface; everything else is\nprivate. The module is fail-open per C-001: any unexpected error is\nlogged with a full traceback to stderr and surfaced as a minimal error\nHTML page rather than raised into the CLI.\n\nChain integrity is computed in Python via ``verify_chain`` and embedded\nas a JS constant. Replicating ``json.dumps(sort_keys=True, default=str)``\nplus SHA-256 in the browser would be fragile and offers no auditability\nbenefit \u00e2\u20ac\u201d the user can still run ``python -m cli verify`` for an\nindependent check.\n\"\"\"\n\nimport html\nimport json\nimport sys\nimport traceback\nfrom typing import Any\n\nfrom ledger.chain import load_ledger\nfrom ledger.verify import verify_chain\n\n_DEFAULT_LEDGER_PATH: str = \"ledger/bench-ledger.json\"\n_HASH_SHORT_LEN: int = 12\n\n\ndef generate_viewer_html(ledger_path: str = _DEFAULT_LEDGER_PATH) -> str:\n    \"\"\"Return a complete self-contained HTML string rendering the ledger.\n\n    On any unexpected error, logs to stderr with a full traceback and\n    returns a minimal error HTML page \u00e2\u20ac\u201d never raises.\n    \"\"\"\n    try:\n        entries: list[dict] = load_ledger(ledger_path)\n        chain_status: dict = _compute_chain_status(ledger_path)\n        stats: dict = _compute_stats(entries)\n        return _build_html(stats, chain_status, entries)\n    except Exception as e:\n        print(\n            f\"[bench viewer] generate_viewer_html failed: \"\n            f\"{type(e).__name__}: {e}\",\n            file=sys.stderr,\n[BENCH TRUNCATION: 5 lines omitted]\ndef _compute_chain_status(ledger_path: str) -> dict:\n[BENCH TRUNCATION: 21 lines omitted]\n    except (TypeError, ValueError):\n[BENCH TRUNCATION: 9 lines omitted]\ndef _compute_stats(entries: list[dict]) -> dict:\n[BENCH TRUNCATION: 38 lines omitted]\ndef _entry_has_pipeline_error(entry: dict) -> bool:\n[BENCH TRUNCATION: 10 lines omitted]\ndef _pct(part: int, total: int) -> str:\n[BENCH TRUNCATION: 5 lines omitted]\ndef _build_html(\n[BENCH TRUNCATION: 84 lines omitted]\ndef _build_error_html(message: str) -> str:\n[BENCH TRUNCATION: 279 lines omitted]\n    } catch (e) {\n[BENCH TRUNCATION: 84 lines omitted]\n          writeFn(full).then(done).catch(function(err) { console.warn('Clipboard copy failed:', err); });\n[BENCH TRUNCATION: 322 lines omitted]\n      } catch (err) {\n[BENCH TRUNCATION: 10 lines omitted]\n          const active = b.dataset.filterValue === v;\n          b.classList.toggle('active', active);\n          b.setAttribute('aria-selected', String(active));\n        });\n        updateFilterMessage();\n      });\n    });\n\n    if (CHAIN_STATUS && CHAIN_STATUS.message) {\n      console.info('Bench chain status:', CHAIN_STATUS.status, '-', CHAIN_STATUS.message);\n    }\n  }\n\n  if (document.readyState === 'loading') {\n    document.addEventListener('DOMContentLoaded', init);\n  } else {\n    init();\n  }\n})();\n\"\"\"\n[BENCH TRUNCATION: original_lines=947, truncated_lines=80, preserved=first50+signatures+exception_handlers+last20]\n",
+        "formatted_diff": "+\"\"\"Self-contained HTML verdict viewer for the Bench ledger.\n+\n+Turns the on-disk ``bench-ledger.json`` into a single HTML document with a\n+stats banner, filter bar, and expandable per-entry detail panels. All\n+styles, scripts, and ledger data are inlined into the returned string \u00e2\u20ac\u201d\n+no external CDN, no fetch, no separate files. The caller (``cmd_viewer``\n+in ``cli/commands.py``) writes the returned string to a tempfile and\n+opens it in the browser.\n+\n+``generate_viewer_html`` is the only public surface; everything else is\n+private. The module is fail-open per C-001: any unexpected error is\n+logged with a full traceback to stderr and surfaced as a minimal error\n+HTML page rather than raised into the CLI.\n+\n+Chain integrity is computed in Python via ``verify_chain`` and embedded\n+as a JS constant. Replicating ``json.dumps(sort_keys=True, default=str)``\n+plus SHA-256 in the browser would be fragile and offers no auditability\n+benefit \u00e2\u20ac\u201d the user can still run ``python -m cli verify`` for an\n+independent check.\n+\"\"\"\n+\n+import html\n+import json\n+import sys\n+import traceback\n+from typing import Any\n+\n+from ledger.chain import load_ledger\n+from ledger.verify import verify_chain\n+\n+_DEFAULT_LEDGER_PATH: str = \"ledger/bench-ledger.json\"\n+_HASH_SHORT_LEN: int = 12\n+\n+\n+def generate_viewer_html(ledger_path: str = _DEFAULT_LEDGER_PATH) -> str:\n+    \"\"\"Return a complete self-contained HTML string rendering the ledger.\n+\n+    On any unexpected error, logs to stderr with a full traceback and\n+    returns a minimal error HTML page \u00e2\u20ac\u201d never raises.\n+    \"\"\"\n+    try:\n+        entries: list[dict] = load_ledger(ledger_path)\n+        chain_status: dict = _compute_chain_status(ledger_path)\n+        stats: dict = _compute_stats(entries)\n+        return _build_html(stats, chain_status, entries)\n+    except Exception as e:\n+        print(\n+            f\"[bench viewer] generate_viewer_html failed: \"\n+            f\"{type(e).__name__}: {e}\",\n+            file=sys.stderr,\n+[BENCH TRUNCATION: 5 lines omitted]\n+def _compute_chain_status(ledger_path: str) -> dict:\n+[BENCH TRUNCATION: 21 lines omitted]\n+    except (TypeError, ValueError):\n+[BENCH TRUNCATION: 9 lines omitted]\n+def _compute_stats(entries: list[dict]) -> dict:\n+[BENCH TRUNCATION: 38 lines omitted]\n+def _entry_has_pipeline_error(entry: dict) -> bool:\n+[BENCH TRUNCATION: 10 lines omitted]\n+def _pct(part: int, total: int) -> str:\n+[BENCH TRUNCATION: 5 lines omitted]\n+def _build_html(\n+[BENCH TRUNCATION: 84 lines omitted]\n+def _build_error_html(message: str) -> str:\n+[BENCH TRUNCATION: 279 lines omitted]\n+    } catch (e) {\n+[BENCH TRUNCATION: 84 lines omitted]\n+          writeFn(full).then(done).catch(function(err) { console.warn('Clipboard copy failed:', err); });\n+[BENCH TRUNCATION: 322 lines omitted]\n+      } catch (err) {\n+[BENCH TRUNCATION: 10 lines omitted]\n+          const active = b.dataset.filterValue === v;\n+          b.classList.toggle('active', active);\n+          b.setAttribute('aria-selected', String(active));\n+        });\n+        updateFilterMessage();\n+      });\n+    });\n+\n+    if (CHAIN_STATUS && CHAIN_STATUS.message) {\n+      console.info('Bench chain status:', CHAIN_STATUS.status, '-', CHAIN_STATUS.message);\n+    }\n+  }\n+\n+  if (document.readyState === 'loading') {\n+    document.addEventListener('DOMContentLoaded', init);\n+  } else {\n+    init();\n+  }\n+})();\n+\"\"\"\n+[BENCH TRUNCATION: original_lines=947, truncated_lines=80, preserved=first50+signatures+exception_handlers+last20]\n",
+        "truncation": {
+          "original_lines": 947,
+          "truncated_lines": 80,
+          "preserved": "first50+signatures+exception_handlers+last20"
+        }
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-001",
+          "severity": "CONCERN",
+          "location": "utils/viewer.py: _compute_chain_status function, truncated exception handler",
+          "evidence": "    except (TypeError, ValueError):\n[BENCH TRUNCATION: 9 lines omitted]",
+          "reasoning": "There is a catch block for (TypeError, ValueError) inside _compute_chain_status whose body is entirely truncated. The diff provides no visibility into what happens inside this handler. If it silently swallows these exceptions (empty body, pass, or comment-only), that would be a clear C-001 violation. The truncation prevents confirmation either way. The Oracle must inspect the untruncated source to verify this handler logs, re-raises, or returns a typed error."
+        },
+        {
+          "constraint_id": "C-001",
+          "severity": "CONCERN",
+          "location": "utils/viewer.py: embedded JavaScript, '} catch (e) {' and '} catch (err) {'",
+          "evidence": "    } catch (e) {\n[BENCH TRUNCATION: 84 lines omitted]\n      } catch (err) {\n[BENCH TRUNCATION: 10 lines omitted]",
+          "reasoning": "Two JavaScript catch blocks appear in the inlined script but their bodies are fully truncated. While C-001 is scoped to Python catch blocks by its literal language, the spirit of the constraint (no silent error swallowing) applies to code shipped as part of this module. If either JS catch block silently suppresses errors without any console.warn/error or user-visible feedback, this would be a behavioral violation of the intent. Visibility is needed into the truncated bodies, particularly the 10-line catch(err) block."
+        },
+        {
+          "constraint_id": "C-005",
+          "severity": "CONCERN",
+          "location": "utils/viewer.py: entire new file (947 lines)",
+          "evidence": "New file: utils/viewer.py with functions generate_viewer_html, _compute_chain_status, _compute_stats, _entry_has_pipeline_error, _pct, _build_html, _build_error_html",
+          "reasoning": "This is a 947-line new file introducing at minimum 7 new functions containing non-trivial logic (chain status computation, stats aggregation, HTML generation, error rendering). No corresponding test file or test additions are visible in this diff. The constitution requires 'corresponding test cases or an explicit justification for why testing is deferred.' No such justification is provided in the diff or docstring beyond the implicit argument that it is a UI rendering utility. This warrants Oracle review."
+        },
+        {
+          "constraint_id": "C-004",
+          "severity": "CONCERN",
+          "location": "utils/viewer.py: multiple function signatures with truncated bodies",
+          "evidence": "def _compute_stats(entries: list[dict]) -> dict:\n[BENCH TRUNCATION: 38 lines omitted]\ndef _build_html(\n[BENCH TRUNCATION: 84 lines omitted]",
+          "reasoning": "The return type annotation for _build_html is truncated entirely \u2014 its signature, parameters, and return type are all hidden. If _build_html lacks a return type annotation or uses `-> Any`, that would be a C-004 violation. The truncation prevents verification. The Oracle should confirm the complete signature of _build_html and any other functions whose annotations are obscured by truncation."
+        }
+      ],
+      "_tokens": {
+        "input": 3874,
+        "output": 859
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "MITIGATE",
+          "argument": "The Challenger's concern about the truncated `except (TypeError, ValueError)` handler in `_compute_chain_status` is legitimate in isolation, but the module-level docstring explicitly states the design intent: 'The module is fail-open per C-001: any unexpected error is logged with a full traceback to stderr and surfaced as a minimal error HTML page rather than raised into the CLI.' Furthermore, the outer `generate_viewer_html` function visibly wraps everything in a broad `except Exception` that logs to stderr and returns an error HTML page. A `(TypeError, ValueError)` handler inside `_compute_chain_status` is almost certainly returning a fallback dict (e.g., `{'status': 'unknown', 'message': ...}`) rather than silently swallowing \u2014 this pattern is consistent with a chain status computation that must return something usable even when verification data is malformed. The truncation is a review tooling limitation, not evidence of a violation. The Oracle should verify the untruncated body, but the architectural framing strongly suggests compliance.",
+          "evidence": "Module docstring: 'The module is fail-open per C-001: any unexpected error is logged with a full traceback to stderr and surfaced as a minimal error HTML page rather than raised into the CLI.' The outer try/except in generate_viewer_html logs with print(..., file=sys.stderr) and traceback."
+        },
+        {
+          "finding_index": 1,
+          "position": "REBUT",
+          "argument": "C-001 is explicitly scoped to Python catch blocks: 'All catch blocks must log, re-throw, or return a typed error.' The constraint's own text, rationale, and scope field ('error-handling') all refer to production code catch blocks in the governed language (Python). JavaScript embedded as a string literal inside a Python file is client-side UI code rendered in a browser \u2014 it is not subject to the same governance constraints as the Python runtime. Applying C-001 to inlined JS string literals would be a category error. Moreover, the visible JS snippets show `console.warn('Clipboard copy failed:', err)` in a catch block, indicating the pattern throughout the JS is to surface errors via console methods rather than swallow them silently. The 10-line `catch(err)` block is in the same script and follows the same pattern. This finding should not rise to a veto.",
+          "evidence": "C-001 scope field: 'error-handling'. Visible JS: `writeFn(full).then(done).catch(function(err) { console.warn('Clipboard copy failed:', err); });` \u2014 demonstrates the pattern is to warn, not silently swallow."
+        },
+        {
+          "finding_index": 2,
+          "position": "CONCEDE",
+          "argument": "The Challenger is correct. This is a 947-line new file with at least 7 non-trivial functions and no test coverage visible in the diff, and no explicit written justification for deferral. The module docstring discusses the fail-open design but says nothing about test deferral. C-005 is a WARNING severity (not veto), but the absence of either tests or a stated justification is a genuine gap. The Oracle should require either a companion test file or an explicit recorded justification (e.g., 'UI rendering utilities are tested via manual browser verification; unit testing HTML string output is deferred') before this change is fully approved.",
+          "evidence": "No test file appears in the diff. The module docstring contains no mention of test strategy or deferral rationale. Seven functions: generate_viewer_html, _compute_chain_status, _compute_stats, _entry_has_pipeline_error, _pct, _build_html, _build_error_html \u2014 all contain non-trivial logic."
+        },
+        {
+          "finding_index": 3,
+          "position": "MITIGATE",
+          "argument": "The Challenger correctly notes that `_build_html`'s full signature is truncated and its return type annotation is not visible. However, C-004 prohibits *removing or weakening* existing type annotations \u2014 this is a new file with no prior annotations to remove. The question is whether new functions in a new file must have return type annotations to comply with C-004. The literal rule is 'Functions must not remove or weaken existing type annotations.' Since there are no existing annotations to remove, C-004 technically does not apply to a file being created from scratch. That said, as a matter of quality, `_build_html` almost certainly returns `str` (it builds an HTML string), and the absence of an annotation would be a style concern. The Oracle should verify but this is not a veto-level C-004 violation on a new file.",
+          "evidence": "C-004 rule: 'Functions must not remove or weaken existing type annotations.' This is a file creation (change_type: create), so no prior annotations exist to be removed or weakened. The visible functions _compute_stats and generate_viewer_html both carry proper type annotations."
+        }
+      ],
+      "summary": "The change is architecturally sound with a clear fail-open error handling philosophy, but should be held pending Oracle verification of the truncated Python exception handler body and \u2014 more importantly \u2014 requires either a companion test file or an explicit C-005 deferral justification before full approval.",
+      "_tokens": {
+        "input": 4766,
+        "output": 1282
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The Challenger raised four concerns, all CONCERN-level and none asserting definitive violations. The Defender's rebuttals adequately address the veto-severity concerns: (1) On C-001 Python handler: the module docstring explicitly declares fail-open semantics with stderr logging, and the outer generate_viewer_html wraps all logic in a visible except Exception that logs with traceback to stderr per C-001. The inner (TypeError, ValueError) handler in _compute_chain_status is architecturally positioned to return a fallback status dict, consistent with the declared design. While the body is truncated, the visible error-handling architecture demonstrates compliance intent, and the Challenger provides no evidence of actual silent swallowing. (2) On C-001 JavaScript handlers: C-001's scope is 'error-handling' and its rule text refers to catch blocks generically, but the visible JS pattern (console.warn on clipboard failure) demonstrates the module follows a surface-errors pattern. Even under a broad reading, no evidence of silent swallowing is presented. (3) On C-004: this is a new file (change_type: create), so there are no 'existing type annotations' to remove or weaken. C-004 literally does not apply. Visible signatures (generate_viewer_html, _compute_stats, _compute_chain_status, _entry_has_pipeline_error, _pct) all carry proper annotations. (4) On C-005: the Defender concedes the gap, but C-005 is severity 'warning', not 'veto', and therefore cannot trigger a veto on its own. I also evaluated the change against the full constitution: C-002 (scope) \u2014 a new utils/viewer.py file is consistent with the stated purpose (viewer for cmd_viewer in cli/commands.py); C-003 (dependencies) \u2014 only stdlib imports (html, json, sys, traceback, typing) and intra-project imports (ledger.chain, ledger.verify); C-006 \u2014 no credentials visible; C-007 \u2014 viewer is read-only rendering, does not modify challenger/defender/oracle/ledger/constitution; C-008 \u2014 uses load_ledger and verify_chain for read-only access, no mutation. No veto-severity constraint is clearly violated.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "SATISFIED",
+          "note": "Module docstring declares fail-open design; visible outer exception handler logs to stderr with traceback. Truncated inner handler is architecturally a fallback return pattern, not evidence of silent swallowing. Challenger provided no positive evidence of violation."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "New file utils/viewer.py aligns with stated purpose of supporting cmd_viewer in cli/commands.py."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "SATISFIED",
+          "note": "All imports are stdlib (html, json, sys, traceback, typing) or intra-project (ledger.chain, ledger.verify). No new external dependencies."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "C-004 prohibits removing or weakening existing annotations. This is a file creation; no prior annotations exist. Visible signatures carry proper type annotations."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "VIOLATED",
+          "note": "947-line file with 7 non-trivial functions lacks visible tests and explicit deferral justification. Defender concedes. However, C-005 is severity 'warning', not veto \u2014 recorded as advisory."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "No credentials, tokens, or secrets visible in the change."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "Viewer is a read-only rendering utility. Does not modify governance pipeline components. Uses verify_chain to report integrity rather than bypass it."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "SATISFIED",
+          "note": "Module uses load_ledger and verify_chain for read-only access. No write, mutation, or deletion of ledger entries present."
+        }
+      ],
+      "advisories": [
+        "C-005 warning: No test coverage is present for the 7 new functions, and no explicit deferral justification is recorded in the module. Recommend adding either a tests/test_viewer.py with coverage of _compute_stats, _entry_has_pipeline_error, _pct, and _compute_chain_status fallback behavior, or adding a brief note to the module docstring stating the deferral rationale (e.g., 'HTML string generation verified via manual browser inspection; unit tests deferred').",
+        "Oracle could not independently verify the truncated body of the (TypeError, ValueError) handler in _compute_chain_status due to diff truncation. The architectural framing supports compliance, but reviewers with access to the full source should confirm the handler logs or returns a typed fallback rather than silently passing.",
+        "Oracle could not verify the return annotation of _build_html due to signature truncation. While C-004 does not apply to new files, adding an explicit '-> str' return annotation is recommended for consistency with the rest of the module."
+      ],
+      "remediation": null,
+      "confidence": "MODERATE",
+      "_tokens": {
+        "input": 8614,
+        "output": 1876
+      }
+    },
+    "entry_hash": "42e6b7a73f686c029fef58478616e8e65d2728a6df0b9dc80ecb5b3743ab5123"
+  },
+  {
+    "entry_id": "72c3ef8b-b6fe-4325-8fa6-c5a097ca4d4f",
+    "timestamp": "2026-04-22T06:03:59.524241+00:00",
+    "previous_hash": "42e6b7a73f686c029fef58478616e8e65d2728a6df0b9dc80ecb5b3743ab5123",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "C:\\Users\\mstar\\Bench\\cli\\commands.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "C:\\Users\\mstar\\Bench\\cli\\commands.py",
+        "change_type": "modify",
+        "old_string": "import sys\nfrom typing import Any\n\nfrom ledger.chain import load_ledger\nfrom ledger.verify import verify_chain\nfrom pipeline.constitution import (\n    ConstitutionError,\n    load_constitution_snapshot,\n)",
+        "new_string": "import sys\nimport tempfile\nimport webbrowser\nfrom typing import Any\n\nfrom ledger.chain import load_ledger\nfrom ledger.verify import verify_chain\nfrom pipeline.constitution import (\n    ConstitutionError,\n    load_constitution_snapshot,\n)\nfrom utils.viewer import generate_viewer_html"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-003",
+          "severity": "VIOLATION",
+          "location": "cli/commands.py - new import lines",
+          "evidence": "import tempfile\nimport webbrowser\nfrom utils.viewer import generate_viewer_html",
+          "reasoning": "Three new dependencies are introduced: the stdlib modules `tempfile` and `webbrowser` (low risk but still undeclared additions), and critically `utils.viewer.generate_viewer_html`, which is a non-stdlib import with no accompanying declaration of how `utils.viewer` is sourced, packaged, or whether it introduces transitive dependencies. C-003 requires that any new import or dependency be explicitly declared. There is no evidence in this diff that `generate_viewer_html` or the `utils.viewer` module was declared as part of the stated task boundary or in a requirements/manifest file."
+        },
+        {
+          "constraint_id": "C-005",
+          "severity": "CONCERN",
+          "location": "cli/commands.py - new import lines",
+          "evidence": "import tempfile\nimport webbrowser\nfrom utils.viewer import generate_viewer_html",
+          "reasoning": "The import of `generate_viewer_html` along with `tempfile` and `webbrowser` strongly implies new logic will be added that writes HTML to a temp file and opens it in a browser. This diff only shows the import additions, but the downstream usage of these imports constitutes new logic branches. If that usage is elsewhere in this file (not shown in the diff) or in `utils/viewer.py`, test coverage for the HTML generation and browser-launch behavior must exist or be explicitly justified as deferred. The diff as presented does not demonstrate that test coverage accompanies this change."
+        }
+      ],
+      "_tokens": {
+        "input": 1579,
+        "output": 439
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "MITIGATE",
+          "argument": "The Challenger correctly identifies that C-003 requires explicit declaration of new imports. However, the severity should be distinguished by type: `tempfile` and `webbrowser` are Python standard library modules \u2014 they require zero external packaging, introduce no supply chain risk, and appear in no requirements.txt or equivalent manifest. The spirit of C-003 is to prevent undeclared *external* dependencies (supply chain attack vectors and reproducibility failures). Flagging stdlib modules as C-003 violations stretches the constraint beyond its stated rationale. That said, `utils.viewer.generate_viewer_html` is a legitimate concern: it is an internal module whose own transitive dependencies (e.g., does `generate_viewer_html` import `jinja2`, `markdown`, or other third-party libraries?) are not visible in this diff. If `utils.viewer` introduces no new third-party dependencies, the violation is nominal. If it does, this is a real gap. The finding is valid for `utils.viewer` specifically, but overstated for stdlib imports.",
+          "evidence": "C-003 rationale: 'Undeclared dependencies are supply chain attack vectors and reproducibility failures.' \u2014 stdlib modules (`tempfile`, `webbrowser`) are not supply chain risks. The `utils.viewer` import is the legitimate locus of concern."
+        },
+        {
+          "finding_index": 1,
+          "position": "CONCEDE",
+          "argument": "The Challenger is correct. The diff introduces three imports that clearly anticipate new logic \u2014 writing HTML to a temp file and opening a browser \u2014 but the diff does not show the usage sites, the implementation of `generate_viewer_html`, or any test coverage for this behavior. Under C-005, new logic branches (HTML generation, temp file creation, browser launch) require corresponding test cases or an explicit justification for deferral. Neither is present in this diff. This is a legitimate warning-level concern that should be resolved before or alongside the rest of the implementation.",
+          "evidence": "C-005: 'New functions or branches of logic must have corresponding test cases or an explicit justification for why testing is deferred.' The import of `tempfile`, `webbrowser`, and `generate_viewer_html` implies new branches with no test evidence in the diff."
+        }
+      ],
+      "summary": "The change is partially sound: the stdlib imports are benign and the Challenger overstates C-003 for those, but the C-003 concern around `utils.viewer`'s transitive dependencies is legitimate, and the C-005 concern about missing test coverage for the implied HTML-viewer logic is a valid concession that should be resolved.",
+      "_tokens": {
+        "input": 2047,
+        "output": 654
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change adds three imports to cli/commands.py: two stdlib modules (tempfile, webbrowser) and one internal module (utils.viewer.generate_viewer_html). The Challenger raised C-003 (Dependency Declaration) and C-005 (Test Coverage). On C-003, the Defender's MITIGATE position is sound: the constraint's stated rationale is 'supply chain attack vectors and reproducibility failures,' which does not apply to Python stdlib modules that require no manifest declaration. For utils.viewer, this is an internal project module, not an external dependency requiring requirements.txt declaration; whether it introduces transitive third-party dependencies cannot be determined from this diff alone, but the import itself of an internal module is not a C-003 violation on its face. On C-005, the Defender concedes, but C-005 is severity 'warning' not 'veto' \u2014 it does not compel a VETO and is properly handled as an advisory. Additionally, the imports themselves introduce no new logic branches in this diff (the diff shows only import statements); C-005 applies to the logic that uses them, which is out of scope for this specific diff. Reviewing the full constitution: C-001 (N/A, no error handling), C-002 (cli/commands.py is a reasonable locus for a CLI command, no scope evidence to the contrary), C-004 (no type annotations weakened), C-006 (no secrets), C-007 (cli/commands.py is not part of the governance enforcement surface \u2014 challenger/defender/oracle/ledger/constitution \u2014 so self-governance is not implicated), C-008 (no ledger modification).",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error handling introduced or modified."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is confined to cli/commands.py imports; no cross-boundary modification evident."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "SATISFIED",
+          "note": "Per Defender rebuttal, tempfile and webbrowser are stdlib and outside C-003's supply-chain rationale. utils.viewer is an internal project module, not an external dependency requiring manifest declaration. If utils.viewer itself pulls in undeclared third-party packages, that would be a separate violation in that file's diff, not this one."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No type annotations affected."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "SATISFIED",
+          "note": "Severity is 'warning' (non-veto). The diff adds only imports, not logic branches; test coverage obligations attach to the usage sites. Recorded as advisory."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No credentials introduced."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "cli/commands.py is a CLI surface, not a governance enforcement component (challenger/defender/oracle/ledger/constitution)."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger modification."
+        }
+      ],
+      "advisories": [
+        "Per Defender's concession on C-005, when the usage sites for tempfile/webbrowser/generate_viewer_html are added, test coverage or an explicit deferral justification must accompany that logic.",
+        "Verify that utils/viewer.py does not introduce undeclared third-party dependencies (e.g., jinja2, markdown). If it does, a separate C-003 review is required against that file's diff and the project's requirements manifest.",
+        "The diff implies downstream behavior (writing HTML to a temp file, launching a browser) that has security and UX implications (e.g., temp file cleanup, browser launch in headless/CI environments). Review when the consumer logic lands."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 4058,
+        "output": 1457
+      }
+    },
+    "entry_hash": "2d8d043c5470a67ebf9c09683580ec67b652716e1ae7e0838307b5cf85da3f9b"
+  },
+  {
+    "entry_id": "e6673e16-453a-43ff-af0d-0784a58656fd",
+    "timestamp": "2026-04-22T06:04:58.386675+00:00",
+    "previous_hash": "2d8d043c5470a67ebf9c09683580ec67b652716e1ae7e0838307b5cf85da3f9b",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "C:\\Users\\mstar\\Bench\\cli\\commands.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "C:\\Users\\mstar\\Bench\\cli\\commands.py",
+        "change_type": "modify",
+        "old_string": "def _print_entry_line(entry: dict) -> None:",
+        "new_string": "def cmd_viewer() -> int:\n    \"\"\"Generate the HTML ledger viewer, write it to a tempfile, open browser.\"\"\"\n    try:\n        html_content: str = generate_viewer_html()\n    except Exception as e:\n        print(\n            f\"[bench cli] viewer generation failed: {type(e).__name__}: {e}\",\n            file=sys.stderr,\n        )\n        return 1\n\n    try:\n        with tempfile.NamedTemporaryFile(\n            mode=\"w\",\n            suffix=\".html\",\n            prefix=\"bench-viewer-\",\n            delete=False,\n            encoding=\"utf-8\",\n        ) as fh:\n            fh.write(html_content)\n            tmp_path: str = fh.name\n    except OSError as e:\n        print(f\"[bench cli] viewer write failed: {e}\", file=sys.stderr)\n        return 1\n\n    print(f\"Bench viewer written to: {tmp_path}\")\n    if not webbrowser.open(f\"file://{tmp_path}\"):\n        print(\n            \"[bench cli] could not auto-open browser; open the path above manually.\",\n            file=sys.stderr,\n        )\n    return 0\n\n\ndef _print_entry_line(entry: dict) -> None:"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-003",
+          "severity": "CONCERN",
+          "location": "new function cmd_viewer(), imports implied",
+          "evidence": "import tempfile and import webbrowser are used in the new function body (tempfile.NamedTemporaryFile, webbrowser.open) and generate_viewer_html is called",
+          "reasoning": "The diff introduces usage of `tempfile`, `webbrowser`, and `generate_viewer_html` without showing corresponding import declarations being added to the file. If these are not already present in the file's import section (which is not shown in the provided context), this is an undeclared dependency/import addition. The diff only shows the insertion point as just before `_print_entry_line`; the import section at the top of the file is not confirmed. The Oracle should verify that `import tempfile`, `import webbrowser`, and the import of `generate_viewer_html` already exist or are explicitly added in a companion change."
+        },
+        {
+          "constraint_id": "C-005",
+          "severity": "VIOLATION",
+          "location": "new function cmd_viewer(), entire function body",
+          "evidence": "def cmd_viewer() -> int: ... (no corresponding test cases referenced or justified)",
+          "reasoning": "C-005 requires that new functions have corresponding test cases or an explicit justification for why testing is deferred. The diff introduces a new public command function `cmd_viewer()` with multiple distinct branches (HTML generation failure, file write failure, browser open failure, and success path) but provides no test coverage and no justification for deferral. The severity of C-005 is 'warning' but it is still a constraint requiring acknowledgment."
+        },
+        {
+          "constraint_id": "C-001",
+          "severity": "OBSERVATION",
+          "location": "cmd_viewer(), webbrowser.open call, line ~29 of new code",
+          "evidence": "if not webbrowser.open(f\"file://{tmp_path}\"):\n    print(\n        \"[bench cli] could not auto-open browser; open the path above manually.\",\n        file=sys.stderr,\n    )",
+          "reasoning": "The browser-open failure is handled with a printed warning but the function still returns 0 (success). This is not a silent swallow \u2014 the error is logged to stderr \u2014 so it does not constitute a C-001 violation. However, it is worth noting that a non-fatal browser failure returning exit code 0 may mask partial failures depending on caller expectations. Flagged as OBSERVATION only; C-001 is not breached."
+        }
+      ],
+      "_tokens": {
+        "input": 1786,
+        "output": 645
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "MITIGATE",
+          "argument": "The Challenger's concern about C-003 is procedurally sound but substantively weak. Both `tempfile` and `webbrowser` are Python standard library modules \u2014 they require no addition to requirements.txt or any dependency manifest, so there is no supply chain risk whatsoever. The C-003 rationale explicitly targets 'supply chain attack vectors and reproducibility failures,' neither of which applies to stdlib imports. The real question is whether these `import` statements exist at the top of the file, which the diff does not show. However, the diff insertion point (just before `_print_entry_line`) strongly suggests the top-of-file import section is not being changed, implying these imports either already exist or were added in a companion change. The import of `generate_viewer_html` is the stronger concern \u2014 it is a non-stdlib symbol. The Oracle should verify that this import is present in the file's import section. If it is not shown in any companion change, that would be a genuine C-003 concern. The stdlib modules alone do not constitute a veto-worthy violation.",
+          "evidence": "`tempfile.NamedTemporaryFile` and `webbrowser.open` are Python standard library calls. The diff shows the new function inserted mid-file, not at the top-level import section, consistent with imports being handled separately or already present."
+        },
+        {
+          "finding_index": 1,
+          "position": "CONCEDE",
+          "argument": "The Challenger is correct. C-005 is a real constraint and `cmd_viewer()` is a new public function with four distinct logical branches (HTML generation failure, file write failure, browser open failure, and the success path). No test cases are referenced and no deferral justification is provided in the diff. The severity is 'warning' not 'veto,' so this does not block the change, but it must be acknowledged and addressed \u2014 either by adding tests or recording an explicit justification. The Defender concedes this finding.",
+          "evidence": "The diff introduces `def cmd_viewer() -> int:` with no accompanying test file changes or documented test deferral rationale."
+        },
+        {
+          "finding_index": 2,
+          "position": "REBUT",
+          "argument": "The Challenger already correctly concluded this is not a C-001 violation and flagged it only as an OBSERVATION. The Defender agrees entirely. Browser open failure is explicitly logged to stderr with a user-actionable message before returning 0. The design decision to return 0 is defensible: the primary task (generating and writing the HTML) succeeded; the browser auto-open is a convenience feature, not a core deliverable. This is an architectural judgment call, not an error-swallowing violation. C-001 is not breached.",
+          "evidence": "`if not webbrowser.open(...): print(\"[bench cli] could not auto-open browser; open the path above manually.\", file=sys.stderr)` \u2014 failure is explicitly surfaced to the user with corrective guidance."
+        }
+      ],
+      "summary": "The change is functionally sound and respects most constitutional constraints; the C-003 concern about `generate_viewer_html`'s import origin warrants Oracle verification, the C-005 warning is a legitimate concession requiring test coverage or documented deferral, and the C-001 observation is not a violation.",
+      "_tokens": {
+        "input": 2468,
+        "output": 824
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change adds a new CLI command cmd_viewer() that generates HTML, writes to a tempfile, and opens a browser. Evaluating against the constitution: C-001 is satisfied \u2014 all error paths log to stderr and return non-zero or surface actionable messages (Challenger's own OBSERVATION confirms no swallowing; Defender concurs). C-003: the Challenger raised a concern about tempfile, webbrowser, and generate_viewer_html imports. The Defender correctly notes tempfile and webbrowser are Python stdlib and carry no supply chain or reproducibility risk, which is the explicit rationale of C-003. generate_viewer_html is a project-internal symbol, not an external dependency, so it also does not implicate C-003's supply chain rationale \u2014 at worst it would be a NameError at runtime, which is a correctness issue rather than a governance violation. I treat C-003 as satisfied but issue an advisory for the reviewer to confirm the imports exist. C-005 is a warning-severity constraint; the Defender conceded the new function lacks tests or a deferral justification. Per constitution, warning severity does not trigger veto but must be surfaced as an advisory. C-002, C-004, C-006, C-007, C-008 are not implicated: the change is scoped to cli/commands.py (a reasonable CLI location), adds rather than weakens type annotations (-> int, typed locals), contains no secrets, does not touch governance pipeline components (challenger/defender/oracle/ledger/constitution), and does not modify ledger entries. No veto-severity constraint is violated.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "SATISFIED",
+          "note": "All three failure paths (HTML generation, file write, browser open) explicitly log to stderr. Browser-open failure returning 0 is an architectural choice, not silent swallowing, as confirmed by Challenger OBSERVATION and Defender rebuttal."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Change is confined to cli/commands.py; no task boundary was provided to evaluate against, and the file is the natural home for CLI command functions."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "SATISFIED",
+          "note": "tempfile and webbrowser are Python stdlib per Defender rebuttal \u2014 no manifest impact. generate_viewer_html is a project-internal symbol, not an external dependency within the scope of C-003's supply chain rationale. Advisory issued to confirm import presence."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "New function declares -> int return type and annotates local variables (html_content: str, tmp_path: str). No existing annotations removed or weakened."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "VIOLATED",
+          "note": "Defender conceded: new function cmd_viewer() with four branches has no accompanying tests or deferral justification. Severity is 'warning', so this does not trigger veto but is recorded as an advisory."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No credentials, keys, or tokens in the diff."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Change is in cli/commands.py, not in challenger/defender/oracle/ledger/constitution components."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger read/write/mutation logic introduced; function only writes an HTML file to a tempdir."
+        }
+      ],
+      "advisories": [
+        "C-005 (warning): cmd_viewer() has four logical branches (generation failure, write failure, browser open failure, success) and no tests or documented deferral. Add test coverage or record an explicit deferral rationale before relying on this command in governed workflows.",
+        "C-003 verification advisory: Ensure `import tempfile`, `import webbrowser`, and the import of `generate_viewer_html` are present at the top of cli/commands.py. The diff does not show the import section; if any are missing the code will fail at runtime, though this is a correctness rather than governance concern.",
+        "Design note (not a constraint): cmd_viewer() returns 0 even when the browser fails to auto-open. Callers that treat exit code as the sole signal of full success may want to reconsider; this is a judgment call and not prohibited by the constitution."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 4753,
+        "output": 1636
+      }
+    },
+    "entry_hash": "4970a27ea79667416597337f202a2ce7fe8d0f35da2a8c16a6b4fc9bf988eca1"
+  },
+  {
+    "entry_id": "88fb24fb-9a1a-4ba4-93bc-c77daaf4452a",
+    "timestamp": "2026-04-22T06:05:42.636674+00:00",
+    "previous_hash": "4970a27ea79667416597337f202a2ce7fe8d0f35da2a8c16a6b4fc9bf988eca1",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "C:\\Users\\mstar\\Bench\\cli\\__main__.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "C:\\Users\\mstar\\Bench\\cli\\__main__.py",
+        "change_type": "modify",
+        "old_string": "from cli.commands import (\n    cmd_constitution,\n    cmd_ledger,\n    cmd_stats,\n    cmd_verify,\n)",
+        "new_string": "from cli.commands import (\n    cmd_constitution,\n    cmd_ledger,\n    cmd_stats,\n    cmd_verify,\n    cmd_viewer,\n)"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-003",
+          "severity": "CONCERN",
+          "location": "cli/__main__.py: new import line",
+          "evidence": "    cmd_viewer,",
+          "reasoning": "A new module `cmd_viewer` is being imported from `cli.commands`. This import implies a new module or symbol exists (or will exist) in the codebase. The diff does not show the corresponding definition of `cmd_viewer` in `cli/commands/__init__.py` or any sub-module. If `cmd_viewer` is a net-new module/file being silently introduced alongside this change, that constitutes an undeclared dependency or addition. The change should be accompanied by explicit declaration of what `cmd_viewer` is, where it lives, and whether it introduces any new third-party dependencies."
+        },
+        {
+          "constraint_id": "C-005",
+          "severity": "CONCERN",
+          "location": "cli/__main__.py: new import line",
+          "evidence": "    cmd_viewer,",
+          "reasoning": "If `cmd_viewer` is a new command module containing new logic, C-005 requires corresponding test cases or an explicit justification for deferral. The diff shows only the import addition; no test coverage for `cmd_viewer` is visible in this change, and no justification for deferral is provided."
+        }
+      ],
+      "_tokens": {
+        "input": 1507,
+        "output": 350
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "MITIGATE",
+          "argument": "C-003 governs 'new imports or dependencies' in the sense of third-party packages or external libraries added to requirements.txt or equivalent manifest files \u2014 it is a supply chain / reproducibility constraint. The import of `cmd_viewer` from `cli.commands` is an internal module import within the same project. The Challenger's concern is legitimate only if `cmd_viewer` itself introduces undeclared third-party dependencies. Importing a first-party internal module does not constitute an undeclared dependency under the spirit or letter of C-003. However, the Challenger is correct that the diff is narrow \u2014 it only shows __main__.py and does not show the cmd_viewer module itself. If cmd_viewer is being introduced in a companion diff (i.e., this is one part of a multi-file change), the dependency declaration concern is fully resolved. The real question is whether cmd_viewer introduces new third-party packages, which cannot be determined from this diff alone. The concern is contextually reasonable but not a clear violation.",
+          "evidence": "The diff adds `cmd_viewer` to an existing import block from `cli.commands` \u2014 a first-party internal package. The change does not touch requirements.txt, pyproject.toml, or any dependency manifest, which is the primary target of C-003."
+        },
+        {
+          "finding_index": 1,
+          "position": "CONCEDE",
+          "argument": "The Challenger is correct here. C-005 requires new functions or branches of logic to have corresponding test cases or an explicit justification for deferral. This diff introduces a new command module (cmd_viewer) into the CLI's import surface without any visible test coverage and without a stated justification for deferral. Even if cmd_viewer is defined elsewhere in a companion diff, the governance record for this change does not satisfy C-005. This is a valid warning-level finding that should be addressed either by pointing to existing test coverage for cmd_viewer or by providing an explicit deferral justification.",
+          "evidence": "The diff shows only the import line `cmd_viewer,` being added with no accompanying test file change or deferral justification present in the submitted change."
+        }
+      ],
+      "summary": "The change is a minimal and structurally sound import addition; the C-003 concern is overstated for a first-party module but cannot be fully cleared without seeing cmd_viewer's own dependencies, while the C-005 warning is legitimately unaddressed and should be resolved before merge.",
+      "_tokens": {
+        "input": 1886,
+        "output": 611
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change is a single-line addition to an import block in cli/__main__.py, bringing in `cmd_viewer` from the first-party `cli.commands` package. Evaluating against the constitution: C-003 (Dependency Declaration) targets external/third-party dependency additions to manifests such as requirements.txt or pyproject.toml. The Defender correctly notes (MITIGATE rebuttal) that importing a first-party sibling module from `cli.commands` is not a supply-chain dependency addition; no manifest files are touched in this diff. The Challenger's concern is contextually reasonable but does not rise to a violation of C-003's letter or rationale. C-005 (Test Coverage for New Logic) is a warning-level constraint, not veto-level, and the Defender conceded it is unaddressed in this specific diff. Per the constitution, warning severity does not mandate a veto; it is surfaced as an advisory. C-001, C-002, C-004, C-006, C-007, C-008 are not implicated: no error handling, no out-of-scope files, no type annotation changes, no secrets, no governance pipeline weakening (cli/__main__.py is a CLI entrypoint wiring, not challenger/defender/oracle/ledger/constitution logic), and no ledger mutation. The change itself is a pure additive wiring of a new command; it cannot weaken any veto-level constraint on its own.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error handling code is introduced or modified."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is confined to cli/__main__.py, consistent with wiring a new CLI subcommand."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "SATISFIED",
+          "note": "Per Defender rebuttal: `cmd_viewer` is a first-party internal module under `cli.commands`, not a third-party dependency. No manifest files (requirements.txt, pyproject.toml) are modified. C-003 targets undeclared external dependencies."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No type annotations are added, removed, or weakened."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "VIOLATED",
+          "note": "Defender conceded: no test coverage or deferral justification is visible for cmd_viewer in this diff. However, C-005 is severity 'warning', not 'veto', so it does not trigger a veto. Surfaced as advisory."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No secrets, tokens, or credentials appear in the diff."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "cli/__main__.py is a CLI entrypoint for dispatching commands; adding a new command import does not weaken challenger, defender, oracle, ledger, or constitution enforcement logic."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger code is touched."
+        }
+      ],
+      "advisories": [
+        "C-005 (warning): The cmd_viewer module being wired in should have corresponding test coverage or an explicit deferral justification recorded. The Defender conceded this point. Reviewers should confirm tests exist in the companion diff that introduces cmd_viewer itself.",
+        "This diff appears to be one part of a multi-file change; the definition of cmd_viewer is not visible here. Governance reviewers should ensure the companion change introducing cmd_viewer is itself submitted through the pipeline, particularly to verify it introduces no third-party dependencies (C-003) and includes tests (C-005)."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 3705,
+        "output": 1400
+      }
+    },
+    "entry_hash": "1119f6e6758b883afebcf6b47f1d558a7322bf1722337e1343540df91ea46c7a"
+  },
+  {
+    "entry_id": "41481164-c63d-4d54-ae76-14a93e2fb40e",
+    "timestamp": "2026-04-22T06:05:59.282972+00:00",
+    "previous_hash": "1119f6e6758b883afebcf6b47f1d558a7322bf1722337e1343540df91ea46c7a",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "C:\\Users\\mstar\\Bench\\cli\\__main__.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "C:\\Users\\mstar\\Bench\\cli\\__main__.py",
+        "change_type": "modify",
+        "old_string": "    \"  stats                      Governance summary statistics\\n\"\n    \"  constitution               Show current constitutional constraints\\n\"\n)",
+        "new_string": "    \"  stats                      Governance summary statistics\\n\"\n    \"  constitution               Show current constitutional constraints\\n\"\n    \"  viewer                     Open an HTML verdict viewer in the browser\\n\"\n)"
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 1503,
+        "output": 26
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change adds a single line to a help text string in cli/__main__.py documenting a 'viewer' subcommand. This is a pure documentation/string literal addition with no logic, no imports, no error handling, no type changes, and no impact on the governance pipeline's enforcement mechanisms. The Challenger found no issues and the Defender confirmed. I reviewed the diff against all eight constraints independently: C-001 (no catch blocks involved), C-002 (single file, cli/__main__.py, help text scope), C-003 (no new imports), C-004 (no type annotations affected), C-005 (no new logic branches, only a string), C-006 (no secrets), C-007 (cli/__main__.py help text is not part of challenger/defender/oracle/ledger/constitution enforcement logic; updating user-facing help does not weaken enforcement), C-008 (no ledger interaction). One advisory: the help text references a 'viewer' subcommand that must actually be wired up elsewhere; if the command handler does not exist, users will hit a runtime error, but that is a correctness concern outside the declared constitution.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error handling code in the diff."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is confined to cli/__main__.py help string."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependencies added."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No type annotations touched."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new logic or branches; string literal only."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "No credentials present in the added string."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "CLI help text is not an enforcement surface; documenting an additional subcommand does not weaken challenger/defender/oracle/ledger/constitution."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger interaction in the diff."
+        }
+      ],
+      "advisories": [
+        "The help text now advertises a 'viewer' subcommand. Ensure the corresponding command handler is implemented and registered in the CLI dispatcher; otherwise users will receive an unknown-command error when invoking it.",
+        "Per C-005 (warning severity), if the 'viewer' subcommand itself introduces new logic, it should be accompanied by tests or explicit deferral. This diff alone does not trigger that concern."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 2454,
+        "output": 1062
+      }
+    },
+    "entry_hash": "ac14c585cb1d33d3ed6ab853e1bc3586add8af3ec2d24071b3ec98f59318c4a9"
+  },
+  {
+    "entry_id": "4210b672-c115-4010-af08-1b535fcb3391",
+    "timestamp": "2026-04-22T06:06:36.399036+00:00",
+    "previous_hash": "ac14c585cb1d33d3ed6ab853e1bc3586add8af3ec2d24071b3ec98f59318c4a9",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "C:\\Users\\mstar\\Bench\\cli\\__main__.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "C:\\Users\\mstar\\Bench\\cli\\__main__.py",
+        "change_type": "modify",
+        "old_string": "    if command == \"constitution\":\n        return cmd_constitution()\n    if command in (\"-h\", \"--help\", \"help\"):",
+        "new_string": "    if command == \"constitution\":\n        return cmd_constitution()\n    if command == \"viewer\":\n        return cmd_viewer()\n    if command in (\"-h\", \"--help\", \"help\"):"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-005",
+          "severity": "CONCERN",
+          "location": "__main__.py: new branch `if command == \"viewer\": return cmd_viewer()`",
+          "evidence": "if command == \"viewer\":\n        return cmd_viewer()",
+          "reasoning": "A new command branch (`viewer`) and its backing function `cmd_viewer()` are introduced without any visible test coverage in the diff. C-005 requires that new logic branches have corresponding test cases or an explicit documented justification for deferral. Neither is present here."
+        },
+        {
+          "constraint_id": "C-003",
+          "severity": "CONCERN",
+          "location": "__main__.py: call to `cmd_viewer()`",
+          "evidence": "return cmd_viewer()",
+          "reasoning": "`cmd_viewer` is called but its definition is not shown in the diff. If `cmd_viewer` is defined in a new or modified module, that module may introduce new imports or third-party dependencies (e.g., a GUI/TUI library for a viewer). Without seeing the full implementation, it cannot be confirmed that no undeclared dependencies are being pulled in. This warrants verification against C-003."
+        }
+      ],
+      "_tokens": {
+        "input": 1515,
+        "output": 319
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "CONCEDE",
+          "argument": "The Challenger is correct that C-005 applies here. A new routing branch for the 'viewer' command is introduced with no test coverage visible in the diff, and no explicit documented justification for deferral is provided. Since C-005 is a WARNING-level constraint, this is a concern but not a veto. However, the violation is real: the new branch is unverified, and the codebase's governance standard requires either a test or an explicit deferral rationale.",
+          "evidence": "if command == \"viewer\":\n        return cmd_viewer()"
+        },
+        {
+          "finding_index": 1,
+          "position": "MITIGATE",
+          "argument": "The Challenger raises a reasonable concern, but the framing is speculative. C-003 governs actual undeclared dependency additions \u2014 it is triggered when a new import or dependency is silently added, not by the theoretical possibility that an unseen function might do so. The diff itself introduces no new imports. The call to `cmd_viewer()` is most plausibly a reference to a function defined elsewhere in the same module or a sibling module within the CLI package, consistent with the pattern established by `cmd_constitution()` which is already present and not shown as a new addition. The concern is valid as a review note \u2014 the full implementation of `cmd_viewer()` should be inspected to confirm no undeclared dependencies \u2014 but it does not constitute a C-003 violation on the basis of this diff alone. The Challenger cannot assert a violation from the absence of evidence; they can only flag it for follow-up inspection.",
+          "evidence": "The diff pattern mirrors the existing `return cmd_constitution()` call, which is already accepted in the codebase. No new import statements appear in the diff. The C-003 rule requires a violation to be present, not merely possible."
+        }
+      ],
+      "summary": "The change is a minimal, well-scoped routing addition with one legitimate (warning-level) gap in test coverage that should be addressed, and one speculative dependency concern that is not a current violation but warrants inspection of the full `cmd_viewer()` implementation.",
+      "_tokens": {
+        "input": 1863,
+        "output": 537
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The proposed change is a minimal three-line addition to the CLI command dispatcher that routes a new 'viewer' command to a cmd_viewer() function, mirroring the existing pattern for cmd_constitution(). Evaluating against the full constitution: C-001 (error handling) is not applicable \u2014 no catch blocks are introduced or modified. C-002 (scope) is satisfied \u2014 the change is confined to __main__.py's dispatcher and is coherent with the stated purpose of adding a viewer command. C-003 (dependencies) \u2014 no new imports appear in this diff; the Defender correctly notes that C-003 requires an actual undeclared addition, not a speculative one. The Challenger's concern about cmd_viewer's implementation potentially introducing dependencies is valid as an advisory but cannot support a veto on the basis of this diff alone. C-004 (type safety) is satisfied \u2014 no type annotations are removed or weakened. C-006 (secrets) is satisfied \u2014 no credentials present. C-007 (governance pipeline integrity) \u2014 the CLI dispatcher is adjacent to governance infrastructure, but adding a read-only viewer command does not weaken enforcement, bypass verification, or disable logging. C-008 (ledger immutability) is not implicated by this diff. C-005 (test coverage) \u2014 the Defender concedes this warning-level finding. Per the constitution, C-005 is severity 'warning', not 'veto', so it does not block PASS but is recorded as an advisory.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error-handling constructs introduced or modified."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is confined to the dispatcher in __main__.py and is coherent with adding a viewer command."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "SATISFIED",
+          "note": "No new imports in this diff. Challenger's concern is speculative; Defender's rebuttal correctly notes C-003 requires an actual declared-dependency omission. Flagged as advisory for follow-up on cmd_viewer's implementation."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "No type annotations removed or weakened."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "VIOLATED",
+          "note": "Defender conceded: new branch introduced without accompanying test or deferral justification. Severity is 'warning', so does not trigger veto."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No secrets or credentials present."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "CLI dispatcher addition does not weaken challenger/defender/oracle/ledger/constitution enforcement. Viewer is additive and appears read-oriented."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger mutation in this diff."
+        }
+      ],
+      "advisories": [
+        "C-005 warning: add a test covering the 'viewer' command dispatch branch, or record an explicit deferral justification.",
+        "C-003 follow-up: inspect the full implementation of cmd_viewer() to confirm it introduces no undeclared third-party dependencies (e.g., TUI/GUI libraries). This diff alone does not violate C-003, but cmd_viewer's source should be reviewed under its own governance pass.",
+        "C-007 follow-up: if cmd_viewer exposes ledger or constitution contents, confirm it is read-only and cannot be used to bypass or obscure governance output."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 3555,
+        "output": 1372
+      }
+    },
+    "entry_hash": "1a7290ffaa46157d61fff765c7dcb8811d044fb1609a99c25df096b027e0d66c"
   }
 ]
