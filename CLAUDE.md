@@ -50,7 +50,7 @@ bench/
   utils/
     diff.py               # Diff extraction and formatting
     api.py                # Anthropic API client
-    formatting.py         # Haiku utility calls
+    formatting.py         # Stdlib diff-info formatting for pipeline display
   tests/
 ```
 
@@ -61,7 +61,7 @@ bench/
 | Challenger | Sonnet 4.6 | Find problems in proposed change |
 | Defender   | Sonnet 4.6 | Argue soundness of the change    |
 | Oracle     | Opus 4.7   | Issue binding PASS or VETO       |
-| Utility    | Haiku 4.5  | Diff summaries, formatting       |
+| Utility    | Haiku 4.5  | Reserved for future summarization (utils/formatting.py is currently stdlib-only) |
 
 Models are Anthropic by default. The wrapper in utils/api.py also supports
 OpenRouter as a routing backend (selected via the BENCH_PROVIDER env var) so
