@@ -170,6 +170,11 @@ def _anthropic_call(
         )
     except anthropic.AnthropicError as e:
         raise _ProviderError(f"anthropic: {type(e).__name__}: {e}") from e
+    except (TypeError, ValueError) as e:
+        # Config-level failures from the SDK (missing/invalid ANTHROPIC_API_KEY,
+        # malformed kwargs) are raised as stdlib exceptions, not AnthropicError.
+        # Treat them as API_ERROR so call_model's non-raising contract holds.
+        raise _ProviderError(f"anthropic config: {type(e).__name__}: {e}") from e
 
     text: str = ""
     content = getattr(response, "content", None)
@@ -221,6 +226,13 @@ def _openrouter_call(
         )
     except openai.OpenAIError as e:
         raise _ProviderError(f"openrouter: {type(e).__name__}: {e}") from e
+    except (TypeError, ValueError) as e:
+        # Config-level failures (missing/invalid OPENROUTER_API_KEY, malformed
+        # kwargs) surface as stdlib exceptions, not OpenAIError. Treat them
+        # as API_ERROR so call_model's non-raising contract holds.
+        raise _ProviderError(
+            f"openrouter config: {type(e).__name__}: {e}"
+        ) from e
 
     text: str = ""
     choices = getattr(response, "choices", None)
