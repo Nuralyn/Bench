@@ -1255,5 +1255,315 @@
       }
     },
     "entry_hash": "ceeb84a9a42455be740fabe3c7ff365dc5ae7179a376e6c61d96bd9084c52b2c"
+  },
+  {
+    "entry_id": "d9a5dea9-ddf3-4cca-8716-438678e1758b",
+    "timestamp": "2026-04-22T05:29:59.308781+00:00",
+    "previous_hash": "ceeb84a9a42455be740fabe3c7ff365dc5ae7179a376e6c61d96bd9084c52b2c",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "C:\\Users\\mstar\\Bench\\tests\\test_formatting.py",
+      "tool": "Write",
+      "diff_summary": {
+        "file_path": "C:\\Users\\mstar\\Bench\\tests\\test_formatting.py",
+        "change_type": "create",
+        "content": "\"\"\"Tests for utils.formatting rendering helpers.\n\nCovers the branches flagged by the C-005 audit of utils/formatting.py:\nformat_diff_for_display across its four shape branches plus malformed\nvariants, _truncate across its three decision paths, and _indent across\nits two. Uses stdlib unittest to match project conventions\n(see tests/test_diff.py \u00e2\u20ac\u201d no pytest in requirements.txt).\n\nRun: python -m unittest tests.test_formatting -v\n\"\"\"\n\nimport sys\nimport unittest\nfrom pathlib import Path\n\n_REPO_ROOT: Path = Path(__file__).resolve().parent.parent\nif str(_REPO_ROOT) not in sys.path:\n    sys.path.insert(0, str(_REPO_ROOT))\n\nfrom utils.formatting import (  # noqa: E402\n    _indent,\n    _truncate,\n    format_diff_for_display,\n)\n\n\nclass FormatDiffForDisplayTests(unittest.TestCase):\n    def test_non_dict_input_returns_no_diff_info(self) -> None:\n        self.assertEqual(\n            format_diff_for_display(\"not a dict\"),  # type: ignore[arg-type]\n            \"(no diff info)\",\n        )\n\n    def test_empty_dict_returns_no_diff_info(self) -> None:\n        self.assertEqual(format_diff_for_display({}), \"(no diff info)\")\n\n    def test_write_shape_renders_file_and_body(self) -> None:\n        result: str = format_diff_for_display(\n            {\"file_path\": \"foo.py\", \"content\": \"print('hi')\"}\n        )\n        self.assertEqual(result, \"Write: foo.py\\n---\\nprint('hi')\")\n\n    def test_edit_shape_renders_old_and_new(self) -> None:\n        result: str = format_diff_for_display(\n            {\"file_path\": \"foo.py\", \"old_string\": \"a\", \"new_string\": \"b\"}\n        )\n        self.assertEqual(\n            result,\n            \"Edit: foo.py\\n--- old ---\\na\\n--- new ---\\nb\",\n        )\n\n    def test_multi_edit_with_valid_edits_renders_each_entry(self) -> None:\n        result: str = format_diff_for_display(\n            {\n                \"file_path\": \"foo.py\",\n                \"edits\": [\n                    {\"old_string\": \"a\", \"new_string\": \"b\"},\n                    {\"old_string\": \"c\", \"new_string\": \"d\"},\n                ],\n            }\n        )\n        self.assertIn(\"MultiEdit: foo.py\", result)\n        self.assertIn(\"[1]\", result)\n        self.assertIn(\"[2]\", result)\n\n    def test_multi_edit_with_non_list_edits_hits_malformed_field_branch(\n        self,\n    ) -> None:\n        result: str = format_diff_for_display(\n            {\"file_path\": \"foo.py\", \"edits\": \"not a list\"}\n        )\n        self.assertIn(\"(edits field is not a list: got str)\", result)\n\n    def test_multi_edit_with_non_dict_entry_hits_malformed_entry_branch(\n        self,\n    ) -> None:\n        result: str = format_diff_for_display(\n            {\"file_path\": \"foo.py\", \"edits\": [\"not a dict\"]}\n        )\n        self.assertIn(\"(malformed edit entry)\", result)\n\n    def test_unknown_shape_hits_keys_fallback_branch(self) -> None:\n        result: str = format_diff_for_display(\n            {\"file_path\": \"foo.py\", \"weird_key\": \"x\"}\n        )\n        self.assertEqual(\n            result,\n            \"Unknown diff shape for foo.py (keys: file_path, weird_key)\",\n        )\n\n\nclass TruncateTests(unittest.TestCase):\n    def test_short_text_returns_unchanged(self) -> None:\n        self.assertEqual(_truncate(\"hello\", 10), \"hello\")\n\n    def test_long_text_is_truncated_with_suffix(self) -> None:\n        text: str = \"x\" * 100\n        result: str = _truncate(text, 10)\n        self.assertEqual(\n            result, \"x\" * 10 + \" ... [truncated, 100 chars total]\"\n        )\n\n    def test_non_positive_max_length_disables_truncation(self) -> None:\n        text: str = \"x\" * 100\n        self.assertEqual(_truncate(text, 0), text)\n\n\nclass IndentTests(unittest.TestCase):\n    def test_normal_string_gets_prefix_on_each_line(self) -> None:\n        self.assertEqual(_indent(\"a\\nb\", prefix=\"  \"), \"  a\\n  b\")\n\n    def test_empty_string_returns_bare_prefix(self) -> None:\n        self.assertEqual(_indent(\"\", prefix=\"  \"), \"  \")\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n",
+        "formatted_diff": "+\"\"\"Tests for utils.formatting rendering helpers.\n+\n+Covers the branches flagged by the C-005 audit of utils/formatting.py:\n+format_diff_for_display across its four shape branches plus malformed\n+variants, _truncate across its three decision paths, and _indent across\n+its two. Uses stdlib unittest to match project conventions\n+(see tests/test_diff.py \u00e2\u20ac\u201d no pytest in requirements.txt).\n+\n+Run: python -m unittest tests.test_formatting -v\n+\"\"\"\n+\n+import sys\n+import unittest\n+from pathlib import Path\n+\n+_REPO_ROOT: Path = Path(__file__).resolve().parent.parent\n+if str(_REPO_ROOT) not in sys.path:\n+    sys.path.insert(0, str(_REPO_ROOT))\n+\n+from utils.formatting import (  # noqa: E402\n+    _indent,\n+    _truncate,\n+    format_diff_for_display,\n+)\n+\n+\n+class FormatDiffForDisplayTests(unittest.TestCase):\n+    def test_non_dict_input_returns_no_diff_info(self) -> None:\n+        self.assertEqual(\n+            format_diff_for_display(\"not a dict\"),  # type: ignore[arg-type]\n+            \"(no diff info)\",\n+        )\n+\n+    def test_empty_dict_returns_no_diff_info(self) -> None:\n+        self.assertEqual(format_diff_for_display({}), \"(no diff info)\")\n+\n+    def test_write_shape_renders_file_and_body(self) -> None:\n+        result: str = format_diff_for_display(\n+            {\"file_path\": \"foo.py\", \"content\": \"print('hi')\"}\n+        )\n+        self.assertEqual(result, \"Write: foo.py\\n---\\nprint('hi')\")\n+\n+    def test_edit_shape_renders_old_and_new(self) -> None:\n+        result: str = format_diff_for_display(\n+            {\"file_path\": \"foo.py\", \"old_string\": \"a\", \"new_string\": \"b\"}\n+        )\n+        self.assertEqual(\n+            result,\n+            \"Edit: foo.py\\n--- old ---\\na\\n--- new ---\\nb\",\n+        )\n+\n+    def test_multi_edit_with_valid_edits_renders_each_entry(self) -> None:\n+        result: str = format_diff_for_display(\n+            {\n+                \"file_path\": \"foo.py\",\n+                \"edits\": [\n+                    {\"old_string\": \"a\", \"new_string\": \"b\"},\n+                    {\"old_string\": \"c\", \"new_string\": \"d\"},\n+                ],\n+            }\n+        )\n+        self.assertIn(\"MultiEdit: foo.py\", result)\n+        self.assertIn(\"[1]\", result)\n+        self.assertIn(\"[2]\", result)\n+\n+    def test_multi_edit_with_non_list_edits_hits_malformed_field_branch(\n+        self,\n+    ) -> None:\n+        result: str = format_diff_for_display(\n+            {\"file_path\": \"foo.py\", \"edits\": \"not a list\"}\n+        )\n+        self.assertIn(\"(edits field is not a list: got str)\", result)\n+\n+    def test_multi_edit_with_non_dict_entry_hits_malformed_entry_branch(\n+        self,\n+    ) -> None:\n+        result: str = format_diff_for_display(\n+            {\"file_path\": \"foo.py\", \"edits\": [\"not a dict\"]}\n+        )\n+        self.assertIn(\"(malformed edit entry)\", result)\n+\n+    def test_unknown_shape_hits_keys_fallback_branch(self) -> None:\n+        result: str = format_diff_for_display(\n+            {\"file_path\": \"foo.py\", \"weird_key\": \"x\"}\n+        )\n+        self.assertEqual(\n+            result,\n+            \"Unknown diff shape for foo.py (keys: file_path, weird_key)\",\n+        )\n+\n+\n+class TruncateTests(unittest.TestCase):\n+    def test_short_text_returns_unchanged(self) -> None:\n+        self.assertEqual(_truncate(\"hello\", 10), \"hello\")\n+\n+    def test_long_text_is_truncated_with_suffix(self) -> None:\n+        text: str = \"x\" * 100\n+        result: str = _truncate(text, 10)\n+        self.assertEqual(\n+            result, \"x\" * 10 + \" ... [truncated, 100 chars total]\"\n+        )\n+\n+    def test_non_positive_max_length_disables_truncation(self) -> None:\n+        text: str = \"x\" * 100\n+        self.assertEqual(_truncate(text, 0), text)\n+\n+\n+class IndentTests(unittest.TestCase):\n+    def test_normal_string_gets_prefix_on_each_line(self) -> None:\n+        self.assertEqual(_indent(\"a\\nb\", prefix=\"  \"), \"  a\\n  b\")\n+\n+    def test_empty_string_returns_bare_prefix(self) -> None:\n+        self.assertEqual(_indent(\"\", prefix=\"  \"), \"  \")\n+\n+\n+if __name__ == \"__main__\":\n+    unittest.main()\n"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-003",
+          "severity": "OBSERVATION",
+          "location": "test_formatting.py:19-23",
+          "evidence": "from utils.formatting import (  # noqa: E402\n    _indent,\n    _truncate,\n    format_diff_for_display,\n)",
+          "reasoning": "The test imports private helpers (_indent, _truncate) from utils.formatting. This is not a dependency violation per se \u2014 no new packages are introduced and all imports are stdlib (sys, unittest, pathlib) plus the existing internal module utils.formatting. However, if _indent and _truncate are not currently exported or documented as part of the public/internal API surface of utils/formatting.py, importing them in tests couples the test suite to implementation internals that could be refactored without notice. This is a weak observation rather than a violation, since C-003 targets undeclared external dependencies, not internal module imports."
+        },
+        {
+          "constraint_id": "C-005",
+          "severity": "OBSERVATION",
+          "location": "test_formatting.py:97-99",
+          "evidence": "def test_empty_string_returns_bare_prefix(self) -> None:\n    self.assertEqual(_indent(\"\", prefix=\"  \"), \"  \")",
+          "reasoning": "The test asserts that _indent(\"\", prefix=\"  \") returns \"  \" (bare prefix). This behaviour \u2014 returning just the prefix for an empty string \u2014 may be an assumption about implementation detail rather than a verified contract. If the actual implementation of _indent(\"\") returns \"\" or raises, this test will fail at runtime and surface a discrepancy rather than a coverage gap. This is an observation about test correctness, not a constitutional violation."
+        },
+        {
+          "constraint_id": "C-005",
+          "severity": "OBSERVATION",
+          "location": "test_formatting.py:85-90",
+          "evidence": "def test_long_text_is_truncated_with_suffix(self) -> None:\n    text: str = \"x\" * 100\n    result: str = _truncate(text, 10)\n    self.assertEqual(\n        result, \"x\" * 10 + \" ... [truncated, 100 chars total]\"\n    )",
+          "reasoning": "The exact truncation suffix string '\" ... [truncated, 100 chars total]\"' is asserted literally. This is an implementation assumption. If utils/formatting.py uses a slightly different format string, this test will fail. Again, this is an observation about test fragility and potential false failure rather than a constitutional concern \u2014 the coverage intent (C-005 compliance) is sound."
+        }
+      ],
+      "_tokens": {
+        "input": 4390,
+        "output": 668
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "REBUT",
+          "argument": "The Challenger correctly self-diagnoses this as a weak observation rather than a C-003 violation. C-003 targets undeclared *external* dependencies (additions to requirements.txt, package.json, etc.). All imports here are either stdlib (sys, unittest, pathlib) or the existing internal module utils.formatting \u2014 no new packages are introduced and nothing needs to be declared anywhere. Importing private helpers (_indent, _truncate) is a standard test-suite pattern for achieving branch coverage of implementation internals; the docstring even explicitly cites C-005 coverage as the motivation. The coupling concern (internals may be refactored) is a test-design observation, not a constitutional constraint.",
+          "evidence": "Constitution C-003: 'Any new import or dependency must be explicitly declared. No silent additions to requirements.txt, package.json, or equivalent.' \u2014 The imports are all stdlib or intra-repo; no manifest file is touched."
+        },
+        {
+          "finding_index": 1,
+          "position": "REBUT",
+          "argument": "This is not a constitutional finding at all \u2014 the Challenger acknowledges it themselves. The test asserts a specific behaviour of _indent('') and will either pass (confirming the contract) or fail (surfacing a discrepancy in the implementation). Either outcome is a net positive: passing tests verify the contract, failing tests reveal a mismatch. C-005 requires that new branches have corresponding test cases, which this satisfies. Whether the assertion is correct against the actual implementation is a runtime question, not a governance one.",
+          "evidence": "test_formatting.py:97-99 \u2014 the empty-string branch is explicitly tested, which is precisely what C-005 demands. No constitutional constraint is implicated."
+        },
+        {
+          "finding_index": 2,
+          "position": "REBUT",
+          "argument": "Same reasoning as finding 1. The Challenger acknowledges 'the coverage intent (C-005 compliance) is sound.' Asserting a literal suffix string is a common, valid testing pattern; if the implementation diverges, the test fails loudly \u2014 which is desirable behaviour. This is test fragility commentary, not a constitutional violation. The change fully satisfies C-005 for the _truncate long-text branch.",
+          "evidence": "test_formatting.py:85-90 \u2014 three distinct _truncate paths are covered (short text, long text, non-positive max_length), which is exactly the branch coverage C-005 requires."
+        }
+      ],
+      "summary": "All three Challenger findings are self-described observations rather than constitutional violations; the change is a well-structured, stdlib-only test file that directly satisfies C-005 coverage requirements without touching any other constraint domain.",
+      "_tokens": {
+        "input": 5103,
+        "output": 682
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The proposed change creates a new test file tests/test_formatting.py that adds unit tests for utils.formatting helpers. The Challenger raised three findings, all self-classified as OBSERVATIONS rather than violations, and the Defender correctly rebuts each by pointing out they are test-design commentary rather than constitutional breaches. On independent review against the full constitution: C-001 is not applicable (no error-handling code). C-002 is satisfied: the change only creates a test file in the tests/ directory, which is the natural scope for adding test coverage. C-003 is satisfied: all imports are stdlib (sys, unittest, pathlib) or the existing internal module utils.formatting; no manifest additions. C-004 is not applicable (no type annotations removed; new code is fully annotated). C-005 is actively satisfied: the file adds branch-level coverage for format_diff_for_display (four shapes plus malformed variants), _truncate (three paths), and _indent (two paths). C-006 is satisfied (no credentials). C-007 is not applicable: tests/ is not part of the governance pipeline (challenger/defender/oracle/ledger/constitution). C-008 is not applicable (no ledger interaction). The Challenger's observations about test fragility (literal suffix strings, private-helper imports) are legitimate engineering concerns but not encoded in the constitution.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No exception-handling code in this test file."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change creates a single new file under tests/, appropriate scope for adding test coverage."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "SATISFIED",
+          "note": "Per Defender rebuttal #0: all imports are stdlib or the existing intra-repo utils.formatting module. No manifest files modified."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "All new functions carry explicit type annotations (-> None, : str, : Path); no existing annotations weakened."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "SATISFIED",
+          "note": "File explicitly targets C-005 coverage for format_diff_for_display, _truncate, and _indent branches, as affirmed by both Challenger ('coverage intent is sound') and Defender."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "No credentials, keys, or tokens in source."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "tests/test_formatting.py is not part of the governance pipeline (challenger/defender/oracle/ledger/constitution)."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger interaction."
+        }
+      ],
+      "advisories": [
+        "Challenger finding #0: Importing private helpers (_indent, _truncate) couples the test suite to implementation internals. Not a violation, but if utils.formatting is refactored these tests may need updates.",
+        "Challenger findings #1 and #2: Tests assert literal output strings (bare prefix for empty _indent input, exact '... [truncated, N chars total]' suffix). If these assertions do not match the actual implementation, tests will fail at runtime. Recommend running the suite once against HEAD to confirm the contracts before merge.",
+        "The module docstring contains a mojibake artifact ('\\u00e2\\u20ac\\u201d') where an em-dash was likely intended. Cosmetic; not governed."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 8037,
+        "output": 1359
+      }
+    },
+    "entry_hash": "0503876ddd891662b637969cef802bd57c3a5df64abaf7db46793f083d63a90f"
+  },
+  {
+    "entry_id": "3b9cedf1-34d8-4d34-b8eb-12db53616033",
+    "timestamp": "2026-04-22T05:30:15.533383+00:00",
+    "previous_hash": "0503876ddd891662b637969cef802bd57c3a5df64abaf7db46793f083d63a90f",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "C:\\Users\\mstar\\Bench\\CLAUDE.md",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "C:\\Users\\mstar\\Bench\\CLAUDE.md",
+        "change_type": "modify",
+        "old_string": "    formatting.py         # Haiku utility calls",
+        "new_string": "    formatting.py         # Stdlib diff-info formatting for pipeline display"
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 1450,
+        "output": 26
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change is a single-line documentation update to CLAUDE.md, modifying an inline comment describing the purpose of formatting.py from 'Haiku utility calls' to 'Stdlib diff-info formatting for pipeline display'. This is a documentation-only change with no executable impact. The Challenger found no violations and the Defender confirmed. I independently reviewed the change against all eight constitutional constraints: C-001 (error handling) is not applicable as no code is changed; C-002 (scope boundary) cannot be evaluated without task context but the change is minimal and self-contained to a documentation file; C-003 (dependency declaration) is not applicable, no imports changed; C-004 (type safety) is not applicable, no annotations touched; C-005 (test coverage) is not applicable, no new logic; C-006 (secrets) no credentials introduced; C-007 (governance pipeline integrity) \u2014 CLAUDE.md is documentation, not enforcement code, and the edit clarifies rather than weakens documentation; C-008 (ledger immutability) not applicable. No violations identified.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Documentation change, no error-handling code affected."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is confined to a single comment line in CLAUDE.md."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependencies introduced."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No type annotations modified."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new logic introduced."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "No secrets or credentials present in the change."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "CLAUDE.md is documentation; the edit clarifies the role of formatting.py and does not weaken any enforcement mechanism."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger entries touched."
+        }
+      ],
+      "advisories": [
+        "Ensure the updated description ('Stdlib diff-info formatting for pipeline display') accurately reflects formatting.py's current implementation. If formatting.py still invokes Haiku or any LLM, the new comment would become misleading documentation."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 2365,
+        "output": 998
+      }
+    },
+    "entry_hash": "42184739825c9fffc03c0815bb2e7448e6e2c90424c997996f5f16e9e8284912"
+  },
+  {
+    "entry_id": "46d21310-e9b9-443b-9dd3-cba82e5a0d61",
+    "timestamp": "2026-04-22T05:30:32.524046+00:00",
+    "previous_hash": "42184739825c9fffc03c0815bb2e7448e6e2c90424c997996f5f16e9e8284912",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "C:\\Users\\mstar\\Bench\\CLAUDE.md",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "C:\\Users\\mstar\\Bench\\CLAUDE.md",
+        "change_type": "modify",
+        "old_string": "| Utility    | Haiku 4.5  | Diff summaries, formatting       |",
+        "new_string": "| Utility    | Haiku 4.5  | Reserved for future summarization (utils/formatting.py is currently stdlib-only) |"
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 1478,
+        "output": 26
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The proposed change is a documentation-only modification to CLAUDE.md, updating a single table row to clarify that the Utility/Haiku 4.5 model assignment is reserved for future use and noting that utils/formatting.py is currently stdlib-only. The Challenger found no issues (status: CLEAR) and the Defender confirmed. Reviewing independently against all eight constraints: C-001 (error handling) is not applicable to documentation. C-002 (scope boundary) is satisfied as the change is confined to a single file and row. C-003 (dependencies) is not applicable \u2014 no imports or dependencies are added. C-004 (type safety) is not applicable to markdown. C-005 (test coverage) is not applicable as no new logic is introduced. C-006 (secrets) is satisfied \u2014 no credentials present. C-007 (governance pipeline integrity) requires scrutiny since CLAUDE.md is project documentation that may guide governance behavior; however, the change only clarifies current implementation status (stdlib-only) and does not weaken enforcement, bypass verification, or disable logging. C-008 (ledger immutability) is not applicable. No constitutional violations identified.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Documentation change; no error handling logic involved."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is limited to a single line in CLAUDE.md."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependency manifest touched."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Markdown file; no type annotations."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new logic introduced."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "No secrets or credentials in the diff."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "The edit clarifies current state (Haiku reserved, utils/formatting.py stdlib-only) without weakening any enforcement, verification, or logging behavior in the governance pipeline."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger entries touched."
+        }
+      ],
+      "advisories": [
+        "Ensure the claim that 'utils/formatting.py is currently stdlib-only' is factually accurate at the time of merge; stale documentation about governance infrastructure can mislead future contributors. If utils/formatting.py later gains non-stdlib dependencies, this line should be updated accordingly."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 2396,
+        "output": 1065
+      }
+    },
+    "entry_hash": "33af0b3f3648d3378534dbbebc9354462b6ed5d0eee453578d14e25c8ed91aa4"
   }
 ]
