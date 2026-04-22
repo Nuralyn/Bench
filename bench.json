@@ -1,0 +1,73 @@
+{
+  "constitution": "bench-v1",
+  "version": 1,
+  "author": "Nuralyn LLC",
+  "created": "2026-04-21T00:00:00Z",
+  "description": "Constitutional constraints for the Bench governance pipeline",
+  "constraints": [
+    {
+      "id": "C-001",
+      "name": "No Silent Error Swallowing",
+      "scope": "error-handling",
+      "rule": "All catch blocks must log, re-throw, or return a typed error. Empty catch blocks and catch blocks that only contain comments are violations.",
+      "severity": "veto",
+      "rationale": "Silent failures compound into untraceable production bugs. A governed codebase must fail visibly."
+    },
+    {
+      "id": "C-002",
+      "name": "Scope Boundary Enforcement",
+      "scope": "scope-control",
+      "rule": "Changes must not modify files outside the stated task boundary. If the task says 'modify challenger.py', changes to oracle.py are a violation unless explicitly justified in the task description.",
+      "severity": "veto",
+      "rationale": "Scope creep in AI-generated code is the primary trust failure mode. Unbounded changes are ungovernable."
+    },
+    {
+      "id": "C-003",
+      "name": "Dependency Declaration",
+      "scope": "dependencies",
+      "rule": "Any new import or dependency must be explicitly declared. No silent additions to requirements.txt, package.json, or equivalent.",
+      "severity": "veto",
+      "rationale": "Undeclared dependencies are supply chain attack vectors and reproducibility failures."
+    },
+    {
+      "id": "C-004",
+      "name": "Type Safety Preservation",
+      "scope": "type-safety",
+      "rule": "Functions must not remove or weaken existing type annotations. Adding 'Any' type or removing a typed return annotation is a violation.",
+      "severity": "veto",
+      "rationale": "Type annotations are governance infrastructure. Weakening them degrades the ability to reason about correctness."
+    },
+    {
+      "id": "C-005",
+      "name": "Test Coverage for New Logic",
+      "scope": "testing",
+      "rule": "New functions or branches of logic must have corresponding test cases or an explicit justification for why testing is deferred.",
+      "severity": "warning",
+      "rationale": "Untested code is unverified code. Governance without verification is theater."
+    },
+    {
+      "id": "C-006",
+      "name": "No Hardcoded Secrets or Credentials",
+      "scope": "security",
+      "rule": "No API keys, passwords, tokens, or credentials may appear in source code. All secrets must be loaded from environment variables or a secrets manager.",
+      "severity": "veto",
+      "rationale": "Hardcoded credentials are the most common and most preventable security failure."
+    },
+    {
+      "id": "C-007",
+      "name": "Governance Pipeline Integrity",
+      "scope": "self-governance",
+      "rule": "Changes to the governance pipeline itself (challenger, defender, oracle, ledger, constitution) must not weaken enforcement, bypass verification, or disable logging.",
+      "severity": "veto",
+      "rationale": "A governance system that can silently weaken itself is not a governance system. This is the self-cannibalizing constraint."
+    },
+    {
+      "id": "C-008",
+      "name": "Ledger Immutability",
+      "scope": "evidence",
+      "rule": "No code may modify, delete, or overwrite existing ledger entries. New entries may only be appended. The hash chain must remain intact.",
+      "severity": "veto",
+      "rationale": "The ledger is the evidence chain. Tampering with evidence is the highest governance violation."
+    }
+  ]
+}
