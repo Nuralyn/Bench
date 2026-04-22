@@ -10,6 +10,8 @@ governance pipeline running in parallel.
 """
 
 import sys
+import tempfile
+import webbrowser
 from typing import Any
 
 from ledger.chain import load_ledger
@@ -18,6 +20,7 @@ from pipeline.constitution import (
     ConstitutionError,
     load_constitution_snapshot,
 )
+from utils.viewer import generate_viewer_html
 
 _HASH_PREFIX_LEN: int = 12
 _DEFAULT_LEDGER_TAIL: int = 10
@@ -192,6 +195,40 @@ def cmd_constitution() -> int:
         print(f"  {cid}  [{severity:7}]  {cname}")
         print(f"           {rule}")
 
+    return 0
+
+
+def cmd_viewer() -> int:
+    """Generate the HTML ledger viewer, write it to a tempfile, open browser."""
+    try:
+        html_content: str = generate_viewer_html()
+    except Exception as e:
+        print(
+            f"[bench cli] viewer generation failed: {type(e).__name__}: {e}",
+            file=sys.stderr,
+        )
+        return 1
+
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=".html",
+            prefix="bench-viewer-",
+            delete=False,
+            encoding="utf-8",
+        ) as fh:
+            fh.write(html_content)
+            tmp_path: str = fh.name
+    except OSError as e:
+        print(f"[bench cli] viewer write failed: {e}", file=sys.stderr)
+        return 1
+
+    print(f"Bench viewer written to: {tmp_path}")
+    if not webbrowser.open(f"file://{tmp_path}"):
+        print(
+            "[bench cli] could not auto-open browser; open the path above manually.",
+            file=sys.stderr,
+        )
     return 0
 
 

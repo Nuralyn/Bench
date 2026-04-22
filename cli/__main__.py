@@ -12,6 +12,7 @@ from cli.commands import (
     cmd_ledger,
     cmd_stats,
     cmd_verify,
+    cmd_viewer,
 )
 
 
@@ -23,6 +24,7 @@ _USAGE: str = (
     "  ledger [--all] [--vetoes]  Show ledger entries (default: last 10)\n"
     "  stats                      Governance summary statistics\n"
     "  constitution               Show current constitutional constraints\n"
+    "  viewer                     Open an HTML verdict viewer in the browser\n"
 )
 
 
@@ -45,6 +47,8 @@ def main(argv: list[str]) -> int:
         return cmd_stats()
     if command == "constitution":
         return cmd_constitution()
+    if command == "viewer":
+        return cmd_viewer()
     if command in ("-h", "--help", "help"):
         print(_USAGE, end="")
         return 0
