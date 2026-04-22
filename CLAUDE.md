@@ -63,7 +63,10 @@ bench/
 | Oracle     | Opus 4.7   | Issue binding PASS or VETO       |
 | Utility    | Haiku 4.5  | Diff summaries, formatting       |
 
-All models are Anthropic. No OpenRouter. No third-party providers.
+Models are Anthropic by default. The wrapper in utils/api.py also supports
+OpenRouter as a routing backend (selected via the BENCH_PROVIDER env var) so
+the same Anthropic models can be reached through either path. Direct calls to
+non-Anthropic model families remain out of scope.
 
 ## Rules
 
@@ -120,12 +123,28 @@ The constitution lives in bench.json. Current constraints:
 
 ## API Configuration
 
-```python
-# Anthropic API client setup
-import anthropic
-client = anthropic.Anthropic()  # Uses ANTHROPIC_API_KEY env var
+The LLM wrapper lives at `utils/api.py` and exposes a single
+`call_model(model, system_prompt, user_content, max_tokens=4096) -> dict`
+function. The provider is selected at call time by the `BENCH_PROVIDER`
+environment variable; the function signature is identical for both backends.
 
-# Model strings
+```python
+# Provider: anthropic (default if BENCH_PROVIDER is unset)
+import anthropic
+client = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY
+
+# Provider: openrouter (BENCH_PROVIDER=openrouter)
+import openai
+client = openai.OpenAI(
+    base_url="https://openrouter.ai/api/v1",
+    api_key=os.environ["OPENROUTER_API_KEY"],
+)
+# Model strings are auto-prefixed with "anthropic/" on this path,
+# e.g. "claude-sonnet-4-6" -> "anthropic/claude-sonnet-4-6".
+# The openai SDK is a soft dependency — install it only if you set
+# BENCH_PROVIDER=openrouter.
+
+# Model strings (same on both providers; routing handles the prefix)
 CHALLENGER_MODEL = "claude-sonnet-4-6"
 DEFENDER_MODEL = "claude-sonnet-4-6"
 ORACLE_MODEL = "claude-opus-4-7"
