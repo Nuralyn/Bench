@@ -43,8 +43,13 @@ See [bench.json](bench.json) for the current constraints.
 This tool was built under its own governance. Every change in this codebase
 was challenged, defended, ruled on, and recorded by Bench itself.
 
-Run `python -m bench verify` to confirm the ledger's integrity.
-Run `python -m bench stats` to see the full governance history.
+During the build, Bench vetoed a change to its own governance pipeline code
+under constraint C-007 (governance pipeline integrity). The change would have
+reduced fallback coverage in the hook entry point. It was corrected and
+re-submitted. Ledger entry #8 is the receipt.
+
+Run `python -m cli verify` to confirm the ledger's integrity.
+Run `python -m cli stats` to see the full governance history.
 
 ## Quick Start
 
@@ -69,9 +74,38 @@ cp bench.json /your-project/bench.json
 # Edit bench.json to add your own rules
 
 # Verify governance
-python -m bench verify
-python -m bench stats
+python -m cli verify
+python -m cli stats
 ```
+
+## Provider Configuration
+
+Bench defaults to the Anthropic API. To route through OpenRouter instead, set the `BENCH_PROVIDER` environment variable:
+
+```bash
+# Default (Anthropic direct)
+export BENCH_PROVIDER=anthropic
+
+# OpenRouter
+export BENCH_PROVIDER=openrouter
+export OPENROUTER_API_KEY=your-key-here
+```
+
+When using OpenRouter, the same model roles apply (Challenger, Defender, Oracle). Only the routing changes.
+
+## Design Decisions
+
+### Fail-Open by Design
+
+Bench always exits with code 0. Flow control uses JSON `permissionDecision` fields (`"allow"` or `"deny"`), never exit codes. If the governance pipeline encounters an error (API timeout, malformed response, import failure), the change is allowed through with a stderr warning. This prevents Bench from becoming a blocker that stalls Claude Code on infrastructure failures. Governance should be a gate, not a wall.
+
+### Diff Hardening
+
+Not all tool inputs are simple text edits. Bench handles three edge cases:
+
+- **Binary files** (images, compiled output) are detected via null-byte sniffing and passed through with metadata only. The pipeline does not attempt to reason about binary content.
+- **Large diffs** exceeding 300 lines are truncated while preserving governance-critical lines: imports, function/class signatures, and exception handlers.
+- **New file creation** is typed as `change_type: "create"` so the pipeline knows it is reviewing a creation, not a modification.
 
 ## Models
 
@@ -80,7 +114,7 @@ python -m bench stats
 | Challenger | Sonnet 4.6 | Adversarial analysis        |
 | Defender   | Sonnet 4.6 | Soundness argument          |
 | Oracle     | Opus 4.7   | Binding verdict             |
-| Utility    | Haiku 4.5  | Diff summaries, formatting  |
+| Utility    | Haiku 4.5  | Reserved for future summarization (formatting is currently stdlib-only) |
 
 ## Built With
 

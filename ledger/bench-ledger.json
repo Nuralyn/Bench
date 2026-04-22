@@ -1565,5 +1565,541 @@
       }
     },
     "entry_hash": "33af0b3f3648d3378534dbbebc9354462b6ed5d0eee453578d14e25c8ed91aa4"
+  },
+  {
+    "entry_id": "c806700e-b0b0-4744-a778-d47a3b84a652",
+    "timestamp": "2026-04-22T05:40:00.325893+00:00",
+    "previous_hash": "33af0b3f3648d3378534dbbebc9354462b6ed5d0eee453578d14e25c8ed91aa4",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "C:\\Users\\mstar\\.claude\\plans\\context-bench-is-a-eventual-planet.md",
+      "tool": "Write",
+      "diff_summary": {
+        "file_path": "C:\\Users\\mstar\\.claude\\plans\\context-bench-is-a-eventual-planet.md",
+        "change_type": "create",
+        "content": "# README.md Correction Plan\n\n## Context\n\nREADME.md was drafted from a pre-sprint skeleton before the Bench codebase was complete. Six sections are now inaccurate relative to shipped behavior and `CLAUDE.md`:\n\n- CLI entry point documented as `python -m bench` (three occurrences) \u00e2\u20ac\u201d the real entry point is `python -m cli`.\n- Models table claims Haiku handles \"Diff summaries, formatting,\" but `utils/formatting.py` is pure stdlib; `CLAUDE.md` already corrected this.\n- `BENCH_PROVIDER` env var (anthropic/openrouter routing) is undocumented.\n- Fail-open design (always exit 0; JSON `permissionDecision` for flow control) is undocumented despite being a load-bearing design decision.\n- Diff hardening features (binary detection, large-diff truncation preserving governance-critical lines, `change_type: \"create\"` for new files) are undocumented.\n- Self-Governance section does not mention the C-007 veto event that was exercised during the build (ledger entry #8).\n\nThe intended outcome is a README that accurately reflects what was built and matches `CLAUDE.md`, without altering the existing tone, structure, or unrelated sections.\n\n## Scope\n\nOnly `C:\\Users\\mstar\\Bench\\README.md` is modified. No other files. No CLAUDE.md, bench.json, or source changes.\n\n## Edits\n\n### Edit 1 \u00e2\u20ac\u201d CLI entry point (three occurrences)\n\nReplace all `python -m bench` with `python -m cli`:\n\n- Line 46: `python -m bench verify` \u00e2\u2020\u2019 `python -m cli verify`\n- Line 47: `python -m bench stats` \u00e2\u2020\u2019 `python -m cli stats`\n- Line 72: `python -m bench verify` \u00e2\u2020\u2019 `python -m cli verify`\n- Line 73: `python -m bench stats` \u00e2\u2020\u2019 `python -m cli stats`\n\n(Four actual occurrences \u00e2\u20ac\u201d task said \"three\" but the Self-Governance block has two and Quick Start has two. All four need the fix to satisfy the verify step \"zero occurrences of `python -m bench` remain.\")\n\n### Edit 2 \u00e2\u20ac\u201d Models table Utility row (line 83)\n\nChange:\n\n```\n| Utility    | Haiku 4.5  | Diff summaries, formatting  |\n```\n\nto:\n\n```\n| Utility    | Haiku 4.5  | Reserved for future summarization (formatting is currently stdlib-only) |\n```\n\nColumn widths will expand; that is acceptable GitHub-flavored markdown.\n\n### Edit 3 \u00e2\u20ac\u201d New section: Provider Configuration\n\nInsert after Quick Start (after line 74), before Models (line 76):\n\n```markdown\n## Provider Configuration\n\nBench defaults to the Anthropic API. To route through OpenRouter instead, set the `BENCH_PROVIDER` environment variable:\n\n\u00e2\u20ac\u2039```bash\n# Default (Anthropic direct)\nexport BENCH_PROVIDER=anthropic\n\n# OpenRouter\nexport BENCH_PROVIDER=openrouter\nexport OPENROUTER_API_KEY=your-key-here\n\u00e2\u20ac\u2039```\n\nWhen using OpenRouter, the same model roles apply (Challenger, Defender, Oracle). Only the routing changes.\n```\n\n### Edit 4 \u00e2\u20ac\u201d New section: Design Decisions (Fail-Open + Diff Hardening)\n\nInsert after the new Provider Configuration section, before Models:\n\n```markdown\n## Design Decisions\n\n### Fail-Open by Design\n\nBench always exits with code 0. Flow control uses JSON `permissionDecision` fields (`\"allow\"` or `\"deny\"`), never exit codes. If the governance pipeline encounters an error (API timeout, malformed response, import failure), the change is allowed through with a stderr warning. This prevents Bench from becoming a blocker that stalls Claude Code on infrastructure failures. Governance should be a gate, not a wall.\n\n### Diff Hardening\n\nNot all tool inputs are simple text edits. Bench handles three edge cases:\n\n- **Binary files** (images, compiled output) are detected via null-byte sniffing and passed through with metadata only. The pipeline does not attempt to reason about binary content.\n- **Large diffs** exceeding 300 lines are truncated while preserving governance-critical lines: imports, function/class signatures, and exception handlers.\n- **New file creation** is typed as `change_type: \"create\"` so the pipeline knows it is reviewing a creation, not a modification.\n```\n\n### Edit 5 \u00e2\u20ac\u201d Strengthen Self-Governance section\n\nAfter the line \"This tool was built under its own governance. Every change in this codebase was challenged, defended, ruled on, and recorded by Bench itself.\" (lines 43\u00e2\u20ac\u201c44), insert:\n\n```\nDuring the build, Bench vetoed a change to its own governance pipeline code under constraint C-007 (governance pipeline integrity). The change would have reduced fallback coverage in the hook entry point. It was corrected and re-submitted. Ledger entry #8 is the receipt.\n```\n\n## Critical Files\n\n- `C:\\Users\\mstar\\Bench\\README.md` \u00e2\u20ac\u201d the only file modified.\n\n## Verification\n\n1. `grep -n \"python -m bench\" README.md` \u00e2\u2020\u2019 must return zero hits.\n2. `grep -n \"python -m cli\" README.md` \u00e2\u2020\u2019 must return four hits (two in Self-Governance, two in Quick Start).\n3. Visual check: Models table Utility row reads \"Reserved for future summarization (formatting is currently stdlib-only)\".\n4. Visual check: `## Provider Configuration` section present with anthropic + openrouter export examples.\n5. Visual check: `## Design Decisions` section present with `### Fail-Open by Design` and `### Diff Hardening` subsections.\n6. Visual check: Self-Governance section mentions C-007, ledger entry #8, and the veto.\n7. Run `python -m cli verify` \u00e2\u20ac\u201d chain must validate. (README edit touches no ledger inputs, so chain integrity should be unaffected; the governance hook itself will run on the Edit and append a new entry.)\n",
+        "formatted_diff": "+# README.md Correction Plan\n+\n+## Context\n+\n+README.md was drafted from a pre-sprint skeleton before the Bench codebase was complete. Six sections are now inaccurate relative to shipped behavior and `CLAUDE.md`:\n+\n+- CLI entry point documented as `python -m bench` (three occurrences) \u00e2\u20ac\u201d the real entry point is `python -m cli`.\n+- Models table claims Haiku handles \"Diff summaries, formatting,\" but `utils/formatting.py` is pure stdlib; `CLAUDE.md` already corrected this.\n+- `BENCH_PROVIDER` env var (anthropic/openrouter routing) is undocumented.\n+- Fail-open design (always exit 0; JSON `permissionDecision` for flow control) is undocumented despite being a load-bearing design decision.\n+- Diff hardening features (binary detection, large-diff truncation preserving governance-critical lines, `change_type: \"create\"` for new files) are undocumented.\n+- Self-Governance section does not mention the C-007 veto event that was exercised during the build (ledger entry #8).\n+\n+The intended outcome is a README that accurately reflects what was built and matches `CLAUDE.md`, without altering the existing tone, structure, or unrelated sections.\n+\n+## Scope\n+\n+Only `C:\\Users\\mstar\\Bench\\README.md` is modified. No other files. No CLAUDE.md, bench.json, or source changes.\n+\n+## Edits\n+\n+### Edit 1 \u00e2\u20ac\u201d CLI entry point (three occurrences)\n+\n+Replace all `python -m bench` with `python -m cli`:\n+\n+- Line 46: `python -m bench verify` \u00e2\u2020\u2019 `python -m cli verify`\n+- Line 47: `python -m bench stats` \u00e2\u2020\u2019 `python -m cli stats`\n+- Line 72: `python -m bench verify` \u00e2\u2020\u2019 `python -m cli verify`\n+- Line 73: `python -m bench stats` \u00e2\u2020\u2019 `python -m cli stats`\n+\n+(Four actual occurrences \u00e2\u20ac\u201d task said \"three\" but the Self-Governance block has two and Quick Start has two. All four need the fix to satisfy the verify step \"zero occurrences of `python -m bench` remain.\")\n+\n+### Edit 2 \u00e2\u20ac\u201d Models table Utility row (line 83)\n+\n+Change:\n+\n+```\n+| Utility    | Haiku 4.5  | Diff summaries, formatting  |\n+```\n+\n+to:\n+\n+```\n+| Utility    | Haiku 4.5  | Reserved for future summarization (formatting is currently stdlib-only) |\n+```\n+\n+Column widths will expand; that is acceptable GitHub-flavored markdown.\n+\n+### Edit 3 \u00e2\u20ac\u201d New section: Provider Configuration\n+\n+Insert after Quick Start (after line 74), before Models (line 76):\n+\n+```markdown\n+## Provider Configuration\n+\n+Bench defaults to the Anthropic API. To route through OpenRouter instead, set the `BENCH_PROVIDER` environment variable:\n+\n+\u00e2\u20ac\u2039```bash\n+# Default (Anthropic direct)\n+export BENCH_PROVIDER=anthropic\n+\n+# OpenRouter\n+export BENCH_PROVIDER=openrouter\n+export OPENROUTER_API_KEY=your-key-here\n+\u00e2\u20ac\u2039```\n+\n+When using OpenRouter, the same model roles apply (Challenger, Defender, Oracle). Only the routing changes.\n+```\n+\n+### Edit 4 \u00e2\u20ac\u201d New section: Design Decisions (Fail-Open + Diff Hardening)\n+\n+Insert after the new Provider Configuration section, before Models:\n+\n+```markdown\n+## Design Decisions\n+\n+### Fail-Open by Design\n+\n+Bench always exits with code 0. Flow control uses JSON `permissionDecision` fields (`\"allow\"` or `\"deny\"`), never exit codes. If the governance pipeline encounters an error (API timeout, malformed response, import failure), the change is allowed through with a stderr warning. This prevents Bench from becoming a blocker that stalls Claude Code on infrastructure failures. Governance should be a gate, not a wall.\n+\n+### Diff Hardening\n+\n+Not all tool inputs are simple text edits. Bench handles three edge cases:\n+\n+- **Binary files** (images, compiled output) are detected via null-byte sniffing and passed through with metadata only. The pipeline does not attempt to reason about binary content.\n+- **Large diffs** exceeding 300 lines are truncated while preserving governance-critical lines: imports, function/class signatures, and exception handlers.\n+- **New file creation** is typed as `change_type: \"create\"` so the pipeline knows it is reviewing a creation, not a modification.\n+```\n+\n+### Edit 5 \u00e2\u20ac\u201d Strengthen Self-Governance section\n+\n+After the line \"This tool was built under its own governance. Every change in this codebase was challenged, defended, ruled on, and recorded by Bench itself.\" (lines 43\u00e2\u20ac\u201c44), insert:\n+\n+```\n+During the build, Bench vetoed a change to its own governance pipeline code under constraint C-007 (governance pipeline integrity). The change would have reduced fallback coverage in the hook entry point. It was corrected and re-submitted. Ledger entry #8 is the receipt.\n+```\n+\n+## Critical Files\n+\n+- `C:\\Users\\mstar\\Bench\\README.md` \u00e2\u20ac\u201d the only file modified.\n+\n+## Verification\n+\n+1. `grep -n \"python -m bench\" README.md` \u00e2\u2020\u2019 must return zero hits.\n+2. `grep -n \"python -m cli\" README.md` \u00e2\u2020\u2019 must return four hits (two in Self-Governance, two in Quick Start).\n+3. Visual check: Models table Utility row reads \"Reserved for future summarization (formatting is currently stdlib-only)\".\n+4. Visual check: `## Provider Configuration` section present with anthropic + openrouter export examples.\n+5. Visual check: `## Design Decisions` section present with `### Fail-Open by Design` and `### Diff Hardening` subsections.\n+6. Visual check: Self-Governance section mentions C-007, ledger entry #8, and the veto.\n+7. Run `python -m cli verify` \u00e2\u20ac\u201d chain must validate. (README edit touches no ledger inputs, so chain integrity should be unaffected; the governance hook itself will run on the Edit and append a new entry.)\n"
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 5080,
+        "output": 26
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The proposed change creates a planning document at C:\\Users\\mstar\\.claude\\plans\\context-bench-is-a-eventual-planet.md. It is a markdown file describing intended future edits to README.md; it does not itself execute any code, modify source, or touch the governance pipeline, ledger, or constitution. The Challenger returned CLEAR with no findings, and the Defender confirmed. I reviewed the full constitution independently: C-001 (error handling) N/A (no code), C-002 (scope) satisfied as the file creation is within .claude/plans and is the only file written, C-003 (dependencies) N/A, C-004 (type safety) N/A, C-005 (tests) N/A for a planning doc, C-006 (secrets) satisfied \u2014 the OpenRouter example uses the placeholder 'your-key-here', not a real credential, C-007 (governance integrity) satisfied \u2014 the plan proposes only README documentation edits and does not alter challenger/defender/oracle/ledger/constitution code, C-008 (ledger immutability) satisfied \u2014 no ledger modification proposed. The plan itself, when later executed, will need to be re-governed per-edit, but that is future work, not this change.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Planning markdown contains no error-handling code."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Single file creation in .claude/plans; scope stated and honored."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependency manifests touched."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No typed code."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Documentation artifact; no new logic."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "OPENROUTER_API_KEY example uses placeholder 'your-key-here', not a real secret."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "Plan proposes only README documentation edits; no changes to challenger/defender/oracle/ledger/constitution modules."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "SATISFIED",
+          "note": "No ledger entries modified or deleted; this change will append a new entry via the hook as normal."
+        }
+      ],
+      "advisories": [
+        "The plan's own internal note flags a discrepancy ('task said three, actually four occurrences'). When the plan is executed, each README edit will be independently governed; ensure the executing change honors C-002 by confining edits to README.md as declared.",
+        "The plan contains mojibake (e.g., '\u00e2\u20ac\u201d', '\u00e2\u20ac\u00b9') suggesting an encoding issue in the source content. Not a constitutional violation, but the resulting file will contain garbled characters that should be cleaned up before the plan is executed."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 7234,
+        "output": 1156
+      }
+    },
+    "entry_hash": "30837fbe92f8e63dc17d39b850a59becc5c11632ad94c82577f34ab0b14fd71f"
+  },
+  {
+    "entry_id": "c67a003b-5c33-4823-9201-58e68896ba83",
+    "timestamp": "2026-04-22T05:41:08.891584+00:00",
+    "previous_hash": "30837fbe92f8e63dc17d39b850a59becc5c11632ad94c82577f34ab0b14fd71f",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "C:\\Users\\mstar\\Bench\\README.md",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "C:\\Users\\mstar\\Bench\\README.md",
+        "change_type": "modify",
+        "old_string": "python -m bench",
+        "new_string": "python -m cli"
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 1431,
+        "output": 26
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The proposed change modifies a single documentation string in README.md, replacing 'python -m bench' with 'python -m cli'. This is a documentation-only change with no code, dependency, type, or security implications. The Challenger found no issues (CLEAR) and the Defender confirmed. I independently evaluated all 8 constraints against the diff: C-001 (error handling) does not apply to markdown docs; C-002 (scope) is satisfied as the change is localized to README.md; C-003 (dependencies) is not applicable\u2014no imports changed; C-004 (type safety) not applicable to markdown; C-005 (tests) not applicable to docs; C-006 (secrets) satisfied\u2014no credentials present; C-007 (governance integrity) not applicable\u2014README is not an enforcement component; C-008 (ledger) not applicable. One advisory worth noting: the change asserts the invocation command is 'python -m cli' rather than 'python -m bench'. If the actual package entry point is still 'bench', this README edit would make documentation incorrect. However, correctness of documentation versus runtime behavior is not encoded as a constitutional constraint, so it does not trigger a veto.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error handling code in a markdown change."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is confined to README.md, a single file."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependency manifest modified."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Markdown contains no type annotations."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new logic introduced; doc-only edit."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "No secrets, tokens, or credentials present in the diff."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "README is documentation, not a governance pipeline component."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger entries touched."
+        }
+      ],
+      "advisories": [
+        "Verify that 'python -m cli' is actually the correct invocation for this project. If the package module is named 'bench', this README edit will produce incorrect user-facing documentation. Constitutional compliance does not guarantee factual correctness of documentation."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 2328,
+        "output": 1009
+      }
+    },
+    "entry_hash": "9cc9622b63c719bca8e831243c0369192204f5f14ae2a29e703bae2c85618eb7"
+  },
+  {
+    "entry_id": "d5d0f6bb-5c18-45f1-86dc-a1c5e344fabc",
+    "timestamp": "2026-04-22T05:41:25.408910+00:00",
+    "previous_hash": "9cc9622b63c719bca8e831243c0369192204f5f14ae2a29e703bae2c85618eb7",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "C:\\Users\\mstar\\Bench\\README.md",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "C:\\Users\\mstar\\Bench\\README.md",
+        "change_type": "modify",
+        "old_string": "| Utility    | Haiku 4.5  | Diff summaries, formatting  |",
+        "new_string": "| Utility    | Haiku 4.5  | Reserved for future summarization (formatting is currently stdlib-only) |"
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 1473,
+        "output": 26
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The proposed change is a documentation-only edit to README.md, modifying a single table row to clarify that the Utility tier (Haiku 4.5) is reserved for future summarization and that formatting is currently stdlib-only. No code, dependencies, types, error handling, secrets, governance pipeline logic, or ledger entries are affected. The Challenger reported CLEAR with no findings, and the Defender confirmed. I independently reviewed the change against all eight constraints and found no applicable violations: C-001 (no catch blocks), C-002 (README is the stated target, single-file scope), C-003 (no imports), C-004 (no type annotations), C-006 (no secrets introduced; the diff contains no credentials), C-007 (README is documentation, not pipeline logic\u2014no enforcement is weakened; in fact, the change increases accuracy by correcting a misleading claim), C-008 (no ledger interaction). C-005 is not applicable to documentation.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Documentation change; no error handling code involved."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is confined to README.md, the stated target file."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No dependencies or imports introduced."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No type annotations in a Markdown file."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new logic requiring test coverage."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "Diff text contains no credentials, keys, or tokens."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "README is descriptive documentation, not enforcement logic. Clarifying that Haiku is reserved (not yet wired to summarization) improves accuracy of governance-relevant documentation rather than weakening it."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger entries touched."
+        }
+      ],
+      "advisories": [
+        "Documentation now states Haiku 4.5 is 'reserved for future' use. Ensure the orchestrator/model-routing code matches this claim (i.e., Haiku is not silently invoked elsewhere). If Haiku is still referenced in dispatch logic, a follow-up change should either wire it up or remove the reference to keep documentation and behavior aligned."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 2386,
+        "output": 1027
+      }
+    },
+    "entry_hash": "5fa17b894bfdf9e18b85bcf550e928a069ba363cd3598f9540b7db1118a6435e"
+  },
+  {
+    "entry_id": "59c0c086-5773-4350-a39a-995984098615",
+    "timestamp": "2026-04-22T05:41:44.368727+00:00",
+    "previous_hash": "5fa17b894bfdf9e18b85bcf550e928a069ba363cd3598f9540b7db1118a6435e",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "C:\\Users\\mstar\\Bench\\README.md",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "C:\\Users\\mstar\\Bench\\README.md",
+        "change_type": "modify",
+        "old_string": "# Verify governance\npython -m cli verify\npython -m cli stats\n```\n\n## Models",
+        "new_string": "# Verify governance\npython -m cli verify\npython -m cli stats\n```\n\n## Provider Configuration\n\nBench defaults to the Anthropic API. To route through OpenRouter instead, set the `BENCH_PROVIDER` environment variable:\n\n```bash\n# Default (Anthropic direct)\nexport BENCH_PROVIDER=anthropic\n\n# OpenRouter\nexport BENCH_PROVIDER=openrouter\nexport OPENROUTER_API_KEY=your-key-here\n```\n\nWhen using OpenRouter, the same model roles apply (Challenger, Defender, Oracle). Only the routing changes.\n\n## Models"
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 1609,
+        "output": 26
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change is a documentation-only modification to README.md, adding a 'Provider Configuration' section describing the BENCH_PROVIDER environment variable and OpenRouter routing. No code, governance pipeline components, ledger, or constitution files are touched. The Challenger found no issues and the Defender confirmed. I independently verified the change against all eight constraints: (C-001) no error handling code present; (C-002) single-file documentation change within scope; (C-003) no dependency changes; (C-004) no type annotations affected; (C-005) no new logic requiring tests; (C-006) the documentation correctly instructs users to set OPENROUTER_API_KEY via environment variable with placeholder 'your-key-here', which is a non-secret instructional placeholder, not a hardcoded credential; (C-007) no changes to challenger/defender/oracle/ledger/constitution; (C-008) no ledger modifications.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Documentation change contains no error handling."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is confined to README.md."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependency manifests modified."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No type annotations involved."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new logic introduced; documentation only."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "The string 'your-key-here' is an instructional placeholder, and the doc explicitly directs users to use environment variables (OPENROUTER_API_KEY). No real credential is embedded."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "Governance pipeline files (challenger, defender, oracle, ledger, constitution) are untouched."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger interaction."
+        }
+      ],
+      "advisories": [
+        "Documentation asserts that OpenRouter routing is supported with the same model roles. Ensure the underlying provider abstraction code actually implements BENCH_PROVIDER=openrouter before users rely on this README; otherwise the docs will drift ahead of behavior. This is an advisory, not a violation."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 2591,
+        "output": 990
+      }
+    },
+    "entry_hash": "f3b8dd46e97d12345b8adc34caf6e8b17ad3930bb8240e5b0b4df77c262cd212"
+  },
+  {
+    "entry_id": "383a07f5-dcfd-4f6a-9861-237ff16b1e38",
+    "timestamp": "2026-04-22T05:42:06.783971+00:00",
+    "previous_hash": "f3b8dd46e97d12345b8adc34caf6e8b17ad3930bb8240e5b0b4df77c262cd212",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "C:\\Users\\mstar\\Bench\\README.md",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "C:\\Users\\mstar\\Bench\\README.md",
+        "change_type": "modify",
+        "old_string": "When using OpenRouter, the same model roles apply (Challenger, Defender, Oracle). Only the routing changes.\n\n## Models",
+        "new_string": "When using OpenRouter, the same model roles apply (Challenger, Defender, Oracle). Only the routing changes.\n\n## Design Decisions\n\n### Fail-Open by Design\n\nBench always exits with code 0. Flow control uses JSON `permissionDecision` fields (`\"allow\"` or `\"deny\"`), never exit codes. If the governance pipeline encounters an error (API timeout, malformed response, import failure), the change is allowed through with a stderr warning. This prevents Bench from becoming a blocker that stalls Claude Code on infrastructure failures. Governance should be a gate, not a wall.\n\n### Diff Hardening\n\nNot all tool inputs are simple text edits. Bench handles three edge cases:\n\n- **Binary files** (images, compiled output) are detected via null-byte sniffing and passed through with metadata only. The pipeline does not attempt to reason about binary content.\n- **Large diffs** exceeding 300 lines are truncated while preserving governance-critical lines: imports, function/class signatures, and exception handlers.\n- **New file creation** is typed as `change_type: \"create\"` so the pipeline knows it is reviewing a creation, not a modification.\n\n## Models"
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 1736,
+        "output": 26
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The proposed change is a documentation-only modification to README.md, adding a 'Design Decisions' section describing fail-open behavior and diff hardening. No source code, dependencies, type annotations, governance pipeline logic, or ledger entries are affected. Challenger found no issues and Defender confirmed. I reviewed the change against all eight constraints independently and found no applicable violations: C-001 (no catch blocks involved), C-002 (single file, README.md, appropriate scope for documentation), C-003 (no imports/dependencies), C-004 (no type annotations), C-006 (no secrets in the added prose), C-007 (documentation describes existing pipeline behavior but does not modify challenger/defender/oracle/ledger/constitution code), C-008 (ledger untouched). C-005 is not applicable to documentation.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Documentation change; no error handling code."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is confined to README.md."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependencies introduced."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No type annotations affected."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Documentation does not introduce new logic requiring tests."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "No secrets or credentials in added prose."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "README describes pipeline behavior but does not modify pipeline code or weaken enforcement. Documenting fail-open behavior is disclosure, not weakening."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Ledger not touched."
+        }
+      ],
+      "advisories": [
+        "The documented 'fail-open by design' behavior should be verified to match actual implementation. If the code ever diverges (e.g., begins using non-zero exit codes), this README section becomes misleading. Consider a test or assertion that enforces the documented contract.",
+        "The 300-line truncation threshold is now part of the documented contract. Changing it later without updating this section would create documentation drift."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 2783,
+        "output": 960
+      }
+    },
+    "entry_hash": "09d92743d1b8eb2653950867a92c5990809e4a31ee657bc522f063f4bac97b8a"
+  },
+  {
+    "entry_id": "0276d7fb-4ff1-4ef6-9466-9d7fe7df2335",
+    "timestamp": "2026-04-22T05:42:25.877185+00:00",
+    "previous_hash": "09d92743d1b8eb2653950867a92c5990809e4a31ee657bc522f063f4bac97b8a",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "C:\\Users\\mstar\\Bench\\README.md",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "C:\\Users\\mstar\\Bench\\README.md",
+        "change_type": "modify",
+        "old_string": "This tool was built under its own governance. Every change in this codebase\nwas challenged, defended, ruled on, and recorded by Bench itself.\n\nRun `python -m cli verify` to confirm the ledger's integrity.",
+        "new_string": "This tool was built under its own governance. Every change in this codebase\nwas challenged, defended, ruled on, and recorded by Bench itself.\n\nDuring the build, Bench vetoed a change to its own governance pipeline code\nunder constraint C-007 (governance pipeline integrity). The change would have\nreduced fallback coverage in the hook entry point. It was corrected and\nre-submitted. Ledger entry #8 is the receipt.\n\nRun `python -m cli verify` to confirm the ledger's integrity."
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 1601,
+        "output": 26
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change is a documentation-only modification to README.md, adding a narrative paragraph about a prior veto event under C-007. It does not touch code, governance pipeline logic, ledger entries, dependencies, type annotations, error handling, or secrets. The Challenger returned CLEAR and the Defender confirmed. I independently reviewed the diff against all eight constraints: C-001 (no catch blocks involved), C-002 (change is scoped to README.md only), C-003 (no imports), C-004 (no type annotations), C-005 (no new logic), C-006 (no credentials), C-007 (references the pipeline but does not modify it; describing a past veto in documentation does not weaken enforcement), C-008 (does not modify ledger entries; merely references entry #8 by number). The factual claim about ledger entry #8 is verifiable via `python -m cli verify` and is not a governance concern at the constitutional level.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Documentation change, no error handling code."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is confined to README.md as stated."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No dependency changes."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No type annotations affected."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new logic introduced."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "No secrets or credentials present."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "The README merely describes a past veto event; it does not modify challenger, defender, oracle, ledger, or constitution code. Documenting enforcement history reinforces rather than weakens governance."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "SATISFIED",
+          "note": "References ledger entry #8 by identifier but does not modify, delete, or overwrite any ledger data."
+        }
+      ],
+      "advisories": [
+        "The README asserts a factual claim about ledger entry #8 being the receipt for the described veto. Ensure this remains accurate; if ledger numbering shifts due to future restructuring, this narrative could become misleading. Consider referencing the entry by hash or a stable identifier in future revisions."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 2568,
+        "output": 972
+      }
+    },
+    "entry_hash": "55237ae29981e086559bb4478b83809bbb3e6bf602160b01cc71bcde578cde32"
   }
 ]
