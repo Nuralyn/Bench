@@ -139,14 +139,47 @@ def call_model(
 
 
 def _try_parse_dict(text: str) -> dict[str, Any] | None:
-    """Parse text as a JSON object. Returns None on JSON error or non-dict."""
+    """Parse text as a JSON object. Returns None on JSON error or non-dict.
+
+    Runs strip_code_fences first so a common LLM response shape — a JSON
+    object wrapped in a ```json ... ``` Markdown fence — parses cleanly
+    without burning a retry round-trip on the model.
+    """
+    cleaned: str = strip_code_fences(text)
     try:
-        result: Any = json.loads(text)
+        result: Any = json.loads(cleaned)
     except json.JSONDecodeError:
         return None
     if isinstance(result, dict):
         return result
     return None
+
+
+def strip_code_fences(text: str) -> str:
+    """Strip a surrounding Markdown code fence from ``text``, if present.
+
+    Recognizes an opening ``````` or `````<lang>``
+    (language tag in any casing — ``json``, ``JSON``, ``Json``, etc.) and a
+    matching trailing ```````, tolerating leading and trailing
+    whitespace or newlines around the block. If no surrounding fence is
+    detected, ``text`` is returned unchanged. Not a general Markdown
+    parser — just a cleanup pass before :func:`json.loads`.
+    """
+    stripped: str = text.strip()
+    if len(stripped) < 6:
+        return text
+    if not (stripped.startswith("```") and stripped.endswith("```")):
+        return text
+
+    after_open: str = stripped[3:]
+    newline_idx: int = after_open.find("\n")
+    if newline_idx == -1:
+        inner: str = after_open[:-3]
+    else:
+        inner = after_open[newline_idx + 1 :]
+        if inner.endswith("```"):
+            inner = inner[:-3]
+    return inner.strip()
 
 
 def _anthropic_call(
