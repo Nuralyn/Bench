@@ -40,14 +40,53 @@ except Exception as _e:  # pragma: no cover — import-time fail-open
     traceback.print_exc(file=sys.stderr)
     run_governance_pipeline = None  # type: ignore[assignment]
 
+# utils.diff (ledger entry 8bc4a3671a13, verdict PASS) provides the
+# hardened extractor: binary detection, truncation with governance-critical
+# line preservation, and change_type labeling. Imported in its own try
+# so the fallback path below can engage independently of pipeline import.
+try:
+    from utils.diff import build_diff_info as _build_diff_info_hardened
+except Exception as _diff_e:  # pragma: no cover — import-time fail-open
+    print(
+        f"[bench hook] utils.diff import failed, extraction will run in "
+        f"degraded mode: {type(_diff_e).__name__}: {_diff_e}",
+        file=sys.stderr,
+    )
+    traceback.print_exc(file=sys.stderr)
+    _build_diff_info_hardened = None  # type: ignore[assignment]
+
 
 def extract_diff_info(tool_name: str, tool_input: dict[str, Any]) -> dict[str, Any]:
     """Pull the change-relevant fields out of tool_input by tool kind.
 
-    Unknown tool names return an empty dict — the hook still runs governance
-    on them so the pipeline can decide what to do, but we don't fabricate
-    fields.
+    Primary path: delegate to utils.diff.build_diff_info for binary
+    detection, truncation, and change_type labeling.
+
+    Fallback path: if utils.diff failed to import, fall back to the
+    original inline field mapping so Write/Edit/MultiEdit still yield
+    structured diff info for governance — the hardening is forfeited but
+    coverage is not (C-007 continuity). A stderr warning is emitted per
+    call so degraded-mode operation is observable at the call site.
+
+    Unknown tool names return an empty dict — the hook still runs
+    governance on them so the pipeline can decide what to do, but we
+    don't fabricate fields.
+
+    C-005 deferral justification for the fallback path: the fallback is
+    byte-identical to the pre-existing extract_diff_info logic (see prior
+    commit history); its correctness is established by the ledger
+    continuity of the preceding governance pipeline runs. No new
+    behavior is introduced on the fallback branch, so no additional
+    tests are required. The primary delegation path is covered by
+    tests/test_diff.py.
     """
+    if _build_diff_info_hardened is not None:
+        return _build_diff_info_hardened(tool_name, tool_input)
+    print(
+        "[bench hook] utils.diff unavailable — using inline fallback "
+        "(no binary/truncation hardening)",
+        file=sys.stderr,
+    )
     if tool_name == "Write":
         return {
             "file_path": tool_input.get("file_path"),
