@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 bench/hooks/pre-tool-use.py"
+            "command": "python hooks/pre-tool-use.py"
           }
         ]
       }
