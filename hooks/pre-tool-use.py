@@ -4,8 +4,7 @@ Claude Code invokes this script before any Write/Edit/MultiEdit tool call,
 piping a JSON payload to stdin. The script returns a JSON response on stdout
 that either allows or denies the tool call via permissionDecision.
 
-Day 1 stub: governance always returns PASS. Day 2 will wire this to the real
-challenger -> defender -> oracle pipeline.
+Dispatches to the Challenger -> Defender -> Oracle runner in pipeline/runner.py.
 
 Invariants:
   * Exit code is ALWAYS 0. Flow control is via JSON, not exit codes.
@@ -13,34 +12,41 @@ Invariants:
   * All structured output goes to stdout. All diagnostics go to stderr.
   * The hook fails open: any internal error returns 'allow' so a broken
     governance layer never blocks the developer. Failures are logged to
-    stderr for the developer to notice.
+    stderr for the developer to notice. The runner also fails open on its
+    own internal errors; this wrapper is defense in depth.
 """
 
 import json
 import sys
 import traceback
+from pathlib import Path
 from typing import Any
 
+# The hook is invoked as `python hooks/pre-tool-use.py`, which puts hooks/
+# on sys.path[0]. The pipeline package lives at the repo root, so prepend
+# the repo root before importing from it.
+_REPO_ROOT: Path = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
-def run_governance_stub(
-    tool_name: str,
-    diff_info: dict[str, Any],
-) -> dict[str, Any]:
-    """Day 1 placeholder for the real pipeline. Always returns PASS.
-
-    On Day 2 this is replaced by the challenger/defender/oracle runner.
-    The signature is shaped to match what the real runner will need:
-    the tool name and the extracted diff fields.
-    """
-    del tool_name, diff_info  # unused in stub; real pipeline will consume
-    return {"verdict": "PASS"}
+try:
+    from pipeline.runner import run_governance_pipeline
+except Exception as _e:  # pragma: no cover — import-time fail-open
+    print(
+        f"[bench hook] pipeline import failed, failing open: "
+        f"{type(_e).__name__}: {_e}",
+        file=sys.stderr,
+    )
+    traceback.print_exc(file=sys.stderr)
+    run_governance_pipeline = None  # type: ignore[assignment]
 
 
 def extract_diff_info(tool_name: str, tool_input: dict[str, Any]) -> dict[str, Any]:
     """Pull the change-relevant fields out of tool_input by tool kind.
 
     Unknown tool names return an empty dict — the hook still runs governance
-    on them so the stub can decide what to do, but we don't fabricate fields.
+    on them so the pipeline can decide what to do, but we don't fabricate
+    fields.
     """
     if tool_name == "Write":
         return {
@@ -115,7 +121,14 @@ def main() -> int:
         )
 
         diff_info: dict[str, Any] = extract_diff_info(tool_name, tool_input)
-        verdict: dict[str, Any] = run_governance_stub(tool_name, diff_info)
+        if run_governance_pipeline is None:
+            verdict: dict[str, Any] = {
+                "verdict": "PASS",
+                "reason": "Pipeline unavailable (import failed) — failing open",
+                "remediation": None,
+            }
+        else:
+            verdict = run_governance_pipeline(tool_name, tool_input, diff_info)
         response: dict[str, Any] = build_response_from_verdict(verdict)
 
     except Exception as e:  # fail-open: governance must never block on its own bug
