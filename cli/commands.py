@@ -9,6 +9,9 @@ nothing here mutates state, so there is no risk of collision with the
 governance pipeline running in parallel.
 """
 
+import atexit
+import os
+import stat
 import sys
 import tempfile
 import webbrowser
@@ -223,7 +226,20 @@ def cmd_viewer() -> int:
         print(f"[bench cli] viewer write failed: {e}", file=sys.stderr)
         return 1
 
+    try:
+        os.chmod(tmp_path, stat.S_IRUSR | stat.S_IWUSR)
+    except OSError as e:
+        print(
+            f"[bench cli] could not restrict temp file permissions: {e}",
+            file=sys.stderr,
+        )
+
+    atexit.register(
+        lambda p=tmp_path: os.remove(p) if os.path.exists(p) else None  # type: ignore[misc]
+    )
+
     print(f"Bench viewer written to: {tmp_path}")
+    print("  (will be cleaned up on process exit)")
     if not webbrowser.open(f"file://{tmp_path}"):
         print(
             "[bench cli] could not auto-open browser; open the path above manually.",

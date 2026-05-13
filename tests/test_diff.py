@@ -21,6 +21,7 @@ from utils.diff import (  # noqa: E402
     BINARY_LABEL,
     MAX_DIFF_LINES,
     _is_binary,
+    _normalize_path,
     _truncate_preserving,
     build_diff_info,
 )
@@ -206,6 +207,53 @@ class BinaryDetectionTests(unittest.TestCase):
             {"file_path": "foo.py", "content": "def foo():\n    pass\n"},
         )
         self.assertNotIn("binary", result)
+
+
+class PathTraversalTests(unittest.TestCase):
+    def test_relative_traversal_blocked(self) -> None:
+        self.assertEqual(_normalize_path("../../../etc/passwd"), "[PATH_TRAVERSAL_BLOCKED]")
+
+    def test_dotdot_single_level_blocked(self) -> None:
+        self.assertEqual(_normalize_path("../sibling.py"), "[PATH_TRAVERSAL_BLOCKED]")
+
+    def test_absolute_path_blocked(self) -> None:
+        result = _normalize_path("/etc/passwd")
+        self.assertEqual(result, "[PATH_TRAVERSAL_BLOCKED]")
+
+    def test_windows_absolute_path_blocked(self) -> None:
+        result = _normalize_path("C:\\Windows\\System32\\config")
+        self.assertEqual(result, "[PATH_TRAVERSAL_BLOCKED]")
+
+    def test_normal_relative_path_passes(self) -> None:
+        import os
+        expected: str = "src\\main.py" if os.sep == "\\" else "src/main.py"
+        self.assertEqual(_normalize_path("src/main.py"), expected)
+
+    def test_embedded_dotdot_that_stays_in_project_passes(self) -> None:
+        result = _normalize_path("src/../utils/diff.py")
+        self.assertNotEqual(result, "[PATH_TRAVERSAL_BLOCKED]")
+        self.assertIn("utils", result)
+
+    def test_empty_path_passes_through(self) -> None:
+        self.assertEqual(_normalize_path(""), "")
+
+    def test_build_diff_info_normalizes_traversal(self) -> None:
+        result = build_diff_info(
+            "Write",
+            {"file_path": "../../../etc/passwd", "content": "pwned"},
+        )
+        self.assertEqual(result["file_path"], "[PATH_TRAVERSAL_BLOCKED]")
+
+    def test_build_diff_info_normalizes_absolute(self) -> None:
+        result = build_diff_info(
+            "Edit",
+            {
+                "file_path": "/etc/shadow",
+                "old_string": "old",
+                "new_string": "new",
+            },
+        )
+        self.assertEqual(result["file_path"], "[PATH_TRAVERSAL_BLOCKED]")
 
 
 class MalformedInputTests(unittest.TestCase):

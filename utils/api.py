@@ -20,8 +20,8 @@ Invariants:
 
 import json
 import os
+import re
 import sys
-import traceback
 from typing import Any
 
 import anthropic
@@ -38,6 +38,21 @@ _OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
 _RETRY_NUDGE: str = (
     "Your previous response was not valid JSON. Respond ONLY with valid JSON."
 )
+
+
+_MAX_ERROR_DETAIL_CHARS: int = 500
+_SENSITIVE_PATTERN: re.Pattern[str] = re.compile(
+    r"(sk-[A-Za-z0-9_-]{10,}|Bearer\s+\S+|api[_-]?key[\"']?\s*[:=]\s*\S+)",
+    re.IGNORECASE,
+)
+
+
+def _sanitize_error_detail(text: str) -> str:
+    """Strip potential API keys and truncate error details."""
+    scrubbed: str = _SENSITIVE_PATTERN.sub("[REDACTED]", text)
+    if len(scrubbed) > _MAX_ERROR_DETAIL_CHARS:
+        return scrubbed[:_MAX_ERROR_DETAIL_CHARS] + "... [truncated]"
+    return scrubbed
 
 
 class _ProviderError(Exception):
@@ -88,11 +103,10 @@ def call_model(
             model, system_prompt, messages, max_tokens
         )
     except _ProviderError as e:
-        print(f"[bench api] {e}", file=sys.stderr)
-        traceback.print_exc(file=sys.stderr)
+        print(f"[bench api] {_sanitize_error_detail(str(e))}", file=sys.stderr)
         return {
             "error": "API_ERROR",
-            "detail": str(e),
+            "detail": _sanitize_error_detail(str(e)),
             "_tokens": {"input": total_input, "output": total_output},
         }
 
@@ -115,11 +129,10 @@ def call_model(
             model, system_prompt, retry_messages, max_tokens
         )
     except _ProviderError as e:
-        print(f"[bench api] {e}", file=sys.stderr)
-        traceback.print_exc(file=sys.stderr)
+        print(f"[bench api] {_sanitize_error_detail(str(e))}", file=sys.stderr)
         return {
             "error": "API_ERROR",
-            "detail": str(e),
+            "detail": _sanitize_error_detail(str(e)),
             "_tokens": {"input": total_input, "output": total_output},
         }
 
@@ -202,12 +215,13 @@ def _anthropic_call(
             messages=messages,
         )
     except anthropic.AnthropicError as e:
-        raise _ProviderError(f"anthropic: {type(e).__name__}: {e}") from e
+        raise _ProviderError(
+            f"anthropic: {type(e).__name__}: {_sanitize_error_detail(str(e))}"
+        ) from e
     except (TypeError, ValueError) as e:
-        # Config-level failures from the SDK (missing/invalid ANTHROPIC_API_KEY,
-        # malformed kwargs) are raised as stdlib exceptions, not AnthropicError.
-        # Treat them as API_ERROR so call_model's non-raising contract holds.
-        raise _ProviderError(f"anthropic config: {type(e).__name__}: {e}") from e
+        raise _ProviderError(
+            f"anthropic config: {type(e).__name__}: {_sanitize_error_detail(str(e))}"
+        ) from e
 
     text: str = ""
     content = getattr(response, "content", None)
@@ -258,13 +272,12 @@ def _openrouter_call(
             messages=full_messages,
         )
     except openai.OpenAIError as e:
-        raise _ProviderError(f"openrouter: {type(e).__name__}: {e}") from e
-    except (TypeError, ValueError) as e:
-        # Config-level failures (missing/invalid OPENROUTER_API_KEY, malformed
-        # kwargs) surface as stdlib exceptions, not OpenAIError. Treat them
-        # as API_ERROR so call_model's non-raising contract holds.
         raise _ProviderError(
-            f"openrouter config: {type(e).__name__}: {e}"
+            f"openrouter: {type(e).__name__}: {_sanitize_error_detail(str(e))}"
+        ) from e
+    except (TypeError, ValueError) as e:
+        raise _ProviderError(
+            f"openrouter config: {type(e).__name__}: {_sanitize_error_detail(str(e))}"
         ) from e
 
     text: str = ""
