@@ -9,6 +9,7 @@ requirements.txt.
 Run: python -m unittest tests.test_diff -v
 """
 
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -220,6 +221,7 @@ class PathTraversalTests(unittest.TestCase):
         result = _normalize_path("/etc/passwd")
         self.assertEqual(result, "[PATH_TRAVERSAL_BLOCKED]")
 
+    @unittest.skipUnless(os.name == "nt", "Windows absolute paths only detected on Windows")
     def test_windows_absolute_path_blocked(self) -> None:
         result = _normalize_path("C:\\Windows\\System32\\config")
         self.assertEqual(result, "[PATH_TRAVERSAL_BLOCKED]")
