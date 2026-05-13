@@ -20,6 +20,7 @@ structured ``change_type: "error"`` dict so the pipeline can still record
 an auditable ledger entry.
 """
 
+import os
 import os.path
 import sys
 import traceback
@@ -33,6 +34,33 @@ _PRESERVED_KINDS: str = "first50+signatures+exception_handlers+last20"
 _FIRST_N: int = 50
 _LAST_N: int = 20
 _MAX_ERROR_MESSAGE_CHARS: int = 500
+_PATH_TRAVERSAL_PLACEHOLDER: str = "[PATH_TRAVERSAL_BLOCKED]"
+
+
+def _normalize_path(raw_path: str) -> str:
+    """Normalize a file path and reject traversal attempts.
+
+    Collapses '..' segments, rejects absolute paths and paths that escape
+    the project directory. Returns a sanitized placeholder for rejected
+    paths so governance still runs (fail-open) but the misleading path
+    never reaches LLM prompts or the ledger.
+    """
+    if not raw_path:
+        return raw_path
+    normalized: str = os.path.normpath(raw_path)
+    if os.path.isabs(normalized) or raw_path.startswith("/"):
+        print(
+            f"[bench diff] path traversal blocked: absolute path {raw_path!r}",
+            file=sys.stderr,
+        )
+        return _PATH_TRAVERSAL_PLACEHOLDER
+    if normalized.startswith(".."):
+        print(
+            f"[bench diff] path traversal blocked: escapes project root {raw_path!r}",
+            file=sys.stderr,
+        )
+        return _PATH_TRAVERSAL_PLACEHOLDER
+    return normalized
 
 
 def build_diff_info(tool_name: str, tool_input: dict) -> dict[str, Any]:
@@ -55,7 +83,7 @@ def build_diff_info(tool_name: str, tool_input: dict) -> dict[str, Any]:
     try:
         if not isinstance(tool_input, dict):
             return {}
-        file_path: str = _coerce_str(tool_input.get("file_path"))
+        file_path: str = _normalize_path(_coerce_str(tool_input.get("file_path")))
 
         if tool_name == "Write":
             return _build_write(file_path, tool_input)

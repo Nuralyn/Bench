@@ -27,6 +27,48 @@ from typing import Any
 _DEFAULT_LEDGER_PATH: str = "ledger/bench-ledger.json"
 _META_FILENAME: str = "ledger-meta.json"
 _GENESIS_MARKER: str = "GENESIS"
+_MAX_FIELD_CHARS: int = 10_000
+_MAX_STAGE_CHARS: int = 50_000
+
+
+def _cap_stage_fields(stage: Any) -> Any:
+    """Truncate oversized string fields in a pipeline stage dict.
+
+    Caps individual strings at _MAX_FIELD_CHARS and the total serialized
+    stage at _MAX_STAGE_CHARS. Returns the (possibly modified) stage.
+    Non-dict stages pass through unchanged.
+    """
+    if not isinstance(stage, dict):
+        return stage
+    capped: dict[str, Any] = {}
+    for key, value in stage.items():
+        if isinstance(value, str) and len(value) > _MAX_FIELD_CHARS:
+            capped[key] = value[:_MAX_FIELD_CHARS] + " [TRUNCATED]"
+        elif isinstance(value, list):
+            new_list: list[Any] = []
+            for item in value:
+                if isinstance(item, dict):
+                    new_item: dict[str, Any] = {}
+                    for k, v in item.items():
+                        if isinstance(v, str) and len(v) > _MAX_FIELD_CHARS:
+                            new_item[k] = v[:_MAX_FIELD_CHARS] + " [TRUNCATED]"
+                        else:
+                            new_item[k] = v
+                    new_list.append(new_item)
+                else:
+                    new_list.append(item)
+            capped[key] = new_list
+        else:
+            capped[key] = value
+    serialized: str = json.dumps(capped, default=str)
+    if len(serialized) > _MAX_STAGE_CHARS:
+        return {
+            "_capped": True,
+            "_original_size": len(serialized),
+            "status": stage.get("status", "UNKNOWN"),
+            "verdict": stage.get("verdict"),
+        }
+    return capped
 
 
 def compute_entry_hash(entry: dict) -> str:
@@ -123,9 +165,9 @@ def append_entry(
                 change_in.get("raw", {}),
             ),
         },
-        "challenger": pipeline_result.get("challenger", {}),
-        "defender": pipeline_result.get("defender", {}),
-        "oracle": pipeline_result.get("oracle", {}),
+        "challenger": _cap_stage_fields(pipeline_result.get("challenger", {})),
+        "defender": _cap_stage_fields(pipeline_result.get("defender", {})),
+        "oracle": _cap_stage_fields(pipeline_result.get("oracle", {})),
     }
     entry["entry_hash"] = compute_entry_hash(entry)
 

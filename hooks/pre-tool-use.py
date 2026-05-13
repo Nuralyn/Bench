@@ -17,6 +17,7 @@ Invariants:
 """
 
 import json
+import os
 import sys
 import traceback
 from pathlib import Path
@@ -87,23 +88,78 @@ def extract_diff_info(tool_name: str, tool_input: dict[str, Any]) -> dict[str, A
         "(no binary/truncation hardening)",
         file=sys.stderr,
     )
+    raw_path: str = str(tool_input.get("file_path", ""))
+    normalized: str = os.path.normpath(raw_path) if raw_path else raw_path
+    if raw_path and (
+        os.path.isabs(normalized)
+        or raw_path.startswith("/")
+        or normalized.startswith("..")
+    ):
+        print(
+            f"[bench hook] path traversal blocked in fallback: {raw_path!r}",
+            file=sys.stderr,
+        )
+        normalized = "[PATH_TRAVERSAL_BLOCKED]"
     if tool_name == "Write":
         return {
-            "file_path": tool_input.get("file_path"),
+            "file_path": normalized,
             "content": tool_input.get("content"),
         }
     if tool_name == "Edit":
         return {
-            "file_path": tool_input.get("file_path"),
+            "file_path": normalized,
             "old_string": tool_input.get("old_string"),
             "new_string": tool_input.get("new_string"),
         }
     if tool_name == "MultiEdit":
         return {
-            "file_path": tool_input.get("file_path"),
+            "file_path": normalized,
             "edits": tool_input.get("edits", []),
         }
     return {}
+
+
+_GOVERNED_TOOLS: frozenset[str] = frozenset({"Write", "Edit", "MultiEdit"})
+
+
+def _validate_hook_payload(
+    tool_name: str, tool_input: dict[str, Any]
+) -> list[str]:
+    """Return a list of validation warnings (empty = valid).
+
+    Lightweight schema check — no external dependencies. Fail-open: the
+    hook continues regardless; the warnings are logged for observability.
+    """
+    warnings: list[str] = []
+    if not tool_name:
+        warnings.append("tool_name is empty")
+    elif tool_name not in _GOVERNED_TOOLS:
+        return warnings
+
+    fp: Any = tool_input.get("file_path")
+    if not isinstance(fp, str) or not fp:
+        warnings.append(f"file_path missing or not a string (got {type(fp).__name__})")
+
+    if tool_name == "Write":
+        content: Any = tool_input.get("content")
+        if not isinstance(content, str):
+            warnings.append(
+                f"Write: content is not a string (got {type(content).__name__})"
+            )
+    elif tool_name == "Edit":
+        for field in ("old_string", "new_string"):
+            val: Any = tool_input.get(field)
+            if not isinstance(val, str):
+                warnings.append(
+                    f"Edit: {field} is not a string (got {type(val).__name__})"
+                )
+    elif tool_name == "MultiEdit":
+        edits: Any = tool_input.get("edits")
+        if not isinstance(edits, list):
+            warnings.append(
+                f"MultiEdit: edits is not a list (got {type(edits).__name__})"
+            )
+    return warnings
 
 
 def build_allow_response(message: str) -> dict[str, Any]:
@@ -158,6 +214,13 @@ def main() -> int:
         tool_input: dict[str, Any] = (
             tool_input_raw if isinstance(tool_input_raw, dict) else {}
         )
+
+        payload_warnings: list[str] = _validate_hook_payload(tool_name, tool_input)
+        for warning in payload_warnings:
+            print(
+                f"[bench hook] payload validation: {warning}",
+                file=sys.stderr,
+            )
 
         diff_info: dict[str, Any] = extract_diff_info(tool_name, tool_input)
         if run_governance_pipeline is None:
