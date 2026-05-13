@@ -17,6 +17,7 @@ Invariants:
 """
 
 import json
+import sys
 from typing import Any
 
 from utils.api import ORACLE_MODEL, call_model
@@ -92,6 +93,28 @@ _REQUIRED_CITATION_FIELDS: tuple[str, ...] = (
 )
 
 
+def _validate_oracle_inputs(
+    diff_info: dict,
+    constitution: dict,
+    challenger_result: dict,
+    defender_result: dict,
+) -> str | None:
+    """Return an error message if inputs are malformed, else None."""
+    if not isinstance(diff_info, dict) or not diff_info:
+        return "diff_info is empty or not a dict"
+    if not isinstance(constitution, dict) or not constitution:
+        return "constitution is empty or not a dict"
+    if not isinstance(challenger_result, dict) or not challenger_result:
+        return "challenger_result is empty or not a dict"
+    if "status" not in challenger_result:
+        return "challenger_result missing status field"
+    if not isinstance(defender_result, dict) or not defender_result:
+        return "defender_result is empty or not a dict"
+    if "status" not in defender_result:
+        return "defender_result missing status field"
+    return None
+
+
 def run_oracle(
     diff_info: dict,
     constitution: dict,
@@ -107,6 +130,20 @@ def run_oracle(
     the prompt — the Oracle reasons from the constitution body.
     """
     del constitution_hash  # unused in prompt; recorded by the runner
+
+    input_error: str | None = _validate_oracle_inputs(
+        diff_info, constitution, challenger_result, defender_result
+    )
+    if input_error is not None:
+        print(
+            f"[bench oracle] input validation failed: {input_error}",
+            file=sys.stderr,
+        )
+        return {
+            "status": "PIPELINE_ERROR",
+            "error": f"INVALID_ORACLE_INPUT: {input_error}",
+            "_tokens": {"input": 0, "output": 0},
+        }
 
     user_content: str = _build_user_content(
         diff_info,

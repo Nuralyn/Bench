@@ -15,6 +15,7 @@ Invariants:
 """
 
 import json
+import sys
 from typing import Any
 
 from utils.api import CHALLENGER_MODEL, call_model
@@ -77,6 +78,22 @@ _REQUIRED_FINDING_FIELDS: tuple[str, ...] = (
 )
 
 
+def _validate_challenger_inputs(
+    diff_info: dict, constitution: dict
+) -> str | None:
+    """Return an error message if inputs are malformed, else None."""
+    if not isinstance(diff_info, dict) or not diff_info:
+        return "diff_info is empty or not a dict"
+    if "file_path" not in diff_info and "change_type" not in diff_info:
+        return "diff_info missing both file_path and change_type"
+    if not isinstance(constitution, dict) or not constitution:
+        return "constitution is empty or not a dict"
+    constraints: Any = constitution.get("constraints")
+    if not isinstance(constraints, list):
+        return f"constitution.constraints is not a list (got {type(constraints).__name__})"
+    return None
+
+
 def run_challenger(
     diff_info: dict,
     constitution: dict,
@@ -90,6 +107,18 @@ def run_challenger(
     the prompt — the Challenger reasons from the constitution body.
     """
     del constitution_hash  # unused in prompt; recorded by the runner
+
+    input_error: str | None = _validate_challenger_inputs(diff_info, constitution)
+    if input_error is not None:
+        print(
+            f"[bench challenger] input validation failed: {input_error}",
+            file=sys.stderr,
+        )
+        return {
+            "status": "PIPELINE_ERROR",
+            "error": f"INVALID_CHALLENGER_INPUT: {input_error}",
+            "_tokens": {"input": 0, "output": 0},
+        }
 
     user_content: str = _build_user_content(diff_info, constitution, file_context)
 

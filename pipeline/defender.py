@@ -14,6 +14,7 @@ Invariants:
 """
 
 import json
+import sys
 from typing import Any
 
 from utils.api import DEFENDER_MODEL, call_model
@@ -67,6 +68,21 @@ _VALID_POSITIONS: frozenset[str] = frozenset({"REBUT", "CONCEDE", "MITIGATE"})
 _REQUIRED_REBUTTAL_STRING_FIELDS: tuple[str, ...] = ("position", "argument")
 
 
+def _validate_defender_inputs(
+    diff_info: dict, constitution: dict, challenger_result: dict
+) -> str | None:
+    """Return an error message if inputs are malformed, else None."""
+    if not isinstance(diff_info, dict) or not diff_info:
+        return "diff_info is empty or not a dict"
+    if not isinstance(constitution, dict) or not constitution:
+        return "constitution is empty or not a dict"
+    if not isinstance(challenger_result, dict) or not challenger_result:
+        return "challenger_result is empty or not a dict"
+    if "status" not in challenger_result:
+        return "challenger_result missing status field"
+    return None
+
+
 def run_defender(
     diff_info: dict,
     constitution: dict,
@@ -81,6 +97,20 @@ def run_defender(
     the prompt — the Defender reasons from the constitution body.
     """
     del constitution_hash  # unused in prompt; recorded by the runner
+
+    input_error: str | None = _validate_defender_inputs(
+        diff_info, constitution, challenger_result
+    )
+    if input_error is not None:
+        print(
+            f"[bench defender] input validation failed: {input_error}",
+            file=sys.stderr,
+        )
+        return {
+            "status": "PIPELINE_ERROR",
+            "error": f"INVALID_DEFENDER_INPUT: {input_error}",
+            "_tokens": {"input": 0, "output": 0},
+        }
 
     user_content: str = _build_user_content(
         diff_info, constitution, challenger_result, file_context
