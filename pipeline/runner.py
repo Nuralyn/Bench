@@ -105,7 +105,8 @@ def run_governance_pipeline(
         defender_result = run_defender(
             diff_info, constitution, constitution_hash, challenger_result
         )
-        _accumulate_tokens(accumulated, defender_result.get("_tokens"))
+    _accumulate_tokens(accumulated, defender_result.get("_tokens"))
+    if challenger_result.get("status") != "CLEAR":
         if defender_result.get("status") == "PIPELINE_ERROR":
             return _finalize(
                 {
