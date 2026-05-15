@@ -134,6 +134,15 @@ def cmd_stats() -> int:
                 for cid in citations:
                     if isinstance(cid, str):
                         citation_counts[cid] = citation_counts.get(cid, 0) + 1
+                    elif isinstance(cid, dict):
+                        raw = cid.get("constraint_id")
+                        if isinstance(raw, str):
+                            citation_counts[raw] = citation_counts.get(raw, 0) + 1
+                    else:
+                        print(
+                            f"[bench cli] unexpected citation type: {type(cid).__name__}",
+                            file=sys.stderr,
+                        )
 
     most_cited: tuple[str, int] | None = None
     if citation_counts:
@@ -272,7 +281,10 @@ def _print_entry_line(entry: dict) -> None:
     if verdict == "VETO":
         citations: Any = oracle_dict.get("constraint_citations")
         if isinstance(citations, list) and citations:
-            cite_str: str = ", ".join(str(c) for c in citations if c)
+            cite_str: str = ", ".join(
+                c.get("constraint_id", str(c)) if isinstance(c, dict) else str(c)
+                for c in citations if c
+            )
             if cite_str:
                 print(f"      citations: {cite_str}")
 

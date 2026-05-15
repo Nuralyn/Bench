@@ -2988,5 +2988,1345 @@
       }
     },
     "entry_hash": "1a7290ffaa46157d61fff765c7dcb8811d044fb1609a99c25df096b027e0d66c"
+  },
+  {
+    "entry_id": "3deeaebc-aa59-4c40-9355-1f487243b978",
+    "timestamp": "2026-05-15T04:40:19.227436+00:00",
+    "previous_hash": "1a7290ffaa46157d61fff765c7dcb8811d044fb1609a99c25df096b027e0d66c",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "[PATH_TRAVERSAL_BLOCKED]",
+      "tool": "Write",
+      "diff_summary": {
+        "file_path": "[PATH_TRAVERSAL_BLOCKED]",
+        "change_type": "create",
+        "content": "# Bench Codebase Investigation: Findings & Remediation Plan\n\n## Context\n\nA complete audit of the Bench governance pipeline revealed **5 bugs** (1 critical, 1 medium, 3 low) and **4 dead code items**. The most impactful bug silently breaks citation counting in both the CLI stats command and the HTML viewer \u00e2\u20ac\u201d the \"most cited constraint\" stat always shows \"n/a\". No existing tests cover the citation counting paths, which is why these bugs went undetected.\n\nThe ledger, hash chain, hook protocol, error handling, and fail-open policies are all correct and robust. No security issues found.\n\n---\n\n## TIER 1 \u00e2\u20ac\u201d CRITICAL\n\n### BUG 1: Citation counting broken in two files\n\n**Files**: `cli/commands.py:134-136` and `utils/viewer.py:110-112`\n\nOracle produces citations as `[{\"constraint_id\": \"C-XXX\", \"disposition\": \"...\", \"note\": \"...\"}]` (dicts), but both consumer sites check `isinstance(cid, str)` \u00e2\u20ac\u201d always False for dicts. The `citation_counts` dict is never populated, so \"most cited constraint\" is always \"n/a\".\n\n**Fix** \u00e2\u20ac\u201d in both files, replace:\n```python\nfor cid in citations:\n    if isinstance(cid, str):\n        citation_counts[cid] = citation_counts.get(cid, 0) + 1\n```\nwith:\n```python\nfor cid in citations:\n    constraint_id = cid.get(\"constraint_id\") if isinstance(cid, dict) else None\n    if isinstance(constraint_id, str):\n        citation_counts[constraint_id] = citation_counts.get(constraint_id, 0) + 1\n```\n\n### BUG 2: _print_entry_line renders raw dicts for citations\n\n**File**: `cli/commands.py:275`\n\n`str(c)` on citation dicts produces `{'constraint_id': 'C-001', ...}` instead of `C-001`.\n\n**Fix** \u00e2\u20ac\u201d replace:\n```python\ncite_str: str = \", \".join(str(c) for c in citations if c)\n```\nwith:\n```python\ncite_str: str = \", \".join(\n    c.get(\"constraint_id\", str(c)) if isinstance(c, dict) else str(c)\n    for c in citations if c\n)\n```\n\n---\n\n## TIER 2 \u00e2\u20ac\u201d MEDIUM\n\n### BUG 3: Oracle allows empty citations on VETO\n\n**File**: `pipeline/oracle.py` \u00e2\u20ac\u201d `_validate_oracle_response()`, after line 222\n\nAn empty `constraint_citations: []` passes validation. A VETO without citing any violated constraint is semantically meaningless.\n\n**Fix** \u00e2\u20ac\u201d add after `if not isinstance(citations, list): return False`:\n```python\nif verdict == \"VETO\" and len(citations) == 0:\n    return False\n```\n\n---\n\n## TIER 3 \u00e2\u20ac\u201d LOW\n\n### BUG 4: OpenRouter API key can be None\n\n**File**: `utils/api.py:267`\n\n`os.environ.get(\"OPENROUTER_API_KEY\")` can pass `None` to the OpenAI client.\n\n**Fix** \u00e2\u20ac\u201d add early validation:\n```python\napi_key: str | None = os.environ.get(\"OPENROUTER_API_KEY\")\nif not api_key:\n    raise _ProviderError(\"openrouter: OPENROUTER_API_KEY environment variable is not set\")\n```\n\n### BUG 5: Token accounting gap on Challenger CLEAR\n\n**File**: `pipeline/runner.py:108`\n\n`_accumulate_tokens` is inside the `else` block, so synthetic zero-tokens from CLEAR path are never accumulated. Functionally harmless (values are 0) but structurally inconsistent.\n\n**Fix** \u00e2\u20ac\u201d dedent `_accumulate_tokens(accumulated, defender_result.get(\"_tokens\"))` to run unconditionally after the if/else.\n\n---\n\n## DEAD CODE\n\n| Item | Location | Notes |\n|------|----------|-------|\n| `utils/formatting.py` | Entire module + `tests/test_formatting.py` | 3 functions, tested but never imported in production |\n| `util/logging.py` | Entire module + `tests/test_logging.py` | 6 exports, tested but never integrated into pipeline |\n| `UTILITY_MODEL` | `utils/api.py:33` | Defined, never referenced. Documented as \"reserved\" |\n| `get_constraint_by_id()` | `pipeline/constitution.py:100-105` | Tested but never called in production |\n\n**Recommendation**: Leave dead code as-is for now. The logging module and formatting module appear intentionally staged for future integration. Flag them but don't remove without explicit direction.\n\n---\n\n## Execution Order\n\n1. Fix BUGs 1+2 together (both touch `cli/commands.py`, same root cause) \u00e2\u20ac\u201d one commit\n2. Fix BUG 3 (oracle validation) \u00e2\u20ac\u201d one commit\n3. Fix BUGs 4+5 (defensive improvements) \u00e2\u20ac\u201d one commit\n\n## Verification\n\nAfter each fix:\n- Run `python -m pytest tests/test_oracle.py tests/test_runner.py -v` for pipeline changes\n- For citation fixes: add a test with realistic VETO ledger entry containing dict-style citations, verify `most_cited` is populated\n- Run `python -m bench verify` to confirm ledger integrity\n- Run `python -m bench stats` to confirm citation counting works\n\n## Critical Files\n- `C:\\Users\\mstar\\Bench\\cli\\commands.py` \u00e2\u20ac\u201d BUGs 1, 2\n- `C:\\Users\\mstar\\Bench\\utils\\viewer.py` \u00e2\u20ac\u201d BUG 1\n- `C:\\Users\\mstar\\Bench\\pipeline\\oracle.py` \u00e2\u20ac\u201d BUG 3\n- `C:\\Users\\mstar\\Bench\\utils\\api.py` \u00e2\u20ac\u201d BUG 4\n- `C:\\Users\\mstar\\Bench\\pipeline\\runner.py` \u00e2\u20ac\u201d BUG 5\n",
+        "formatted_diff": "+# Bench Codebase Investigation: Findings & Remediation Plan\n+\n+## Context\n+\n+A complete audit of the Bench governance pipeline revealed **5 bugs** (1 critical, 1 medium, 3 low) and **4 dead code items**. The most impactful bug silently breaks citation counting in both the CLI stats command and the HTML viewer \u00e2\u20ac\u201d the \"most cited constraint\" stat always shows \"n/a\". No existing tests cover the citation counting paths, which is why these bugs went undetected.\n+\n+The ledger, hash chain, hook protocol, error handling, and fail-open policies are all correct and robust. No security issues found.\n+\n+---\n+\n+## TIER 1 \u00e2\u20ac\u201d CRITICAL\n+\n+### BUG 1: Citation counting broken in two files\n+\n+**Files**: `cli/commands.py:134-136` and `utils/viewer.py:110-112`\n+\n+Oracle produces citations as `[{\"constraint_id\": \"C-XXX\", \"disposition\": \"...\", \"note\": \"...\"}]` (dicts), but both consumer sites check `isinstance(cid, str)` \u00e2\u20ac\u201d always False for dicts. The `citation_counts` dict is never populated, so \"most cited constraint\" is always \"n/a\".\n+\n+**Fix** \u00e2\u20ac\u201d in both files, replace:\n+```python\n+for cid in citations:\n+    if isinstance(cid, str):\n+        citation_counts[cid] = citation_counts.get(cid, 0) + 1\n+```\n+with:\n+```python\n+for cid in citations:\n+    constraint_id = cid.get(\"constraint_id\") if isinstance(cid, dict) else None\n+    if isinstance(constraint_id, str):\n+        citation_counts[constraint_id] = citation_counts.get(constraint_id, 0) + 1\n+```\n+\n+### BUG 2: _print_entry_line renders raw dicts for citations\n+\n+**File**: `cli/commands.py:275`\n+\n+`str(c)` on citation dicts produces `{'constraint_id': 'C-001', ...}` instead of `C-001`.\n+\n+**Fix** \u00e2\u20ac\u201d replace:\n+```python\n+cite_str: str = \", \".join(str(c) for c in citations if c)\n+```\n+with:\n+```python\n+cite_str: str = \", \".join(\n+    c.get(\"constraint_id\", str(c)) if isinstance(c, dict) else str(c)\n+    for c in citations if c\n+)\n+```\n+\n+---\n+\n+## TIER 2 \u00e2\u20ac\u201d MEDIUM\n+\n+### BUG 3: Oracle allows empty citations on VETO\n+\n+**File**: `pipeline/oracle.py` \u00e2\u20ac\u201d `_validate_oracle_response()`, after line 222\n+\n+An empty `constraint_citations: []` passes validation. A VETO without citing any violated constraint is semantically meaningless.\n+\n+**Fix** \u00e2\u20ac\u201d add after `if not isinstance(citations, list): return False`:\n+```python\n+if verdict == \"VETO\" and len(citations) == 0:\n+    return False\n+```\n+\n+---\n+\n+## TIER 3 \u00e2\u20ac\u201d LOW\n+\n+### BUG 4: OpenRouter API key can be None\n+\n+**File**: `utils/api.py:267`\n+\n+`os.environ.get(\"OPENROUTER_API_KEY\")` can pass `None` to the OpenAI client.\n+\n+**Fix** \u00e2\u20ac\u201d add early validation:\n+```python\n+api_key: str | None = os.environ.get(\"OPENROUTER_API_KEY\")\n+if not api_key:\n+    raise _ProviderError(\"openrouter: OPENROUTER_API_KEY environment variable is not set\")\n+```\n+\n+### BUG 5: Token accounting gap on Challenger CLEAR\n+\n+**File**: `pipeline/runner.py:108`\n+\n+`_accumulate_tokens` is inside the `else` block, so synthetic zero-tokens from CLEAR path are never accumulated. Functionally harmless (values are 0) but structurally inconsistent.\n+\n+**Fix** \u00e2\u20ac\u201d dedent `_accumulate_tokens(accumulated, defender_result.get(\"_tokens\"))` to run unconditionally after the if/else.\n+\n+---\n+\n+## DEAD CODE\n+\n+| Item | Location | Notes |\n+|------|----------|-------|\n+| `utils/formatting.py` | Entire module + `tests/test_formatting.py` | 3 functions, tested but never imported in production |\n+| `util/logging.py` | Entire module + `tests/test_logging.py` | 6 exports, tested but never integrated into pipeline |\n+| `UTILITY_MODEL` | `utils/api.py:33` | Defined, never referenced. Documented as \"reserved\" |\n+| `get_constraint_by_id()` | `pipeline/constitution.py:100-105` | Tested but never called in production |\n+\n+**Recommendation**: Leave dead code as-is for now. The logging module and formatting module appear intentionally staged for future integration. Flag them but don't remove without explicit direction.\n+\n+---\n+\n+## Execution Order\n+\n+1. Fix BUGs 1+2 together (both touch `cli/commands.py`, same root cause) \u00e2\u20ac\u201d one commit\n+2. Fix BUG 3 (oracle validation) \u00e2\u20ac\u201d one commit\n+3. Fix BUGs 4+5 (defensive improvements) \u00e2\u20ac\u201d one commit\n+\n+## Verification\n+\n+After each fix:\n+- Run `python -m pytest tests/test_oracle.py tests/test_runner.py -v` for pipeline changes\n+- For citation fixes: add a test with realistic VETO ledger entry containing dict-style citations, verify `most_cited` is populated\n+- Run `python -m bench verify` to confirm ledger integrity\n+- Run `python -m bench stats` to confirm citation counting works\n+\n+## Critical Files\n+- `C:\\Users\\mstar\\Bench\\cli\\commands.py` \u00e2\u20ac\u201d BUGs 1, 2\n+- `C:\\Users\\mstar\\Bench\\utils\\viewer.py` \u00e2\u20ac\u201d BUG 1\n+- `C:\\Users\\mstar\\Bench\\pipeline\\oracle.py` \u00e2\u20ac\u201d BUG 3\n+- `C:\\Users\\mstar\\Bench\\utils\\api.py` \u00e2\u20ac\u201d BUG 4\n+- `C:\\Users\\mstar\\Bench\\pipeline\\runner.py` \u00e2\u20ac\u201d BUG 5\n"
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 5239,
+        "output": 26
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The proposed change creates a markdown document describing an investigation report with findings and a remediation plan. It is a documentation artifact only \u2014 it does not modify any code, ledger, governance pipeline files, dependencies, type annotations, or introduce any secrets. The Challenger issued CLEAR and the Defender confirmed CLEAR. Reviewing the constitution independently: C-001 (error handling) is N/A as no code is changed; C-002 (scope) is satisfied as the change is a single new documentation file; C-003 (dependencies) is N/A; C-004 (type safety) is N/A; C-005 (testing) is N/A as no new logic is introduced; C-006 (secrets) is satisfied \u2014 the document contains no credentials, only references to environment variable names; C-007 (governance integrity) is satisfied \u2014 the document only proposes future fixes and explicitly recommends strengthening Oracle validation (BUG 3) rather than weakening it; C-008 (ledger immutability) is N/A as no ledger entries are touched. The document itself is non-executable and therefore cannot violate any veto-severity constraint in its current form.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No code changes; no catch blocks introduced or modified."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Single new markdown file; no out-of-scope modifications."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependencies introduced."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No type annotations affected."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Documentation-only artifact; no new executable logic to test."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "Document references env var names (OPENROUTER_API_KEY) but contains no actual secrets."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "Document proposes strengthening Oracle validation (rejecting empty VETO citations), which reinforces rather than weakens governance. No enforcement is bypassed."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger interaction."
+        }
+      ],
+      "advisories": [
+        "This document makes substantive claims about bugs in cli/commands.py, utils/viewer.py, pipeline/oracle.py, utils/api.py, and pipeline/runner.py. The Oracle has not independently verified these claims against the actual source files \u2014 the PASS certifies only that publishing this report violates no constitutional constraint, not that the reported bugs are accurate.",
+        "When the proposed fixes (BUGs 1-5) are implemented as actual code changes, each will require its own governance pass. BUG 3 in particular touches pipeline/oracle.py and will be subject to heightened C-007 scrutiny \u2014 ensure the fix only strengthens validation.",
+        "The file_path in the proposed change was reported as '[PATH_TRAVERSAL_BLOCKED]'. The governance harness flagged the original path. Confirm with the operator that the intended write location is within the repository before committing.",
+        "Recommendation to 'leave dead code as-is' should be revisited; dead code that is tested but never imported can drift and produce false confidence. Not a constraint violation, but worth tracking."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 7281,
+        "output": 1327
+      }
+    },
+    "entry_hash": "58a211cfcb69990b9b25d8b7ab508d7c0294da3da06ab1eec97a4958dbd112ae"
+  },
+  {
+    "entry_id": "7d26908e-7a2c-4b13-a8d4-63c63a49a861",
+    "timestamp": "2026-05-15T04:43:07.831969+00:00",
+    "previous_hash": "58a211cfcb69990b9b25d8b7ab508d7c0294da3da06ab1eec97a4958dbd112ae",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "[PATH_TRAVERSAL_BLOCKED]",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "[PATH_TRAVERSAL_BLOCKED]",
+        "change_type": "modify",
+        "old_string": "                for cid in citations:\n                    if isinstance(cid, str):\n                        citation_counts[cid] = citation_counts.get(cid, 0) + 1",
+        "new_string": "                for cid in citations:\n                    constraint_id = cid.get(\"constraint_id\") if isinstance(cid, dict) else None\n                    if isinstance(constraint_id, str):\n                        citation_counts[constraint_id] = citation_counts.get(constraint_id, 0) + 1"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-005",
+          "severity": "CONCERN",
+          "location": "diff: new_string logic branch",
+          "evidence": "constraint_id = cid.get(\"constraint_id\") if isinstance(cid, dict) else None\n                    if isinstance(constraint_id, str):\n                        citation_counts[constraint_id] = citation_counts.get(constraint_id, 0) + 1",
+          "reasoning": "This change replaces one code path (handling string citations) with a new branching structure (handling dict citations with a 'constraint_id' key, and silently dropping non-dict, non-string entries). The new branch introduces logic for dict-typed citations that did not previously exist. Per C-005, new branches of logic require corresponding test cases or an explicit justification for deferral. No such justification is provided in the change description."
+        },
+        {
+          "constraint_id": "C-007",
+          "severity": "CONCERN",
+          "location": "diff: new_string \u2014 silent drop of non-dict, non-str citations",
+          "evidence": "constraint_id = cid.get(\"constraint_id\") if isinstance(cid, dict) else None\n                    if isinstance(constraint_id, str):\n                        citation_counts[constraint_id] = citation_counts.get(constraint_id, 0) + 1",
+          "reasoning": "The old code counted any citation that was a plain string. The new code silently skips citations that are plain strings (the isinstance(cid, str) branch is removed entirely) and also silently skips dicts that lack a 'constraint_id' key or where 'constraint_id' is not a string. If this is citation-counting logic inside the governance pipeline itself (challenger, defender, oracle, or ledger processing), silently dropping valid citations could weaken enforcement tracking and audit completeness \u2014 a potential violation of C-007. The severity depends on which component this code lives in; the file path was blocked, making this impossible to confirm, which itself warrants scrutiny."
+        },
+        {
+          "constraint_id": "C-002",
+          "severity": "CONCERN",
+          "location": "diff metadata: file_path",
+          "evidence": "\"file_path\": \"[PATH_TRAVERSAL_BLOCKED]\"",
+          "reasoning": "The file path has been redacted or blocked, making it impossible to verify that the change is scoped to the intended file. C-002 requires that changes not modify files outside the stated task boundary. Without knowing which file is being modified, scope boundary compliance cannot be confirmed. This is an observability gap that the Oracle should resolve before approving."
+        }
+      ],
+      "_tokens": {
+        "input": 1541,
+        "output": 665
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "CONCEDE",
+          "argument": "The Challenger is correct that new branching logic \u2014 specifically the dict-handling path and the silent-drop behavior for non-dict, non-str entries \u2014 constitutes new logic under C-005. No test coverage or explicit deferral justification accompanies this change. This is a legitimate concern.",
+          "evidence": "The new code introduces `isinstance(cid, dict)` and `.get(\"constraint_id\")` handling that has no prior analog in the old code. The old code's single `isinstance(cid, str)` check is replaced by a two-branch structure with a None-fallthrough path, none of which is covered by any stated test."
+        },
+        {
+          "finding_index": 1,
+          "position": "CONCEDE",
+          "argument": "The Challenger raises a legitimate concern about silent drops. The old code counted any `cid` that was a plain string. The new code will silently ignore plain strings \u2014 which were previously the only valid citation type \u2014 because `isinstance(cid, dict)` will be False for strings, making `constraint_id` None, which then fails the `isinstance(constraint_id, str)` check. This is a behavioral regression that silently discards previously-counted citations. If any part of the pipeline still emits plain string citations, they will be silently uncounted. This is a real audit completeness risk. The blocked file path makes it impossible to confirm whether this is in a governance-critical component, which compounds the severity. C-007 concern stands.",
+          "evidence": "Old: `if isinstance(cid, str): citation_counts[cid] += 1` \u2014 strings counted. New: string `cid` \u2192 `constraint_id = None` \u2192 `isinstance(None, str)` is False \u2192 not counted. The regression is unambiguous."
+        },
+        {
+          "finding_index": 2,
+          "position": "CONCEDE",
+          "argument": "The blocked file path is a genuine observability gap. Without the file path, scope boundary compliance under C-002 cannot be verified by any reviewer including the Oracle. This is not merely a procedural inconvenience \u2014 it is a structural deficiency in the submission. The Oracle should require file path disclosure before approving.",
+          "evidence": "\"file_path\": \"[PATH_TRAVERSAL_BLOCKED]\" \u2014 the redaction prevents any scope verification. C-002 requires knowing which file is modified to confirm the change is within scope."
+        }
+      ],
+      "summary": "All three Challenger findings are legitimate: the change introduces untested branching logic (C-005), silently drops previously-counted plain-string citations creating an audit regression (C-007), and is submitted with a blocked file path that prevents scope verification (C-002) \u2014 this change should not be approved without test coverage, a behavioral regression fix or justification, and file path disclosure.",
+      "_tokens": {
+        "input": 2243,
+        "output": 708
+      }
+    },
+    "oracle": {
+      "verdict": "VETO",
+      "reasoning": "The Defender concedes all three Challenger findings, and the concessions are well-grounded. The most serious issue is the C-007 violation: the new code silently drops plain-string citations that were previously counted. As both Challenger and Defender demonstrate, when `cid` is a string, `isinstance(cid, dict)` is False, so `constraint_id` becomes None, which then fails `isinstance(constraint_id, str)`, resulting in the citation being silently dropped from `citation_counts`. This is a behavioral regression in citation-tracking logic. The variable name `citation_counts` and the surrounding pattern strongly suggest this code lives in the governance pipeline (challenger/defender/oracle citation aggregation), which makes silent loss of citation data a direct weakening of enforcement tracking under C-007. Additionally, the blocked file path ([PATH_TRAVERSAL_BLOCKED]) prevents the Oracle from verifying C-002 scope compliance \u2014 a structural observability failure. The Defender does not contest any of this and explicitly states the change should not be approved without remediation. C-005 is a warning-severity concern that alone would not trigger veto, but the C-007 veto-severity violation is sufficient and dispositive.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-002",
+          "disposition": "VIOLATED",
+          "note": "Blocked file path prevents scope verification. Defender concedes this is a structural deficiency that prevents any reviewer from confirming the change stays within scope boundaries."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "VIOLATED",
+          "note": "New branching logic (dict handling, None-fallthrough path) added without test coverage or deferral justification. Warning severity \u2014 contributes to but does not alone cause the veto."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "VIOLATED",
+          "note": "The change silently drops plain-string citations that were previously counted, creating an audit regression in citation tracking. Defender concedes the regression is 'unambiguous.' If this is in a governance pipeline component (citation_counts strongly implies so), it weakens enforcement tracking, which C-007 forbids."
+        },
+        {
+          "constraint_id": "C-001",
+          "disposition": "VIOLATED",
+          "note": "Related to C-007 \u2014 the new code silently ignores citations of unexpected shape (non-dict, non-conforming-dict, and now plain strings) with no logging or error. This is silent error swallowing of unexpected input rather than a catch block, but the same governance principle applies: invalid/unexpected data is dropped without trace."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new imports or dependencies introduced."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No type annotations modified."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No secrets or credentials present."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger modifications in this diff."
+        }
+      ],
+      "advisories": [
+        "The redacted file path is itself a governance signal worth investigating \u2014 submissions to the pipeline should not arrive with blocked paths, as this defeats Oracle review.",
+        "If the intent is to migrate citation format from string to dict, a backward-compatible path that handles both shapes (or an explicit migration with audited deprecation of strings) would be the governance-compliant approach."
+      ],
+      "remediation": "To pass governance, the change must: (1) Disclose the actual file path so C-002 scope compliance can be verified. (2) Preserve backward compatibility with plain-string citations by retaining the `isinstance(cid, str)` branch alongside the new dict-handling branch \u2014 e.g., `if isinstance(cid, str): citation_counts[cid] += 1; elif isinstance(cid, dict): cid_val = cid.get('constraint_id'); if isinstance(cid_val, str): citation_counts[cid_val] += 1`. (3) Add explicit handling (log, warn, or raise) for citations that match neither shape, rather than silently dropping them, to satisfy C-001 and C-007. (4) Add test cases covering: plain-string citations, dict citations with valid constraint_id, dict citations without constraint_id, and malformed entries \u2014 or provide explicit deferral justification per C-005.",
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 4308,
+        "output": 1603
+      }
+    },
+    "entry_hash": "73f0e667c300a998011e268b4965cc4bd4b65509de268b6628f41d2542c90dd3"
+  },
+  {
+    "entry_id": "6dd0ab5b-234a-4a54-910a-de073f50d3e2",
+    "timestamp": "2026-05-15T04:44:07.822617+00:00",
+    "previous_hash": "73f0e667c300a998011e268b4965cc4bd4b65509de268b6628f41d2542c90dd3",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "[PATH_TRAVERSAL_BLOCKED]",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "[PATH_TRAVERSAL_BLOCKED]",
+        "change_type": "modify",
+        "old_string": "                for cid in citations:\n                    if isinstance(cid, str):\n                        citation_counts[cid] = citation_counts.get(cid, 0) + 1",
+        "new_string": "                for cid in citations:\n                    constraint_id = cid.get(\"constraint_id\") if isinstance(cid, dict) else None\n                    if isinstance(constraint_id, str):\n                        citation_counts[constraint_id] = citation_counts.get(constraint_id, 0) + 1"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-007",
+          "severity": "CONCERN",
+          "location": "diff: new_string, line 2-4",
+          "evidence": "constraint_id = cid.get(\"constraint_id\") if isinstance(cid, dict) else None\n                    if isinstance(constraint_id, str):\n                        citation_counts[constraint_id] = citation_counts.get(constraint_id, 0) + 1",
+          "reasoning": "This change modifies citation counting logic in what appears to be a governance pipeline component (given the variable name 'constraint_id' and reference to citations). The old code counted string citations directly; the new code only counts citations that are dicts with a 'constraint_id' key. If any existing citation records are plain strings, they will now be silently dropped from the count. This could weaken enforcement reporting \u2014 if citation frequency is used to prioritize or escalate constraint violations, undercounting due to format mismatch would silently degrade governance visibility. The concern hinges on whether the upstream data can produce plain-string citations in practice."
+        },
+        {
+          "constraint_id": "C-001",
+          "severity": "CONCERN",
+          "location": "diff: new_string, line 2",
+          "evidence": "constraint_id = cid.get(\"constraint_id\") if isinstance(cid, dict) else None",
+          "reasoning": "When `cid` is neither a string nor a dict (e.g., an integer, list, or malformed entry), the expression silently resolves to `None` and the entire citation is dropped without any logging, warning, or error. The old code only acted on `isinstance(cid, str)` so it also skipped non-strings silently, but the new code introduces a new branch (dict handling) that adds a second silent-skip path for unexpected types. While not a classic catch-block violation, the spirit of C-001 \u2014 that failures must be visible \u2014 applies: unexpected citation formats are now silently discarded with no observability."
+        },
+        {
+          "constraint_id": "C-005",
+          "severity": "CONCERN",
+          "location": "diff: new_string",
+          "evidence": "constraint_id = cid.get(\"constraint_id\") if isinstance(cid, dict) else None",
+          "reasoning": "A new branch of logic has been introduced: the handling of dict-type citations with a 'constraint_id' key. No test cases are referenced or provided in the diff to cover this new branch (dict input, dict without 'constraint_id' key, non-string constraint_id value, non-dict non-string input). Without explicit justification for deferral, this triggers C-005."
+        }
+      ],
+      "_tokens": {
+        "input": 1541,
+        "output": 675
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "MITIGATE",
+          "argument": "The Challenger's C-007 concern is valid in spirit but likely inverts the actual governance improvement. The old code counted plain-string citations; the new code counts dict-structured citations with a 'constraint_id' key. This change almost certainly reflects a schema migration in the upstream data format \u2014 citations have evolved from bare strings to structured dicts. If the upstream producers have already migrated to emitting dicts, the old code was silently dropping ALL citations (since none were plain strings anymore), and the new code correctly counts them. The risk of silently dropping plain-string citations is real only if the upstream still emits them. Without file context, the most likely interpretation is that this is a necessary format adaptation, not a weakening. The concern is legitimate as a conditional risk but not a clear violation of C-007 absent evidence that plain-string citations remain in production use.",
+          "evidence": "The variable name 'constraint_id' strongly suggests this is in a governance pipeline component. The change from `isinstance(cid, str)` to `cid.get('constraint_id') if isinstance(cid, dict)` is a structural schema upgrade, not a removal of functionality. If the old format is defunct, the old code was already broken (counting nothing), and this fix restores correct behavior."
+        },
+        {
+          "finding_index": 1,
+          "position": "CONCEDE",
+          "argument": "The Challenger is correct that unexpected citation types (integers, lists, etc.) are now silently dropped with no logging or observability. While the old code also silently skipped non-strings, the new code introduces an additional silent path: dicts missing 'constraint_id', dicts with non-string 'constraint_id' values, and non-dict non-string types. This is a genuine violation of C-001's spirit \u2014 unexpected formats should at minimum emit a warning log. The new code should include an else clause that logs unexpected citation formats so format mismatches are detectable. This is a real gap.",
+          "evidence": "The new_string has no else/except/log path for: (1) isinstance(cid, dict) but no 'constraint_id' key, (2) constraint_id exists but is not a str, (3) cid is neither dict nor str. All three cases silently result in None and are discarded."
+        },
+        {
+          "finding_index": 2,
+          "position": "CONCEDE",
+          "argument": "The Challenger is correct under C-005. Three new code branches are introduced \u2014 dict with valid 'constraint_id', dict without 'constraint_id', and non-dict non-string cid \u2014 and no test coverage is referenced or provided in the diff. No justification for deferral is given. This is a warning-level violation and should be remediated with test cases covering at minimum: a dict with a valid string 'constraint_id', a dict missing the key, a dict with a non-string value, and a non-dict non-string citation.",
+          "evidence": "The diff adds `cid.get('constraint_id') if isinstance(cid, dict) else None` and `if isinstance(constraint_id, str)` \u2014 two new conditional branches \u2014 with no accompanying test artifacts referenced."
+        }
+      ],
+      "summary": "The change is a likely-necessary schema migration from string citations to structured dicts, but it introduces a silent-discard path for malformed inputs (conceded C-001 violation) and lacks test coverage for the new branches (conceded C-005 warning), making it not fully sound as written.",
+      "_tokens": {
+        "input": 2257,
+        "output": 866
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change modifies citation counting logic to handle dict-structured citations with a 'constraint_id' key instead of bare strings. This appears to be a schema adaptation. Evaluating against each cited constraint: (1) C-007 (Governance Pipeline Integrity): The Challenger raised this as a CONCERN, not a clear violation, conditional on whether upstream still emits plain strings. The Defender's MITIGATE position is persuasive \u2014 the variable name 'constraint_id' and structural nature of the change indicate a format migration where the new code likely restores correct counting rather than weakening it. Absent evidence that plain-string citations are still produced upstream, this does not rise to a clear C-007 violation requiring veto. (2) C-001 (No Silent Error Swallowing): The Defender conceded that unexpected citation formats are silently dropped. However, C-001 is scoped specifically to 'catch blocks' that are 'empty' or 'only contain comments.' The rule text addresses error-handling constructs, not all type-filtering branches. The pre-existing code had the same silent-skip behavior for non-strings; the new code preserves this pattern for non-matching types. This is a stylistic/observability concern, not a clear C-001 violation under the rule as written. Issuing as advisory. (3) C-005 (Test Coverage): Severity is 'warning', not 'veto'. A warning-level constraint cannot trigger a veto. Issuing as advisory. No other constitutional constraints (C-002 scope, C-003 dependencies, C-004 type safety, C-006 secrets, C-008 ledger immutability) are implicated by this diff.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "C-001 is scoped to catch blocks (empty or comment-only). The diff contains no exception handling. The silent-discard concern raised by Challenger and conceded by Defender is a related observability gap but does not match the rule text. Noted as advisory."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Single-file modification; no scope boundary stated in task context to violate."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "SATISFIED",
+          "note": "No new imports or dependencies introduced."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "No type annotations removed or weakened."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "VIOLATED",
+          "note": "Defender conceded new branches lack test coverage with no deferral justification. Severity is 'warning', not veto-eligible. Recorded as advisory per the rule's severity classification."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "No credentials present."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "Challenger raised conditional CONCERN, not a confirmed violation. Defender's MITIGATE argument that this is a schema migration is plausible and unrebutted by direct evidence of weakening. The change does not bypass verification or disable logging \u2014 it adapts to a new data structure. No clear weakening of enforcement is demonstrated."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger modification."
+        }
+      ],
+      "advisories": [
+        "C-005 warning: Add test cases covering (a) dict with valid string 'constraint_id', (b) dict missing the key, (c) dict with non-string 'constraint_id' value, (d) non-dict non-string citation entries.",
+        "Observability gap (related to C-001 spirit though not its letter): Consider emitting a warning log when a citation entry has an unexpected format, so upstream schema drift is detectable rather than silently absorbed.",
+        "If plain-string citations may still appear in production data, consider handling both formats (str and dict) during a migration window to avoid silently dropping legacy entries \u2014 verify upstream producers have fully migrated to the dict schema."
+      ],
+      "remediation": null,
+      "confidence": "MODERATE",
+      "_tokens": {
+        "input": 4483,
+        "output": 1492
+      }
+    },
+    "entry_hash": "cb2678ea092f92f27d3c78e50e3168c395d3625cbedb1da9d7d3a032e64e3f90"
+  },
+  {
+    "entry_id": "9b072643-bd42-4986-810c-637d33a72b80",
+    "timestamp": "2026-05-15T04:44:52.945052+00:00",
+    "previous_hash": "cb2678ea092f92f27d3c78e50e3168c395d3625cbedb1da9d7d3a032e64e3f90",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "[PATH_TRAVERSAL_BLOCKED]",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "[PATH_TRAVERSAL_BLOCKED]",
+        "change_type": "modify",
+        "old_string": "            cite_str: str = \", \".join(str(c) for c in citations if c)",
+        "new_string": "            cite_str: str = \", \".join(\n                c.get(\"constraint_id\", str(c)) if isinstance(c, dict) else str(c)\n                for c in citations if c\n            )"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-005",
+          "severity": "CONCERN",
+          "location": "diff: new_string replacement logic",
+          "evidence": "c.get(\"constraint_id\", str(c)) if isinstance(c, dict) else str(c)",
+          "reasoning": "This introduces a new conditional branch that handles dict-type citations differently from string/other types. The branch silently selects a specific key ('constraint_id') from dict citations with a fallback to str(c). There is no indication in the diff of corresponding test cases for this new branching logic \u2014 specifically: (1) a dict citation WITH a 'constraint_id' key, (2) a dict citation WITHOUT a 'constraint_id' key (fallback path), and (3) a non-dict citation (existing path). The constitution requires new branches to have test coverage or explicit justification for deferral."
+        },
+        {
+          "constraint_id": "C-002",
+          "severity": "CONCERN",
+          "location": "file_path field in proposed change",
+          "evidence": "\"file_path\": \"[PATH_TRAVERSAL_BLOCKED]\"",
+          "reasoning": "The file path has been redacted as '[PATH_TRAVERSAL_BLOCKED]', which makes it impossible to verify that this change is within the stated task boundary. C-002 requires that changes not modify files outside the stated task boundary. Without knowing which file is being modified, scope boundary compliance cannot be confirmed. This is not a fabricated concern \u2014 the absence of a verifiable file path structurally prevents scope validation."
+        }
+      ],
+      "_tokens": {
+        "input": 1495,
+        "output": 401
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "MITIGATE",
+          "argument": "The Challenger is correct that new conditional branches should have test coverage per C-005. However, C-005 is a WARNING-severity constraint, not a VETO. The logic introduced is narrow, deterministic, and low-risk: it is a simple isinstance guard with a dict key lookup and a fallback to str(c). The existing path (non-dict) is preserved exactly as before \u2014 str(c) \u2014 so no regression is possible on the original behavior. The two new sub-paths (dict with 'constraint_id', dict without) are trivially verifiable by inspection. A justification for deferral is implicitly present: this is a formatting convenience expression inside a string join, not a business-logic function. That said, the Challenger is right that explicit test cases or a written deferral note would satisfy C-005 cleanly. This is a legitimate concern but does not rise to a blocking violation.",
+          "evidence": "The old_string uses str(c) unconditionally. The new_string preserves str(c) for all non-dict inputs (the existing path is unchanged), and adds a dict-specific branch that is one expression deep. No external dependencies or error-swallowing are introduced."
+        },
+        {
+          "finding_index": 1,
+          "position": "MITIGATE",
+          "argument": "The Challenger correctly identifies that the redacted file path prevents formal C-002 scope verification. However, the path was redacted by the pipeline infrastructure itself ('[PATH_TRAVERSAL_BLOCKED]'), not by the author of the change. This is a pipeline safety mechanism, not an attempt to obscure scope. The change itself is a single-line string formatting expression inside a citation rendering context \u2014 the nature of the code strongly implies it belongs in a reporting, formatting, or output module, which is consistent with the kind of task that would involve citation string generation. The structural inability to confirm scope due to pipeline redaction should not be treated the same as a deliberate scope violation. The appropriate resolution is to require the submitter to confirm the file identity out-of-band, not to veto the change on this basis.",
+          "evidence": "The diff is a one-line string join expression involving a variable named 'citations' with a key called 'constraint_id' \u2014 contextually consistent with a single formatter or renderer file. No evidence of multi-file scope creep exists in the diff itself."
+        }
+      ],
+      "summary": "Both findings are legitimate but neither is a veto-level violation: the test coverage gap (C-005, WARNING) is real but mitigated by the triviality and non-regression nature of the new branch, while the file path redaction (C-002) is a pipeline artifact rather than evidence of actual scope creep, and should be resolved by identity confirmation rather than rejection.",
+      "_tokens": {
+        "input": 1933,
+        "output": 684
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change modifies a single line that formats citation strings, adding an isinstance check to extract 'constraint_id' from dict-typed citations with a str(c) fallback. Evaluating against each constraint: C-001 is not triggered (no error handling introduced or modified). C-002 is flagged by the Challenger due to redacted file path, but the Defender correctly notes that '[PATH_TRAVERSAL_BLOCKED]' is a pipeline safety marker, not author obfuscation, and the diff content (citation rendering of constraint_id) is structurally consistent with a formatter module \u2014 insufficient evidence of scope violation to trigger veto. C-003 is not triggered (no new imports). C-004 is SATISFIED \u2014 the type annotation 'cite_str: str' is preserved exactly. C-005 is raised as a warning-level concern by the Challenger; the Defender concedes the gap but correctly notes (a) C-005 is warning severity, not veto, and (b) the existing non-dict path is preserved bit-for-bit (str(c)), so no regression risk exists on prior behavior. C-006 is not triggered. C-007 is the most relevant scrutiny axis given the change appears to touch citation rendering possibly in a governance module: the change does not weaken enforcement, bypass verification, or disable logging \u2014 it strengthens output readability by extracting structured constraint IDs from dict citations rather than dumping raw dict repr. C-008 is not triggered (no ledger mutation). No veto-severity constraint is clearly violated.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error handling code introduced or modified."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Redacted path is a pipeline artifact per Defender rebuttal; diff content is single-file and contextually consistent with a citation formatter. No evidence of multi-file scope creep."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new imports or dependencies."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "Type annotation 'cite_str: str' is preserved; no Any introduced."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "VIOLATED",
+          "note": "New branching logic (dict with key, dict without key, non-dict) lacks declared test coverage. Severity is warning, not veto. Recorded as advisory."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No secrets or credentials in diff."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "If this is a governance module file, the change improves citation rendering fidelity (extracts structured constraint_id) rather than weakening enforcement or logging."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger mutation."
+        }
+      ],
+      "advisories": [
+        "C-005: Add test cases covering the three branches: (1) dict citation with 'constraint_id' key, (2) dict citation without 'constraint_id' key (fallback to str(c)), (3) non-dict citation. Alternatively, add an inline comment justifying deferral.",
+        "Submitter should confirm the actual file identity out-of-band so future audits of this change can verify C-002 compliance against the original task boundary, as noted by the Defender."
+      ],
+      "remediation": null,
+      "confidence": "MODERATE",
+      "_tokens": {
+        "input": 3866,
+        "output": 1308
+      }
+    },
+    "entry_hash": "fa127dc413ea944bd025ee08716ae8e0f58f1336cc8a47d77351c75c9d0f42b1"
+  },
+  {
+    "entry_id": "a66f8513-2bd7-42ee-81db-3495f190ab34",
+    "timestamp": "2026-05-15T04:46:09.413835+00:00",
+    "previous_hash": "fa127dc413ea944bd025ee08716ae8e0f58f1336cc8a47d77351c75c9d0f42b1",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "[PATH_TRAVERSAL_BLOCKED]",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "[PATH_TRAVERSAL_BLOCKED]",
+        "change_type": "modify",
+        "old_string": "                for cid in citations:\n                    if isinstance(cid, str):\n                        citation_counts[cid] = citation_counts.get(cid, 0) + 1",
+        "new_string": "                for cid in citations:\n                    if isinstance(cid, str):\n                        citation_counts[cid] = citation_counts.get(cid, 0) + 1\n                    elif isinstance(cid, dict):\n                        cid_val: Any = cid.get(\"constraint_id\")\n                        if isinstance(cid_val, str):\n                            citation_counts[cid_val] = citation_counts.get(cid_val, 0) + 1\n                    else:\n                        print(\n                            f\"[bench cli] unexpected citation type: {type(cid).__name__}\",\n                            file=sys.stderr,\n                        )"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-004",
+          "severity": "CONCERN",
+          "location": "new_string, line introducing cid_val annotation",
+          "evidence": "cid_val: Any = cid.get(\"constraint_id\")",
+          "reasoning": "The code introduces an explicit `Any` type annotation for `cid_val`. C-004 prohibits adding `Any` type annotations, as they weaken type safety. While `dict.get()` without a type-narrowed dict does return `Any` implicitly in many type-checkers, explicitly annotating the variable as `Any` makes this concrete and visible. The subsequent `isinstance(cid_val, str)` guard does narrow the type before use, so the runtime risk is low, but the annotation itself is a literal `Any` addition as prohibited by C-004."
+        },
+        {
+          "constraint_id": "C-005",
+          "severity": "CONCERN",
+          "location": "new_string, elif isinstance(cid, dict) branch and else branch",
+          "evidence": "elif isinstance(cid, dict):\n                        cid_val: Any = cid.get(\"constraint_id\")\n                        if isinstance(cid_val, str):\n                            citation_counts[cid_val] = citation_counts.get(cid_val, 0) + 1\n                    else:\n                        print(...)",
+          "reasoning": "Two new logic branches are introduced \u2014 one handling dict-typed citations and one handling unexpected types. There is no indication in the diff that corresponding test cases exist for these branches. C-005 requires test cases or explicit documented justification for deferral for new branches of logic."
+        },
+        {
+          "constraint_id": "C-002",
+          "severity": "OBSERVATION",
+          "location": "file_path field in the proposed change",
+          "evidence": "\"file_path\": \"[PATH_TRAVERSAL_BLOCKED]\"",
+          "reasoning": "The file path has been redacted as `[PATH_TRAVERSAL_BLOCKED]`. C-002 requires that changes not modify files outside the stated task boundary. Without knowing the actual file being modified, it is impossible to verify scope compliance. This is not a confirmed violation but the blocked path prevents scope verification, which is itself a governance concern."
+        }
+      ],
+      "_tokens": {
+        "input": 1636,
+        "output": 581
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "MITIGATE",
+          "argument": "The Challenger's reading of C-004 is technically accurate \u2014 the annotation `cid_val: Any` does introduce an explicit `Any` type \u2014 but the context substantially reduces concern. The variable `cid_val` is immediately guarded by `isinstance(cid_val, str)` before any use, meaning the runtime behavior is fully type-safe. The `Any` annotation here is a pragmatic acknowledgment that `dict.get()` on an unparameterized dict returns `Any` in most type-checkers (mypy, pyright), so the annotation is descriptively honest rather than a weakening of an existing stricter type. The spirit of C-004 is to prevent weakening of function signatures and return types \u2014 the governance-critical surface. An intermediate local variable annotated as `Any` to accurately reflect the result of a heterogeneous dict lookup is qualitatively different from removing a typed function return annotation. That said, I acknowledge this is a literal violation of C-004's text. A mitigation would be to parameterize the dict type upstream or use `cast()`, but the practical risk is near-zero given the `isinstance` guard.",
+          "evidence": "cid_val: Any = cid.get(\"constraint_id\") followed immediately by if isinstance(cid_val, str): which narrows the type before any use of cid_val"
+        },
+        {
+          "finding_index": 1,
+          "position": "MITIGATE",
+          "argument": "The Challenger correctly identifies that two new branches lack demonstrated test coverage, which is a C-005 concern. However, C-005 is rated 'warning' not 'veto', and the finding is appropriately flagged at CONCERN severity. The branches themselves are defensive: the `dict` branch handles a known structural variant of citation data by safely extracting a string key, and the `else` branch simply emits a diagnostic message to stderr and continues \u2014 it cannot fail silently. The code is simple enough that the logic correctness is visually verifiable. A formal justification for test deferral should be documented, but this does not rise to a blocking violation given the warning-level severity and low complexity of the new branches.",
+          "evidence": "The else branch only calls print(..., file=sys.stderr), which is a pure side-effect with no state mutation. The dict branch mirrors the existing str branch pattern exactly. Neither branch introduces algorithmic complexity that demands test isolation."
+        },
+        {
+          "finding_index": 2,
+          "position": "CONCEDE",
+          "argument": "The Challenger is correct that the redacted file path `[PATH_TRAVERSAL_BLOCKED]` makes scope verification under C-002 impossible. This is a legitimate governance gap. The pipeline itself has blocked the path metadata needed to confirm the change is within scope. While this may be a security feature of the pipeline infrastructure (preventing path traversal in governance tooling), it creates an evidence vacuum: we cannot confirm or deny that the modified file is within the stated task boundary. The Oracle should require the actual file path to be surfaced through a safe channel before approving. I concede this finding.",
+          "evidence": "\"file_path\": \"[PATH_TRAVERSAL_BLOCKED]\" \u2014 no actual path is available for scope verification against any stated task boundary"
+        }
+      ],
+      "summary": "The change is logically sound and defensively written, but has two legitimate governance flags: a literal C-004 violation from an explicit `Any` annotation on a local variable (mitigated by an immediate isinstance guard), and an unresolvable C-002 scope verification failure due to the redacted file path \u2014 the latter is a blocking concern until the actual file path is confirmed.",
+      "_tokens": {
+        "input": 2250,
+        "output": 896
+      }
+    },
+    "oracle": {
+      "verdict": "VETO",
+      "reasoning": "Two issues converge to require a veto. First, C-004 (Type Safety Preservation, severity: veto) explicitly prohibits 'adding Any type'. The Challenger identifies a literal violation in `cid_val: Any = cid.get(\"constraint_id\")`, and the Defender concedes this is 'a literal violation of C-004's text' while arguing the runtime risk is low. C-004 is not a runtime-risk constraint; it is a governance-infrastructure constraint, and its text is categorical. The Defender's mitigation (use `cast()` or parameterize the dict upstream) is itself the path to compliance, confirming a compliant alternative exists. Second, C-002 (Scope Boundary Enforcement, severity: veto) cannot be verified because the `file_path` field is redacted as `[PATH_TRAVERSAL_BLOCKED]`. The Defender concedes this finding outright, acknowledging an 'evidence vacuum' for scope verification. A veto-severity constraint that cannot be verified cannot be certified as satisfied; under a governance regime, unverifiable equals unapproved for veto-tier rules. C-005 (warning) is appropriately flagged but does not independently trigger veto. C-001, C-003, C-006, C-007, C-008 are not implicated by the diff content shown.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No catch/except blocks introduced."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "VIOLATED",
+          "note": "File path is redacted as [PATH_TRAVERSAL_BLOCKED]; scope cannot be verified against any task boundary. Defender conceded this finding."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new imports introduced (sys and Any are presumed pre-existing in the module given their use)."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "VIOLATED",
+          "note": "Explicit `cid_val: Any` annotation directly violates the rule's prohibition on adding `Any`. Defender conceded literal violation; runtime safety via isinstance guard does not cure the type-annotation violation."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "VIOLATED",
+          "note": "Two new logic branches (dict handling and else diagnostic) lack tests or documented deferral justification. Warning-severity, non-blocking on its own."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No credentials present."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Diff does not appear to alter governance enforcement logic; however, this assessment is itself hampered by the redacted file path (see C-002)."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger mutation."
+        }
+      ],
+      "advisories": [
+        "C-005: Add test cases covering (a) a dict citation with a valid string constraint_id, (b) a dict citation missing constraint_id, and (c) an unexpected type triggering the stderr diagnostic. Alternatively, document deferral justification inline.",
+        "If `sys` was newly imported to support the stderr write, ensure the import is declared at module top per C-003. This cannot be confirmed from the diff alone."
+      ],
+      "remediation": "To pass governance: (1) Remove the explicit `Any` annotation. Replace `cid_val: Any = cid.get(\"constraint_id\")` with either `cid_val = cast(object, cid.get(\"constraint_id\"))` followed by the existing isinstance guard, or restructure as `raw = cid.get(\"constraint_id\"); if isinstance(raw, str): citation_counts[raw] = citation_counts.get(raw, 0) + 1`. The latter is preferred \u2014 it eliminates the need for any `Any` annotation while preserving identical runtime behavior. (2) Surface the actual file path through a non-redacted channel so scope can be verified against the stated task boundary per C-002. (3) Recommended but not blocking: add tests or a deferral note for the two new branches per C-005.",
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 4605,
+        "output": 1554
+      }
+    },
+    "entry_hash": "0203ef587c5f748709a755c7fcb936fb6a083cf203b891b36c993b685d49cbbe"
+  },
+  {
+    "entry_id": "d27a05f0-b76b-4225-8924-6e4994dbce12",
+    "timestamp": "2026-05-15T04:47:05.404629+00:00",
+    "previous_hash": "0203ef587c5f748709a755c7fcb936fb6a083cf203b891b36c993b685d49cbbe",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "[PATH_TRAVERSAL_BLOCKED]",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "[PATH_TRAVERSAL_BLOCKED]",
+        "change_type": "modify",
+        "old_string": "                for cid in citations:\n                    constraint_id = cid.get(\"constraint_id\") if isinstance(cid, dict) else None\n                    if isinstance(constraint_id, str):\n                        citation_counts[constraint_id] = citation_counts.get(constraint_id, 0) + 1",
+        "new_string": "                for cid in citations:\n                    if isinstance(cid, str):\n                        citation_counts[cid] = citation_counts.get(cid, 0) + 1\n                    elif isinstance(cid, dict):\n                        cid_val: Any = cid.get(\"constraint_id\")\n                        if isinstance(cid_val, str):\n                            citation_counts[cid_val] = citation_counts.get(cid_val, 0) + 1\n                    else:\n                        print(\n                            f\"[bench viewer] unexpected citation type: {type(cid).__name__}\",\n                            file=sys.stderr,\n                        )"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-004",
+          "severity": "CONCERN",
+          "location": "new_string, line introducing `cid_val: Any = cid.get(\"constraint_id\")`",
+          "evidence": "cid_val: Any = cid.get(\"constraint_id\")",
+          "reasoning": "The variable is explicitly annotated as `Any`. While this is a local variable annotation rather than a function signature annotation, C-004 states that 'Adding Any type' is a violation. The original code used an inline expression without Any annotation. However, the practical risk is limited: `dict.get()` returns `Optional[<value_type>]` and the annotation is only on a local variable used immediately for an isinstance check. The Oracle should determine whether C-004 applies strictly to function/method signatures or also to local variable annotations."
+        },
+        {
+          "constraint_id": "C-003",
+          "severity": "CONCERN",
+          "location": "new_string, `file=sys.stderr` usage",
+          "evidence": "file=sys.stderr,",
+          "reasoning": "The new code uses `sys.stderr`, which requires `sys` to be imported. The diff does not show an import statement being added. If `sys` is not already imported in the file context, this would be an undeclared dependency usage (though `sys` is a stdlib module, C-003 still requires that imports be declared). The file context was not provided, so this cannot be fully resolved here \u2014 the Oracle should verify whether `sys` is already imported."
+        },
+        {
+          "constraint_id": "C-005",
+          "severity": "CONCERN",
+          "location": "new_string, new branch: `if isinstance(cid, str)` and `else` block",
+          "evidence": "if isinstance(cid, str):\n                        citation_counts[cid] = ...\n                    ...\n                    else:\n                        print(...)",
+          "reasoning": "Two new logical branches are introduced: handling string-type citations directly, and the `else` fallthrough for unexpected types. Neither branch existed before. C-005 requires corresponding test cases or explicit justification for deferral. No test coverage evidence accompanies this diff."
+        }
+      ],
+      "_tokens": {
+        "input": 1668,
+        "output": 559
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "REBUT",
+          "argument": "C-004 is titled 'Type Safety Preservation' and its rule explicitly targets function signatures and typed return annotations \u2014 governance-level artifacts that inform callers and tooling. The rule states 'Functions must not remove or weaken existing type annotations. Adding Any type or removing a typed return annotation is a violation.' A local variable annotation on an intermediate variable within a single expression is categorically different from a function signature annotation. The use of `cid_val: Any` here is a pragmatic annotation on a local scratch variable that immediately flows into an `isinstance(cid_val, str)` check \u2014 the narrowing happens on the next line, making the `Any` annotation purely informational. Furthermore, `dict.get()` without a typed dict returns `Optional[Any]` in most type checkers anyway, so the annotation is not weakening anything \u2014 it's being explicit about what the untyped dict yields. The spirit of C-004 is to prevent erosion of the type contract at API boundaries. This change does not touch any function signature, return type, or parameter annotation.",
+          "evidence": "C-004 rule text: 'Functions must not remove or weaken existing type annotations. Adding Any type or removing a typed return annotation is a violation.' The annotation in question is `cid_val: Any = cid.get(\"constraint_id\")` \u2014 a local variable, not a function parameter or return annotation."
+        },
+        {
+          "finding_index": 1,
+          "position": "MITIGATE",
+          "argument": "The Challenger correctly identifies that `sys` must be imported, and this is a legitimate thing to verify. However, `sys` is a Python standard library module that is almost universally imported in non-trivial Python scripts. The Challenger themselves acknowledge the file context was not provided, meaning this is a conditional concern rather than a confirmed violation. C-003's rationale targets supply chain attack vectors and reproducibility failures \u2014 `sys` is a built-in stdlib module with zero supply chain risk. Even if `sys` were not yet imported, the fix is a single `import sys` line with no governance risk. The practical probability that a file in a pipeline that already uses `print()` and I/O operations does not have `sys` imported is low. This finding should be resolved by verifying the existing imports rather than treated as a veto.",
+          "evidence": "`sys` is Python's standard library system module. The diff shows use of `sys.stderr` in a print call \u2014 a standard stderr redirection pattern. C-003's rationale cites 'supply chain attack vectors and reproducibility failures', neither of which applies to stdlib imports."
+        },
+        {
+          "finding_index": 2,
+          "position": "CONCEDE",
+          "argument": "The Challenger is correct. Two new logical branches are introduced \u2014 handling of `str`-typed citations directly, and an `else` fallthrough that logs unexpected types to stderr. Neither branch existed before, and the diff provides no evidence of accompanying test cases or explicit written justification for deferral. C-005 is a warning-severity constraint, not a veto, so this does not block the change, but the violation is real. Test cases should be added for (a) a citation list containing plain string entries and (b) a citation list containing an unexpected type that triggers the else branch.",
+          "evidence": "New branches introduced: `if isinstance(cid, str): citation_counts[cid] = ...` and `else: print(f\"[bench viewer] unexpected citation type...\")`. No test file diff is present in the submission."
+        }
+      ],
+      "summary": "The change is substantively sound \u2014 it correctly expands citation handling to support string-typed citations and adds visible error logging for unexpected types \u2014 with one legitimate C-005 warning for missing test coverage on new branches, while the C-004 and C-003 findings are either overstretched interpretations or unconfirmed conditionals that do not warrant veto.",
+      "_tokens": {
+        "input": 2260,
+        "output": 949
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change expands citation handling to support string-typed citations and adds visible stderr logging for unexpected types, which actually strengthens C-001 (no silent error swallowing) compared to the prior code, which silently ignored non-dict citations. I evaluated each Challenger finding against the Defender's rebuttals: (1) C-004 finding on `cid_val: Any` \u2014 the constraint's rule text explicitly scopes to functions and return annotations ('Functions must not remove or weaken existing type annotations'). A local variable annotation that immediately flows into an isinstance narrowing does not weaken any function-level type contract. The Defender's REBUT is consistent with the literal text of C-004. SATISFIED. (2) C-003 finding on `sys.stderr` \u2014 C-003's rationale targets supply chain and reproducibility risks; `sys` is stdlib. The Challenger themselves marked this conditional on file context not provided. I cannot confirm a violation without evidence the import is missing, and even if missing it would be trivially remediable with no governance risk. The Defender's MITIGATE is reasonable; this becomes an advisory to verify the import exists. (3) C-005 finding on missing tests \u2014 Defender CONCEDES. C-005 is severity 'warning', not 'veto', so per the VETO rules this does not block. It is recorded as an advisory. I also independently checked C-007 (governance pipeline integrity): the change strengthens rather than weakens enforcement by surfacing previously-silent unexpected citation shapes via stderr, so C-007 is SATISFIED. No other constraints (C-002, C-006, C-008) are implicated by this diff.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "SATISFIED",
+          "note": "The new else branch logs unexpected citation types to stderr rather than silently dropping them, which aligns with C-001's requirement that failures be visible."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "C-003 targets supply chain and reproducibility risks. `sys` is stdlib; the Challenger flagged this as conditional on unseen file context. Advisory issued to verify the import exists."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "C-004's rule text targets function-level annotations ('Functions must not remove or weaken existing type annotations'). The `cid_val: Any` is a local variable annotation immediately narrowed by isinstance; no function signature or return type is weakened. Defender's REBUT (finding 0) is consistent with the literal constraint text."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "VIOLATED",
+          "note": "Defender concedes new branches lack tests or written deferral justification. Severity is 'warning', not 'veto', so this does not block but is recorded as an advisory."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "Change to viewer/pipeline code strengthens rather than weakens enforcement by surfacing previously-silent unexpected data shapes."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Single-file modification; no scope boundary issue evident from the diff."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No credentials or secrets introduced."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger entries are modified, deleted, or overwritten."
+        }
+      ],
+      "advisories": [
+        "C-005 (warning): Add test cases for (a) citations list containing plain string entries and (b) citations list containing an unexpected non-str/non-dict type that exercises the new else branch. Defender conceded this and committed to it being real but non-blocking.",
+        "C-003 verification: Confirm `import sys` is present at the top of the modified file. If it is not, add it in the same change. This is not a violation but a precondition for the diff to function.",
+        "Style note (not enforced by constitution): a direct `print(..., file=sys.stderr)` couples the viewer to stdout/stderr conventions; if a logger exists elsewhere in the pipeline, prefer it for consistency. This is preference, not law."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 4670,
+        "output": 1569
+      }
+    },
+    "entry_hash": "e7f7e3b7640cbbb38e74e2a74980ff7704ec463c8c169547913d6993fe364048"
+  },
+  {
+    "entry_id": "31bc67df-f1e4-458f-9569-c3ea2405818b",
+    "timestamp": "2026-05-15T04:48:04.804530+00:00",
+    "previous_hash": "e7f7e3b7640cbbb38e74e2a74980ff7704ec463c8c169547913d6993fe364048",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "[PATH_TRAVERSAL_BLOCKED]",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "[PATH_TRAVERSAL_BLOCKED]",
+        "change_type": "modify",
+        "old_string": "                for cid in citations:\n                    if isinstance(cid, str):\n                        citation_counts[cid] = citation_counts.get(cid, 0) + 1",
+        "new_string": "                for cid in citations:\n                    if isinstance(cid, str):\n                        citation_counts[cid] = citation_counts.get(cid, 0) + 1\n                    elif isinstance(cid, dict):\n                        raw = cid.get(\"constraint_id\")\n                        if isinstance(raw, str):\n                            citation_counts[raw] = citation_counts.get(raw, 0) + 1\n                    else:\n                        print(\n                            f\"[bench cli] unexpected citation type: {type(cid).__name__}\",\n                            file=sys.stderr,\n                        )"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-005",
+          "severity": "CONCERN",
+          "location": "new_string: elif isinstance(cid, dict) branch and else branch",
+          "evidence": "elif isinstance(cid, dict):\n                        raw = cid.get(\"constraint_id\")\n                        if isinstance(raw, str):\n                            citation_counts[raw] = citation_counts.get(raw, 0) + 1\n                    else:\n                        print(\n                            f\"[bench cli] unexpected citation type: {type(cid).__name__}\",\n                            file=sys.stderr,\n                        )",
+          "reasoning": "Two new logic branches are introduced: one that handles dict-typed citations by extracting 'constraint_id', and one that logs unexpected types to stderr. Neither branch appears to have corresponding test cases referenced or justified in the change description. Per C-005, new branches of logic require test coverage or an explicit written justification for deferral."
+        },
+        {
+          "constraint_id": "C-002",
+          "severity": "OBSERVATION",
+          "location": "file_path field of the proposed change",
+          "evidence": "\"file_path\": \"[PATH_TRAVERSAL_BLOCKED]\"",
+          "reasoning": "The file path has been redacted, making it impossible to verify that the change is scoped to the correct file as required by C-002. While this may be a pipeline safety measure rather than a change characteristic, it means scope boundary cannot be confirmed from the information provided."
+        }
+      ],
+      "_tokens": {
+        "input": 1622,
+        "output": 401
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "MITIGATE",
+          "argument": "The C-005 finding is legitimate in that no test cases are cited in the change description. However, several mitigating factors reduce the severity: (1) The logic is narrow and defensive \u2014 the dict branch extracts a single known key ('constraint_id') with a type guard before writing to the counter, which is a low-complexity, low-risk path. (2) The else branch performs no mutation at all \u2014 it only emits a diagnostic to stderr, making it functionally trivial and easy to reason about without a formal test. (3) C-005 is rated 'warning', not 'veto', meaning the constitution itself acknowledges that missing tests are a concern requiring attention rather than a hard block. A written justification for deferral would satisfy the constraint: the dict branch is a defensive forward-compatibility shim for a format variant that can be validated by inspection, and the else branch is a pure stderr diagnostic with no side effects on program state.",
+          "evidence": "The new dict branch only writes to citation_counts[raw] after two isinstance guards. The else branch only calls print(..., file=sys.stderr). Neither branch mutates shared state in a novel or complex way. C-005 severity is 'warning', not 'veto'."
+        },
+        {
+          "finding_index": 1,
+          "position": "CONCEDE",
+          "argument": "The Challenger is correct that the redacted file path makes it impossible to verify C-002 scope compliance from the information provided. This is a genuine observability gap. The pipeline safety mechanism that blocked the path is understandable, but it eliminates the ability for the governance process to confirm the change is scoped correctly. The Oracle should either require the path to be disclosed through a safe channel or treat this as an unresolvable scope question pending disclosure.",
+          "evidence": "\"file_path\": \"[PATH_TRAVERSAL_BLOCKED]\" \u2014 no file name or module can be inferred from this redaction, so scope boundary confirmation is structurally impossible."
+        }
+      ],
+      "summary": "The change is logically sound and defensively written, but the redacted file path creates an unresolvable C-002 scope verification gap that the Oracle must resolve before approval, while the C-005 test-coverage concern is a legitimate warning-level issue that could be closed with a brief deferral justification.",
+      "_tokens": {
+        "input": 2052,
+        "output": 589
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change adds defensive handling for dict-typed citations and an stderr diagnostic for unexpected types. Evaluating against the constitution: C-001 is satisfied because the else branch emits a visible diagnostic to stderr rather than silently swallowing the unexpected type. C-007 is satisfied because the change strengthens (rather than weakens) the citation aggregation logic by handling additional input shapes and surfacing anomalies. The Challenger's C-002 observation is acknowledged but the redaction is a pipeline safety artifact (path traversal block) rather than evidence of out-of-scope modification; the diff content itself (citation aggregation in a CLI) is consistent with a single-file modification and contains no cross-module edits, so no concrete C-002 violation is demonstrated. The Defender concedes the observability gap but provides no evidence of actual scope breach, and the Challenger marked this only as OBSERVATION, not a violation. The Challenger's C-005 finding is valid but C-005 is severity 'warning', not 'veto', and the Defender's MITIGATE response provides a reasonable deferral justification (narrow defensive shim, stderr-only side effect). This becomes an advisory, not a block. No new imports are introduced (sys is presumed already imported given its use; if not, this would implicate C-003 \u2014 see advisory). No secrets, no ledger mutation, no type annotation weakening observed in the diff.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "SATISFIED",
+          "note": "Unexpected citation types are logged to stderr rather than silently ignored."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Challenger raised this as OBSERVATION due to path redaction; no evidence of actual cross-file modification in the diff content. Defender conceded the observability gap but no violation is demonstrated."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new imports visible in the diff; sys is assumed pre-existing (see advisory)."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "No type annotations are removed or weakened."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "VIOLATED",
+          "note": "New dict and else branches lack cited test coverage. Severity is 'warning', not 'veto'. Defender's deferral justification (defensive shim, stderr-only side effect) is accepted as advisory."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "No secrets present."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "Change strengthens citation aggregation and adds visibility for anomalous inputs; does not weaken governance enforcement or logging."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger interaction in this diff."
+        }
+      ],
+      "advisories": [
+        "C-005: Add a test case covering (a) a dict citation with a string 'constraint_id' key and (b) an unexpected type (e.g., int) to confirm the stderr diagnostic path. Until then, this remains an open warning.",
+        "C-003: The new_string references 'sys.stderr'. Verify that 'import sys' already exists at module scope. If not, adding it would constitute a new import that must be explicitly declared.",
+        "C-002: The redacted file_path ('[PATH_TRAVERSAL_BLOCKED]') prevents independent scope verification. Future pipeline runs should surface a sanitized but non-empty file identifier so scope can be audited without exposing traversal-sensitive paths."
+      ],
+      "remediation": null,
+      "confidence": "MODERATE",
+      "_tokens": {
+        "input": 3865,
+        "output": 1382
+      }
+    },
+    "entry_hash": "fde8da25ed72b9942f3560efc091b0951a0627c1c9a679a96591da200f5558c9"
+  },
+  {
+    "entry_id": "8eb2653e-4125-4303-b188-d4d4692837dd",
+    "timestamp": "2026-05-15T04:48:57.056718+00:00",
+    "previous_hash": "fde8da25ed72b9942f3560efc091b0951a0627c1c9a679a96591da200f5558c9",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "[PATH_TRAVERSAL_BLOCKED]",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "[PATH_TRAVERSAL_BLOCKED]",
+        "change_type": "modify",
+        "old_string": "                    elif isinstance(cid, dict):\n                        cid_val: Any = cid.get(\"constraint_id\")\n                        if isinstance(cid_val, str):\n                            citation_counts[cid_val] = citation_counts.get(cid_val, 0) + 1",
+        "new_string": "                    elif isinstance(cid, dict):\n                        raw = cid.get(\"constraint_id\")\n                        if isinstance(raw, str):\n                            citation_counts[raw] = citation_counts.get(raw, 0) + 1"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-004",
+          "severity": "CONCERN",
+          "location": "diff: new_string, line 3",
+          "evidence": "raw = cid.get(\"constraint_id\")\n                        if isinstance(raw, str):\n                            citation_counts[raw] = citation_counts.get(raw, 0) + 1",
+          "reasoning": "The old code used the explicitly typed intermediate variable `cid_val: Any = cid.get(...)` with an inline type annotation. The new code replaces it with `raw = cid.get(...)`, removing the explicit `Any` annotation. While `Any` is technically the weakest type annotation, removing it altogether means the variable is now unannotated \u2014 relying entirely on type inference. In strict typing contexts, an unannotated local variable derived from `.get()` on a `dict` of unknown type may widen or narrow differently depending on the type checker's inference rules. This is a marginal concern: the isinstance guard still enforces the str check at runtime, but the explicit type contract on the intermediate variable has been silently dropped. Whether this constitutes a 'weakening' of type safety depends on whether the codebase enforces typed locals via mypy/pyright in strict mode."
+        },
+        {
+          "constraint_id": "C-007",
+          "severity": "OBSERVATION",
+          "location": "diff: context \u2014 citation_counts manipulation in governance pipeline",
+          "evidence": "citation_counts[raw] = citation_counts.get(raw, 0) + 1",
+          "reasoning": "The modified code appears to be part of citation counting logic within the governance pipeline itself (likely in challenger, oracle, or a related component, given the path was blocked). The change is purely a variable rename (cid_val \u2192 raw) with no behavioral difference. No enforcement is weakened, no logging is disabled. This observation is flagged only to note that the file is within self-governance scope; the change itself appears benign."
+        }
+      ],
+      "_tokens": {
+        "input": 1557,
+        "output": 498
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "REBUT",
+          "argument": "The Challenger's C-004 finding conflates removing a redundant annotation with weakening type safety. The old annotation `cid_val: Any` explicitly declared the variable as the weakest possible type \u2014 `Any` \u2014 which provides zero type safety benefit. It does not constrain the variable, does not allow the type checker to catch misuse, and is semantically equivalent to no annotation at all from a safety standpoint. The new code `raw = cid.get(...)` allows the type checker to infer the return type of `.get()` on the dict, which in most typed contexts would be `Optional[<value_type>]` \u2014 potentially a *stronger* inference than `Any`. The `isinstance(raw, str)` guard remains identical, so the runtime safety contract is unchanged. C-004 guards against removing or weakening type annotations; replacing an explicit `Any` annotation with type inference is not a weakening \u2014 `Any` is the bottom of the type safety hierarchy. The constitution's rationale ('weakening degrades the ability to reason about correctness') does not apply when the removed annotation was `Any`, which by definition conveys no correctness information.",
+          "evidence": "Old: `cid_val: Any = cid.get(\"constraint_id\")` \u2014 explicitly typed as Any, the weakest possible annotation. New: `raw = cid.get(\"constraint_id\")` \u2014 type inferred by checker. The isinstance guard `if isinstance(raw, str)` is preserved identically in both versions."
+        },
+        {
+          "finding_index": 1,
+          "position": "REBUT",
+          "argument": "The Challenger correctly characterizes this as a benign observation and does not assert a violation. The change is a pure variable rename with zero behavioral difference. No enforcement logic, logging, or verification is touched. The C-007 flag is appropriately cautious given the blocked file path, but the Challenger's own reasoning concludes the change is benign. There is nothing to rebut beyond confirming the Challenger's own conclusion.",
+          "evidence": "The logic `citation_counts[raw] = citation_counts.get(raw, 0) + 1` is functionally identical to `citation_counts[cid_val] = citation_counts.get(cid_val, 0) + 1`. Only the local variable name changed."
+        }
+      ],
+      "summary": "This change is a safe cosmetic variable rename from `cid_val` to `raw`; the Challenger's C-004 concern is unwarranted because replacing an explicit `Any` annotation with type inference is not a weakening of type safety, and the C-007 observation was self-resolved as benign by the Challenger.",
+      "_tokens": {
+        "input": 2096,
+        "output": 669
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change is a trivial variable rename (cid_val -> raw) within citation counting logic. The Challenger raised C-004 (Type Safety Preservation) as a CONCERN, noting the removal of the inline `: Any` annotation. The Defender correctly rebuts: `Any` is the weakest possible annotation in Python's type system and conveys no correctness information; replacing it with inferred typing (which on a dict.get() call typically yields a more precise Optional[T]) does not weaken type safety, and the isinstance(raw, str) runtime guard is preserved identically. The constitution's C-004 rationale explicitly ties violations to 'degrading the ability to reason about correctness' \u2014 removing an `Any` annotation does not degrade this. The Challenger's C-007 finding is an OBSERVATION, not a violation, and the Challenger itself concludes the change is benign; no enforcement, logging, or verification logic is altered. No other constraints are implicated: no new imports (C-003), no error handling changes (C-001), no secrets (C-006), no ledger writes (C-008), and the diff is confined to a single file (C-002).",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error handling code is modified."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Single-file modification; no scope creep evident in the diff."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependencies added."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "Per Defender rebuttal: removing an explicit `Any` annotation is not a weakening of type safety, since `Any` conveys no correctness constraint. The isinstance guard is preserved."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new logic branches introduced; pure rename."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No credentials present."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "Challenger's own OBSERVATION concludes the change is benign; no enforcement, logging, or verification is weakened. Defender confirms behavioral equivalence."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger entries modified; this is in-memory citation counting."
+        }
+      ],
+      "advisories": [
+        "If the project enforces strict mypy/pyright with disallow_untyped_locals or similar, consider whether explicit annotations on local variables are desired by project convention \u2014 though this is style, not constitutional law."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 4052,
+        "output": 1064
+      }
+    },
+    "entry_hash": "9664dc3d16e9728750831ff787c614bd409bc3f4dd3e0db57d013fac590baa81"
+  },
+  {
+    "entry_id": "18849449-0900-48a6-92b5-1b8daf9b0af9",
+    "timestamp": "2026-05-15T04:49:57.797005+00:00",
+    "previous_hash": "9664dc3d16e9728750831ff787c614bd409bc3f4dd3e0db57d013fac590baa81",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "[PATH_TRAVERSAL_BLOCKED]",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "[PATH_TRAVERSAL_BLOCKED]",
+        "change_type": "modify",
+        "old_string": "    citations: Any = response.get(\"constraint_citations\")\n    if not isinstance(citations, list):\n        return False\n    for citation in citations:",
+        "new_string": "    citations: Any = response.get(\"constraint_citations\")\n    if not isinstance(citations, list):\n        return False\n    if verdict == \"VETO\" and len(citations) == 0:\n        return False\n    for citation in citations:"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-007",
+          "severity": "CONCERN",
+          "location": "diff: new_string, line adding `if verdict == \"VETO\" and len(citations) == 0: return False`",
+          "evidence": "if verdict == \"VETO\" and len(citations) == 0:\n        return False",
+          "reasoning": "This change modifies validation logic within the governance pipeline (likely oracle or challenger validation code). The new branch short-circuits validation specifically for VETO verdicts with empty citation lists, returning False (invalid). While this appears to *strengthen* enforcement by rejecting uncited vetoes, the logic depends on a `verdict` variable whose origin is not visible in the diff. If `verdict` is not reliably set or defaults to something unexpected, this branch could cause legitimate VETO responses to be incorrectly rejected (returning False), effectively suppressing valid vetoes. This warrants scrutiny: the Oracle should confirm that `verdict` is always correctly populated before this check executes, and that the failure mode of an incorrectly-rejected VETO is acceptable."
+        },
+        {
+          "constraint_id": "C-005",
+          "severity": "CONCERN",
+          "location": "diff: new_string, new branch `if verdict == \"VETO\" and len(citations) == 0: return False`",
+          "evidence": "if verdict == \"VETO\" and len(citations) == 0:\n        return False",
+          "reasoning": "A new conditional branch has been added with no accompanying test case visible in the diff. C-005 requires that new branches of logic have corresponding test cases or an explicit justification for deferral. The cases that need coverage include: VETO with empty citations (should return False), VETO with non-empty citations (should proceed to per-citation validation), and non-VETO verdict with empty citations (should proceed, not be rejected by this new check). No test evidence is present in the diff."
+        }
+      ],
+      "_tokens": {
+        "input": 1517,
+        "output": 489
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "MITIGATE",
+          "argument": "The Challenger's concern about C-007 is partially valid in principle but overstated in practice. The change *strengthens* governance enforcement by ensuring VETO verdicts cannot be issued without citation evidence \u2014 this is directly aligned with C-007's intent ('must not weaken enforcement'). A VETO without citations would itself be a governance failure: an uncited veto has no evidentiary basis and should be rejected. The risk the Challenger identifies \u2014 that `verdict` might be unreliably set \u2014 is a pre-existing architectural concern, not one introduced by this diff. The diff does not change how `verdict` is sourced or populated. If `verdict` were already unreliable before this change, that bug would have manifested elsewhere. The failure mode the Challenger describes (a legitimate VETO being rejected) would only occur if a legitimate VETO also had zero citations, which is itself an invalid state we want to catch. The new branch's logic is therefore sound: a VETO with zero citations is always invalid.",
+          "evidence": "The new line `if verdict == \"VETO\" and len(citations) == 0: return False` is narrowly scoped: it only fires when verdict is exactly 'VETO' AND citations list is empty. It does not affect non-VETO verdicts with empty citations, nor does it affect VETO verdicts with populated citations."
+        },
+        {
+          "finding_index": 1,
+          "position": "CONCEDE",
+          "argument": "The Challenger is correct. A new conditional branch has been introduced with no test coverage visible in the diff. C-005 explicitly requires new logic branches to have corresponding test cases or a stated justification for deferral. Three distinct cases require coverage: (1) VETO + empty citations \u2192 False, (2) VETO + non-empty citations \u2192 proceeds to per-citation loop, (3) non-VETO + empty citations \u2192 proceeds (not caught by this guard). None of these cases are evidenced in the diff. This is a legitimate C-005 warning-level violation.",
+          "evidence": "The diff shows only the addition of the conditional branch with no accompanying test file changes or inline justification for test deferral."
+        }
+      ],
+      "summary": "The change is directionally correct and strengthens governance integrity by requiring VETO verdicts to be citation-backed, but it ships with a C-005 warning violation: the new branch lacks test coverage for all three relevant cases, which must be addressed before or alongside merge.",
+      "_tokens": {
+        "input": 2035,
+        "output": 619
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change adds a guard requiring VETO verdicts to include at least one constraint citation. Per C-007, governance pipeline changes must not weaken enforcement; this change strengthens enforcement by rejecting uncited vetoes, which aligns with the constitution's intent that evidence-backed verdicts are required. The Challenger's C-007 concern (Finding 0) raises a hypothetical about `verdict` reliability, but as the Defender correctly notes, the diff does not alter how `verdict` is sourced \u2014 any pre-existing reliability issue is not introduced or worsened here. The Defender's MITIGATE position is accepted. On Finding 1 (C-005), the Defender CONCEDES that the new branch lacks visible test coverage. However, C-005 is severity 'warning', not 'veto', so it cannot trigger a veto on its own. It is recorded as an advisory. No other constraints are implicated: no error swallowing (C-001), no out-of-scope file modifications visible (C-002), no new imports (C-003), no type weakening \u2014 types preserved (C-004), no secrets (C-006), and no ledger mutation (C-008).",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No exception handling modified."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Single-file modification; scope boundary not evaluable from diff alone but no cross-file modification present."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "SATISFIED",
+          "note": "No new imports added."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "Existing type annotations (citations: Any) preserved; no annotations removed or weakened."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "VIOLATED",
+          "note": "Defender concedes new conditional branch lacks visible test coverage for the three relevant cases. Warning-level only; does not trigger veto."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No credentials in diff."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "Change strengthens governance enforcement by requiring citations on VETO verdicts, consistent with C-007's anti-weakening mandate. Challenger's concern about `verdict` provenance is a pre-existing condition not modified by this diff, per Defender's rebuttal."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger interaction."
+        }
+      ],
+      "advisories": [
+        "C-005 (warning): The new conditional branch should have accompanying tests covering (1) VETO with empty citations returns False, (2) VETO with non-empty citations proceeds to per-citation validation, (3) non-VETO verdict with empty citations is not rejected by this guard. Add tests in a follow-up or before merge.",
+        "Confirm in the surrounding function (not visible in the diff) that the `verdict` variable is validated/typed prior to reaching this check, so that a malformed or missing verdict field cannot bypass or misfire this guard. This is not a violation but a defensive recommendation."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 3935,
+        "output": 1226
+      }
+    },
+    "entry_hash": "2e025559ca39cd6bc37be5f7e0675fc729cec068e435c16fe761253adf76e51b"
+  },
+  {
+    "entry_id": "60eacfa4-0d00-45c2-b0b8-6c217b223b7c",
+    "timestamp": "2026-05-15T04:50:49.825099+00:00",
+    "previous_hash": "2e025559ca39cd6bc37be5f7e0675fc729cec068e435c16fe761253adf76e51b",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "[PATH_TRAVERSAL_BLOCKED]",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "[PATH_TRAVERSAL_BLOCKED]",
+        "change_type": "modify",
+        "old_string": "    try:\n        client = openai.OpenAI(\n            base_url=_OPENROUTER_BASE_URL,\n            api_key=os.environ.get(\"OPENROUTER_API_KEY\"),\n        )",
+        "new_string": "    api_key = os.environ.get(\"OPENROUTER_API_KEY\")\n    if not api_key:\n        raise _ProviderError(\n            \"openrouter: OPENROUTER_API_KEY environment variable is not set\"\n        )\n\n    try:\n        client = openai.OpenAI(\n            base_url=_OPENROUTER_BASE_URL,\n            api_key=api_key,\n        )"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-005",
+          "severity": "CONCERN",
+          "location": "new_string: early return branch before try block",
+          "evidence": "if not api_key:\n        raise _ProviderError(\n            \"openrouter: OPENROUTER_API_KEY environment variable is not set\"\n        )",
+          "reasoning": "A new conditional branch has been introduced that raises _ProviderError when the API key is absent. This is a new code path with observable behavior (raising an exception before client construction). There is no indication in the diff that a corresponding test case exists or has been added to cover this branch. C-005 requires new branches of logic to have corresponding test cases or an explicit justification for deferral."
+        },
+        {
+          "constraint_id": "C-002",
+          "severity": "CONCERN",
+          "location": "file_path field in proposed change",
+          "evidence": "\"file_path\": \"[PATH_TRAVERSAL_BLOCKED]\"",
+          "reasoning": "The file path has been redacted/blocked, making it impossible to verify that the change is scoped to the intended file. C-002 requires that changes not modify files outside the stated task boundary. Without a visible file path, scope compliance cannot be confirmed. This is not a confirmed violation but warrants scrutiny \u2014 the Oracle should verify the actual target file matches the task description."
+        }
+      ],
+      "_tokens": {
+        "input": 1590,
+        "output": 361
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "MITIGATE",
+          "argument": "The Challenger's C-005 finding is technically valid \u2014 a new branch has been introduced without an explicit test case in the diff. However, this is a warning-severity constraint, not a veto, and the mitigation case is strong. The new branch is trivial: it checks whether `os.environ.get()` returned a falsy value and raises a typed, named error (`_ProviderError`). This is a fail-fast guard at the earliest possible point, making the behavior self-documenting and immediately visible in any integration test that runs without the environment variable set. The prior behavior \u2014 passing `None` or an empty string as `api_key` to the OpenAI client \u2014 would have produced an opaque downstream error from the OpenAI SDK, making test coverage of the *old* path arguably harder to write correctly. The new path is trivially exercisable: any test calling the function without `OPENROUTER_API_KEY` set will exercise it. That said, an explicit unit test asserting the `_ProviderError` message would be best practice, and the absence of one is a legitimate concern under C-005.",
+          "evidence": "new_string introduces: `if not api_key: raise _ProviderError(\"openrouter: OPENROUTER_API_KEY environment variable is not set\")` \u2014 a single, atomic branch with no internal logic branches of its own."
+        },
+        {
+          "finding_index": 1,
+          "position": "REBUT",
+          "argument": "The redaction is a pipeline security artifact, not a deliberate obfuscation by the change author. The change content is narrowly scoped to one logical location.",
+          "evidence": "The diff shows a single old_string/new_string pair modifying only the `openai.OpenAI()` client initialization block and adding a pre-flight key check. No other code structure or file is referenced."
+        }
+      ],
+      "summary": "The change is sound \u2014 it converts a silent failure (passing None to the OpenAI client) into a visible, typed early error, consistent with C-001; the C-005 warning is legitimate but low-risk given the branch's triviality, and the C-002 path concern is a pipeline artifact rather than a code violation.",
+      "_tokens": {
+        "input": 1984,
+        "output": 763
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change adds a fail-fast guard for a missing OPENROUTER_API_KEY environment variable, raising a typed _ProviderError before client construction. This is consistent with C-001 (no silent error swallowing) \u2014 it converts a potential silent/opaque failure into a visible, typed exception. C-006 is satisfied: the secret is still loaded from os.environ, not hardcoded. The Challenger's C-005 concern is legitimate but is a warning-severity constraint, not a veto trigger; the Defender's mitigation is reasonable given the branch's triviality (a single falsy check raising a named error). The C-002 concern about the redacted file path is a pipeline artifact (path traversal protection in the tool layer), not evidence of scope violation by the change author; the diff content itself is narrowly scoped to a single client-initialization block. No veto-severity constraints are violated.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "SATISFIED",
+          "note": "Change strengthens error visibility by raising a typed _ProviderError instead of letting None propagate to the SDK."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "NOT_APPLICABLE",
+          "note": "File path redaction is a pipeline security artifact (Challenger finding 1); diff content is scoped to a single client-init block (Defender rebuttal)."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new imports introduced; openai, os, and _ProviderError are pre-existing."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "No type annotations removed or weakened."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "VIOLATED",
+          "note": "New branch raising _ProviderError lacks an explicit test case in the diff (Challenger finding 0). Severity is 'warning', not 'veto'; recorded as an advisory."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "API key continues to be sourced from os.environ.get; no hardcoded credential introduced."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Change is in a provider client init path, not the governance pipeline itself."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger modification."
+        }
+      ],
+      "advisories": [
+        "C-005 (warning): Add an explicit unit test asserting that calling the function without OPENROUTER_API_KEY set raises _ProviderError with the expected message. Defender concedes this would be best practice.",
+        "Consider also guarding against an api_key consisting solely of whitespace (the current `if not api_key` check only catches None and empty string)."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 3717,
+        "output": 1072
+      }
+    },
+    "entry_hash": "2379a82bbbd7ebda9a8281ab6e96ec927efac0e5ab72d5e7884efc79a4b6a322"
+  },
+  {
+    "entry_id": "522f0e17-ba1c-46b7-a117-e926784feffd",
+    "timestamp": "2026-05-15T04:52:17.529652+00:00",
+    "previous_hash": "2379a82bbbd7ebda9a8281ab6e96ec927efac0e5ab72d5e7884efc79a4b6a322",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "[PATH_TRAVERSAL_BLOCKED]",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "[PATH_TRAVERSAL_BLOCKED]",
+        "change_type": "modify",
+        "old_string": "    if challenger_result.get(\"status\") == \"CLEAR\":\n        defender_result: dict[str, Any] = {\n            \"status\": \"CONFIRM_CLEAR\",\n            \"rebuttals\": [],\n            \"summary\": \"Challenger found no issues.\",\n            \"_tokens\": {\"input\": 0, \"output\": 0},\n        }\n    else:\n        defender_result = run_defender(\n            diff_info, constitution, constitution_hash, challenger_result\n        )\n        _accumulate_tokens(accumulated, defender_result.get(\"_tokens\"))\n        if defender_result.get(\"status\") == \"PIPELINE_ERROR\":",
+        "new_string": "    if challenger_result.get(\"status\") == \"CLEAR\":\n        defender_result: dict[str, Any] = {\n            \"status\": \"CONFIRM_CLEAR\",\n            \"rebuttals\": [],\n            \"summary\": \"Challenger found no issues.\",\n            \"_tokens\": {\"input\": 0, \"output\": 0},\n        }\n    else:\n        defender_result = run_defender(\n            diff_info, constitution, constitution_hash, challenger_result\n        )\n    _accumulate_tokens(accumulated, defender_result.get(\"_tokens\"))\n    if challenger_result.get(\"status\") != \"CLEAR\":\n        if defender_result.get(\"status\") == \"PIPELINE_ERROR\":"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-007",
+          "severity": "VIOLATION",
+          "location": "diff: new_string, lines after the defender branch",
+          "evidence": "    _accumulate_tokens(accumulated, defender_result.get(\"_tokens\"))\n    if challenger_result.get(\"status\") != \"CLEAR\":",
+          "reasoning": "The original code only accumulated tokens when the defender was actually invoked (i.e., when challenger status was not CLEAR). The refactored code moves `_accumulate_tokens` outside the `else` block, causing it to execute unconditionally \u2014 including when `challenger_result.get('status') == 'CLEAR'`. In the CLEAR case, `defender_result` is the synthetic dict with `_tokens: {input: 0, output: 0}`, so this may not cause a numeric accounting error, but the structural change means token tracking logic is now called for a fabricated result rather than a real one. More critically, the governance pipeline's token/cost accounting infrastructure is being altered in a way that is non-obvious: the CONFIRM_CLEAR stub result was designed to be zero-cost precisely so it would be a no-op if accumulated. However, the intent of the original code was explicit: defender tokens are only tracked when the defender runs. This change decouples the accumulation from the actual execution in a way that is architecturally misleading and weakens the observability/logging integrity of the governance pipeline itself."
+        },
+        {
+          "constraint_id": "C-007",
+          "severity": "CONCERN",
+          "location": "diff: new_string, restructured conditional block",
+          "evidence": "    if challenger_result.get(\"status\") != \"CLEAR\":\n        if defender_result.get(\"status\") == \"PIPELINE_ERROR\":",
+          "reasoning": "The PIPELINE_ERROR guard for the defender result was previously inside the `else` branch, meaning it could only ever be evaluated when the defender was actually called. In the refactored code, the guard `if challenger_result.get('status') != 'CLEAR'` is a separate top-level conditional that re-checks the challenger status. While logically equivalent in outcome, this restructuring introduces a subtle divergence: any code that was in the original `else` block after the PIPELINE_ERROR check now falls under a new independent branch. If additional logic exists below the shown diff that was also previously inside the `else` block but is not shown here, it may now be incorrectly moved outside of it, creating a correctness gap in the governance pipeline's error handling flow. The partial diff makes this impossible to fully verify, which is itself a concern for a self-governance constraint."
+        },
+        {
+          "constraint_id": "C-005",
+          "severity": "CONCERN",
+          "location": "diff: overall change",
+          "evidence": "Restructuring of token accumulation and conditional branching in the governance pipeline orchestration logic",
+          "reasoning": "This change modifies control flow in the pipeline orchestrator in a non-trivial way. The new branch structure (unconditional token accumulation + re-evaluated challenger status guard) represents new logical paths. There is no indication in the diff that test cases exist or have been updated to cover the CLEAR path where `_accumulate_tokens` is now called on a synthetic zero-token result, or to verify that the PIPELINE_ERROR path is still correctly triggered only when appropriate."
+        }
+      ],
+      "_tokens": {
+        "input": 1790,
+        "output": 824
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "MITIGATE",
+          "argument": "The Challenger's concern is architecturally real but the practical impact is zero. The synthetic CONFIRM_CLEAR result is explicitly constructed with `_tokens: {input: 0, output: 0}`, meaning `_accumulate_tokens` called on it is a mathematical no-op \u2014 adding zeros changes nothing in the accumulated totals. The Challenger acknowledges this themselves ('may not cause a numeric accounting error'). The observability argument \u2014 that token tracking is 'called for a fabricated result' \u2014 is a style concern, not a functional or governance integrity violation. The actual purpose of moving `_accumulate_tokens` outside the else block appears to be DRY code consolidation: the CLEAR path previously silently skipped accumulation (which was fine because tokens were zero), but now the code handles both paths uniformly. This is defensible refactoring. However, I concede the Challenger is right that this is architecturally misleading: the original structure made the intent explicit ('defender only ran here, so accumulate here'), while the new structure obscures that coupling. This is a weak C-007 concern, not a veto-level violation, because governance pipeline integrity refers to weakening enforcement or bypassing verification \u2014 neither of which occurs here.",
+          "evidence": "CONFIRM_CLEAR dict in new_string: `\"_tokens\": {\"input\": 0, \"output\": 0}` \u2014 accumulating zeros produces no change in totals. C-007 targets 'weaken enforcement, bypass verification, or disable logging' \u2014 none of these apply to cosmetic restructuring of a zero-effect call."
+        },
+        {
+          "finding_index": 1,
+          "position": "CONCEDE",
+          "argument": "This is a legitimate and serious concern. The Challenger correctly identifies that the diff is partial and we cannot verify whether additional logic previously inside the `else` block has been correctly repositioned. The original structure guaranteed that all defender-specific logic (PIPELINE_ERROR handling and anything below it) only ran when the defender was actually invoked. The new structure replaces that guarantee with a re-check of `challenger_result.get('status') != 'CLEAR'` \u2014 which is logically equivalent for the shown code, but creates a structural risk: any future code added inside this block must independently reason about the challenger status rather than inheriting it from the structural guarantee of an `else` branch. More critically, the partial diff means we cannot rule out that code has been inadvertently moved outside its intended scope. This is a real architectural regression in the governance pipeline's control flow clarity, and without the full file context, the Oracle cannot confirm safety.",
+          "evidence": "The diff shows only a fragment. The original `else` block encapsulated all defender-invocation logic as a single unit. The new structure splits this into (1) unconditional accumulation and (2) a new independent conditional. Any logic below the visible diff that was in the original `else` block is unverifiable from this diff alone."
+        },
+        {
+          "finding_index": 2,
+          "position": "CONCEDE",
+          "argument": "The Challenger is correct that this restructuring of pipeline orchestration control flow represents new logical paths that should have test coverage. The CLEAR path now exercises `_accumulate_tokens` (even if with zero values), and the PIPELINE_ERROR guard now sits under a re-evaluated conditional rather than being structurally guaranteed by the else branch. These are testable behaviors. No evidence of test updates is provided. C-005 is a warning-severity constraint, so this is not a veto, but the concession is appropriate.",
+          "evidence": "No test files appear in the diff. The change modifies branching logic in the pipeline orchestrator, which by C-005 requires corresponding test cases or explicit justification for deferral \u2014 neither is present."
+        }
+      ],
+      "summary": "The change achieves legitimate DRY refactoring with zero practical numeric impact on token accounting, but the partial diff conceals whether logic previously inside the `else` block has been correctly repositioned, and the structural guarantee of the original else-encapsulation has been weakened \u2014 conceding finding 1 as a real architectural concern and finding 2 on test coverage; finding 0 is mitigated but not a veto.",
+      "_tokens": {
+        "input": 2647,
+        "output": 1022
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The Challenger raised three concerns, two against C-007 (governance pipeline integrity) and one against C-005 (test coverage). On the first C-007 finding, the Defender correctly mitigates: the CONFIRM_CLEAR synthetic result is explicitly constructed with `_tokens: {input: 0, output: 0}`, making `_accumulate_tokens` a mathematical no-op in the CLEAR path. C-007 prohibits changes that 'weaken enforcement, bypass verification, or disable logging' \u2014 none of these occur. Token accounting totals are unchanged, no logging is removed, and no verification step is bypassed. This is cosmetic restructuring, not governance weakening. On the second C-007 finding, the Challenger argues the partial diff conceals possible misplaced logic, and the Defender concedes. However, the visible diff shows the `if defender_result.get('status') == 'PIPELINE_ERROR':` guard correctly preserved under an equivalent `if challenger_result.get('status') != 'CLEAR':` conditional. The Challenger's concern is speculative ('if additional logic exists ... it may'), and speculation about unseen code is not evidence of a violation. C-007 requires demonstrated weakening, not hypothetical risk. On C-005, the Defender concedes lack of test updates, but C-005 is severity 'warning', not 'veto', and explicitly permits deferral \u2014 this becomes an advisory, not a veto trigger. No other constitutional constraints (C-001, C-002, C-003, C-004, C-006, C-008) are implicated by this control-flow refactor.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error handling blocks introduced or modified."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Change is confined to the pipeline orchestrator file; no scope creep evident."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new imports or dependencies."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "Existing `dict[str, Any]` annotation on defender_result preserved; no type weakening."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "VIOLATED",
+          "note": "Defender conceded no test updates accompany the control-flow restructuring. Severity is warning, so this is an advisory, not a veto."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No secrets or credentials present."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "Defender's mitigation on finding 0 is persuasive: zero-token CONFIRM_CLEAR stub makes accumulation a no-op; no enforcement weakened, no verification bypassed, no logging disabled. Finding 1's concession is based on speculation about unseen code, not demonstrated violation in the visible diff."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger modifications."
+        }
+      ],
+      "advisories": [
+        "C-005 (warning): The control-flow restructuring introduces new logical paths (CLEAR-path accumulation, re-evaluated challenger status guard) that should have corresponding test cases. No test updates are visible in the diff.",
+        "Architectural note: The original `else`-encapsulation made the coupling between defender invocation and downstream defender-result handling structurally explicit. The new structure relies on a re-evaluated `challenger_result.get('status') != 'CLEAR'` check. Future maintainers must independently reason about challenger status when adding logic inside the new conditional, rather than inheriting it from an else branch. Consider documenting this invariant with a comment.",
+        "The diff is partial. While the visible change is constitutionally compliant, reviewers should verify on the full file that no logic previously inside the `else` block was inadvertently moved outside its intended guard."
+      ],
+      "remediation": null,
+      "confidence": "MODERATE",
+      "_tokens": {
+        "input": 5441,
+        "output": 1502
+      }
+    },
+    "entry_hash": "1b08e964398d77dc86e73946bbe5eaef2beaf0f21c2c149b0d0dac20c1856066"
   }
 ]
