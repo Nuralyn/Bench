@@ -261,10 +261,16 @@ def _openrouter_call(
         *messages,
     ]
 
+    api_key = os.environ.get("OPENROUTER_API_KEY")
+    if not api_key:
+        raise _ProviderError(
+            "openrouter: OPENROUTER_API_KEY environment variable is not set"
+        )
+
     try:
         client = openai.OpenAI(
             base_url=_OPENROUTER_BASE_URL,
-            api_key=os.environ.get("OPENROUTER_API_KEY"),
+            api_key=api_key,
         )
         response = client.chat.completions.create(
             model=routed_model,
