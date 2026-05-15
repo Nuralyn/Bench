@@ -220,6 +220,8 @@ def _validate_oracle_response(response: dict[str, Any]) -> bool:
     citations: Any = response.get("constraint_citations")
     if not isinstance(citations, list):
         return False
+    if verdict == "VETO" and len(citations) == 0:
+        return False
     for citation in citations:
         if not isinstance(citation, dict):
             return False

@@ -110,6 +110,15 @@ def _compute_stats(entries: list[dict]) -> dict:
                 for cid in citations:
                     if isinstance(cid, str):
                         citation_counts[cid] = citation_counts.get(cid, 0) + 1
+                    elif isinstance(cid, dict):
+                        raw = cid.get("constraint_id")
+                        if isinstance(raw, str):
+                            citation_counts[raw] = citation_counts.get(raw, 0) + 1
+                    else:
+                        print(
+                            f"[bench viewer] unexpected citation type: {type(cid).__name__}",
+                            file=sys.stderr,
+                        )
 
     most_cited: tuple[str, int] | None = None
     if citation_counts:
