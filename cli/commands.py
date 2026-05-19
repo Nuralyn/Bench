@@ -243,12 +243,7 @@ def cmd_viewer() -> int:
             file=sys.stderr,
         )
 
-    atexit.register(
-        lambda p=tmp_path: os.remove(p) if os.path.exists(p) else None  # type: ignore[misc]
-    )
-
     print(f"Bench viewer written to: {tmp_path}")
-    print("  (will be cleaned up on process exit)")
     if not webbrowser.open(f"file://{tmp_path}"):
         print(
             "[bench cli] could not auto-open browser; open the path above manually.",
