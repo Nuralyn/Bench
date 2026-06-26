@@ -310,6 +310,14 @@ def _openrouter_call(
     return text, input_tokens, output_tokens
 
 
+def _coerce_int(value: Any) -> int:
+    """Best-effort int coercion for token counts; returns 0 on bad input."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _claude_cli_call(
     model: str,
     system_prompt: str,
@@ -319,10 +327,11 @@ def _claude_cli_call(
     """One call via the local `claude` CLI in headless print mode.
 
     Routes the stage through `claude -p` so it rides the user's Claude Code
-    subscription instead of an ANTHROPIC_API_KEY. The stage system prompt goes
-    on --system-prompt and the user content on stdin (avoiding command-line
-    length limits on large diffs); the reply returns as a single JSON envelope
-    whose "result" field is the assistant text. Returns (text, in_tok, out_tok).
+    subscription instead of an ANTHROPIC_API_KEY. The system prompt and user
+    content are folded into a single stdin payload (not passed as --system-prompt,
+    which truncates multi-line values on the .cmd shim path); the reply returns
+    as a single JSON envelope whose "result" field is the assistant text.
+    Returns (text, in_tok, out_tok).
 
     Reentrancy: the child inherits this repo's .claude/settings.json, hence
     Bench's own PreToolUse hook. BENCH_SUBPROCESS=1 in the child env makes that
@@ -339,30 +348,44 @@ def _claude_cli_call(
     if binary is None:
         raise _ProviderError("claude_code: `claude` binary not found on PATH")
 
-    # Flatten messages into a single text prompt. Single-turn calls pass the
-    # user content as-is; the parse-retry path (user/assistant/user) is rendered
-    # with role labels so the prior reply and the JSON nudge both survive.
+    # Flatten messages into a single text body. Single-turn calls pass the user
+    # content as-is; the parse-retry path (user/assistant/user) is rendered with
+    # role labels so the prior reply and the JSON nudge both survive.
     if len(messages) == 1:
-        prompt: str = messages[0].get("content", "")
+        body: str = messages[0].get("content", "")
     else:
-        prompt = "\n\n".join(
+        body = "\n\n".join(
             f"{m.get('role', 'user').upper()}: {m.get('content', '')}"
             for m in messages
         )
 
+    # Fold the system prompt into the stdin payload rather than passing it as
+    # --system-prompt. Bench's stage prompts are multi-line, and when `claude`
+    # resolves to a .cmd/.bat shim a multi-line argv is truncated at the first
+    # newline by cmd.exe, silently gutting the prompt. stdin carries arbitrary
+    # text safely on every platform.
+    prompt: str = f"{system_prompt}\n\n{body}" if system_prompt else body
+
+    timeout: float = _DEFAULT_CLAUDE_CLI_TIMEOUT
     timeout_raw: str = os.environ.get("BENCH_CLAUDE_TIMEOUT", "")
     if timeout_raw:
         try:
-            timeout: float = float(timeout_raw)
+            parsed_timeout: float = float(timeout_raw)
         except ValueError:
             print(
                 f"[bench api] invalid BENCH_CLAUDE_TIMEOUT={timeout_raw!r}; "
                 f"using {_DEFAULT_CLAUDE_CLI_TIMEOUT}s",
                 file=sys.stderr,
             )
-            timeout = _DEFAULT_CLAUDE_CLI_TIMEOUT
-    else:
-        timeout = _DEFAULT_CLAUDE_CLI_TIMEOUT
+        else:
+            if parsed_timeout > 0:
+                timeout = parsed_timeout
+            else:
+                print(
+                    f"[bench api] BENCH_CLAUDE_TIMEOUT={timeout_raw!r} must be "
+                    f"> 0; using {_DEFAULT_CLAUDE_CLI_TIMEOUT}s",
+                    file=sys.stderr,
+                )
 
     child_env: dict[str, str] = dict(os.environ)
     child_env["BENCH_SUBPROCESS"] = "1"
@@ -377,8 +400,6 @@ def _claude_cli_call(
         "json",
         "--model",
         model,
-        "--system-prompt",
-        system_prompt,
         "--disallowedTools",
         "Write",
         "Edit",
@@ -390,6 +411,8 @@ def _claude_cli_call(
             input=prompt,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
             env=child_env,
             shell=False,
@@ -398,9 +421,12 @@ def _claude_cli_call(
         raise _ProviderError(
             f"claude_code: `claude` timed out after {timeout}s"
         ) from e
-    except OSError as e:
+    except (OSError, ValueError) as e:
+        # OSError: spawn failure. ValueError (includes UnicodeError): an encoding
+        # edge the explicit utf-8 setting did not absorb. Both become a
+        # _ProviderError so call_model's never-raises contract holds.
         raise _ProviderError(
-            f"claude_code: failed to spawn `claude`: {type(e).__name__}: "
+            f"claude_code: failed to run `claude`: {type(e).__name__}: "
             f"{_sanitize_error_detail(str(e))}"
         ) from e
 
@@ -433,8 +459,16 @@ def _claude_cli_call(
 
     usage = envelope.get("usage")
     if isinstance(usage, dict):
-        input_tokens: int = int(usage.get("input_tokens", 0) or 0)
-        output_tokens: int = int(usage.get("output_tokens", 0) or 0)
+        # Claude Code applies prompt caching automatically, so most real input
+        # lands in the cache fields; sum all three so the ledger reflects true
+        # input consumption. Coercion is defensive: a malformed token value must
+        # not break call_model's never-raises contract.
+        input_tokens: int = (
+            _coerce_int(usage.get("input_tokens"))
+            + _coerce_int(usage.get("cache_creation_input_tokens"))
+            + _coerce_int(usage.get("cache_read_input_tokens"))
+        )
+        output_tokens: int = _coerce_int(usage.get("output_tokens"))
     else:
         input_tokens = 0
         output_tokens = 0

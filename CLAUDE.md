@@ -146,8 +146,9 @@ client = openai.OpenAI(
 
 # Provider: claude_code (BENCH_PROVIDER=claude_code) — no API key.
 # Dispatches each stage through the local `claude` CLI in headless mode
-# (`claude -p --output-format json --model ... --system-prompt ...`, with the
-# user content on stdin) so calls ride the user's Claude Code subscription.
+# (`claude -p --output-format json --model ...`, with the system prompt and
+# user content folded into the stdin payload) so calls ride the user's Claude
+# Code subscription.
 # The child is spawned with BENCH_SUBPROCESS=1 so Bench's own PreToolUse hook
 # fails open instead of recursing. subprocess/shutil are stdlib, so this path
 # adds no dependency. Per-stage timeout is BENCH_CLAUDE_TIMEOUT seconds
