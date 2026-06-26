@@ -169,6 +169,48 @@ class MainFlowTests(unittest.TestCase):
         parsed: dict = json.loads(output)
         self.assertIn("hookSpecificOutput", parsed)
 
+    @patch.object(_hook_module, "run_governance_pipeline")
+    def test_bench_subprocess_env_bypasses_pipeline(
+        self, mock_pipeline: MagicMock
+    ) -> None:
+        # With BENCH_SUBPROCESS=1 the hook must fail open WITHOUT governing,
+        # even for a payload the pipeline would VETO. A bypass returns 'allow'
+        # and never calls the pipeline; the normal path would deny.
+        mock_pipeline.return_value = {
+            "verdict": "VETO", "reason": "x", "remediation": "y",
+        }
+        payload: str = json.dumps({
+            "tool_name": "Write",
+            "tool_input": {"file_path": "test.py", "content": "hello"},
+        })
+        with patch.dict("os.environ", {"BENCH_SUBPROCESS": "1"}):
+            code, output = self._run_main_with_stdin(payload)
+        self.assertEqual(code, 0)
+        resp: dict = json.loads(output)
+        self.assertEqual(
+            resp["hookSpecificOutput"]["permissionDecision"], "allow"
+        )
+        mock_pipeline.assert_not_called()
+
+    @patch.object(_hook_module, "run_governance_pipeline")
+    def test_bench_subprocess_short_circuits_before_parsing_stdin(
+        self, mock_pipeline: MagicMock
+    ) -> None:
+        # Malformed stdin: the bypass returns allow with its distinctive message
+        # before any parse, proving it short-circuits ahead of pipeline work.
+        with patch.dict("os.environ", {"BENCH_SUBPROCESS": "1"}):
+            code, output = self._run_main_with_stdin("{{{ not json")
+        self.assertEqual(code, 0)
+        resp: dict = json.loads(output)
+        self.assertEqual(
+            resp["hookSpecificOutput"]["permissionDecision"], "allow"
+        )
+        self.assertIn(
+            "nested subprocess",
+            resp["hookSpecificOutput"]["additionalContext"],
+        )
+        mock_pipeline.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -201,6 +201,18 @@ def build_response_from_verdict(verdict: dict[str, Any]) -> dict[str, Any]:
 
 def main() -> int:
     """Entry point. Always returns 0; flow control is via stdout JSON."""
+    if os.environ.get("BENCH_SUBPROCESS") == "1":
+        # Reentrancy guard: this hook is firing inside a `claude -p` subprocess
+        # that Bench itself spawned (utils/api.py claude_code provider).
+        # Governing the nested agent would recurse, so fail open immediately.
+        bypass: dict[str, Any] = build_allow_response(
+            "Bench governance: nested subprocess (BENCH_SUBPROCESS=1), skipping."
+        )
+        json.dump(bypass, sys.stdout)
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+        return 0
+
     try:
         raw_stdin: str = sys.stdin.read()
         payload: Any = json.loads(raw_stdin)
