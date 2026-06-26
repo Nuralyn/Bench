@@ -121,6 +121,7 @@ class ClaudeCliCallTests(unittest.TestCase):
         # Security: the judge gets NO tools (--tools ""), not just a Write/Edit
         # deny list, since the child bypasses Bench's own hook.
         self.assertEqual(cmd[cmd.index("--tools") + 1], "")
+        self.assertIn("--strict-mcp-config", cmd)
         self.assertNotIn("--disallowedTools", cmd)
         self.assertIn("--model", cmd)
         self.assertIn("claude-opus-4-7", cmd)
@@ -142,11 +143,14 @@ class ClaudeCliCallTests(unittest.TestCase):
             {"role": "assistant", "content": "bad output"},
             {"role": "user", "content": "respond with JSON only"},
         ]
-        _claude_cli_call("claude-sonnet-4-6", "sys", msgs, 4096)
+        _claude_cli_call("claude-sonnet-4-6", "SYS_SENTINEL", msgs, 4096)
         _args, kwargs = run.call_args
         sent = kwargs["input"]
         self.assertIn("ASSISTANT: bad output", sent)
         self.assertIn("USER: respond with JSON only", sent)
+        # The system prompt must not leak onto stdin in the multi-turn path
+        # either — it goes to --system-prompt-file.
+        self.assertNotIn("SYS_SENTINEL", sent)
 
     @mock.patch("utils.api.shutil.which", return_value="/usr/bin/claude")
     def test_system_prompt_written_to_file_not_stdin(self, _which) -> None:
@@ -169,6 +173,18 @@ class ClaudeCliCallTests(unittest.TestCase):
         self.assertNotIn("STRICT_JUDGE_RULES", captured["input"])
         # The temp file is cleaned up after the call.
         self.assertFalse(Path(captured["path"]).exists())
+
+    @mock.patch("utils.api.shutil.which", return_value="/usr/bin/claude")
+    def test_temp_file_write_failure_raises_provider_error(self, _which) -> None:
+        # If the system-prompt temp file cannot be written, the helper must
+        # raise the typed _ProviderError, never a bare OSError that would break
+        # call_model's never-raises contract.
+        with mock.patch(
+            "utils.api.tempfile.NamedTemporaryFile",
+            side_effect=OSError("disk full"),
+        ):
+            with self.assertRaises(_ProviderError):
+                _claude_cli_call("claude-sonnet-4-6", "sys", _msgs(), 4096)
 
     @mock.patch("utils.api.subprocess.run")
     @mock.patch("utils.api.shutil.which", return_value="/usr/bin/claude")

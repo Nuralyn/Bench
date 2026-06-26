@@ -257,6 +257,24 @@ class PathTraversalTests(unittest.TestCase):
         )
         self.assertEqual(result["file_path"], "[PATH_TRAVERSAL_BLOCKED]")
 
+    def test_in_root_absolute_path_allowed(self) -> None:
+        # Write/Edit always pass ABSOLUTE paths, so an in-root absolute path must
+        # resolve to its project-relative form, not be blocked. Regression guard:
+        # the old code blocked every absolute path, which garbled every edit.
+        abs_in_root: str = os.path.join(os.getcwd(), "utils", "diff.py")
+        result = _normalize_path(abs_in_root)
+        self.assertNotEqual(result, "[PATH_TRAVERSAL_BLOCKED]")
+        self.assertEqual(result, os.path.join("utils", "diff.py"))
+
+    def test_build_diff_info_allows_in_root_absolute(self) -> None:
+        # The real-world input shape: build_diff_info given an absolute in-root
+        # file_path must return the nameable project-relative path.
+        abs_in_root: str = os.path.join(os.getcwd(), "utils", "api.py")
+        result = build_diff_info(
+            "Write", {"file_path": abs_in_root, "content": "x = 1"}
+        )
+        self.assertEqual(result["file_path"], os.path.join("utils", "api.py"))
+
 
 class MalformedInputTests(unittest.TestCase):
     def test_multi_edit_with_non_list_edits_field(self) -> None:
