@@ -95,8 +95,9 @@ def extract_diff_info(tool_name: str, tool_input: dict[str, Any]) -> dict[str, A
         # allow in-root paths (returned project-relative, nameable for
         # governance), blocking only genuine escapes. Rejecting every absolute
         # path would garble every edit, since Write/Edit always pass absolute
-        # paths — the bug this mirrors the fix for.
-        root: str = os.path.realpath(os.getcwd())
+        # paths — the bug this mirrors the fix for. Use the file-derived repo
+        # root (_REPO_ROOT), not os.getcwd(), which can be a subdir at runtime.
+        root: str = os.path.realpath(str(_REPO_ROOT))
         candidate: str = os.path.realpath(os.path.join(root, raw_path))
         try:
             normalized = os.path.relpath(candidate, root)
