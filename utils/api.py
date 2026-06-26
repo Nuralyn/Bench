@@ -24,6 +24,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from typing import Any
 
 import anthropic
@@ -327,16 +328,19 @@ def _claude_cli_call(
     """One call via the local `claude` CLI in headless print mode.
 
     Routes the stage through `claude -p` so it rides the user's Claude Code
-    subscription instead of an ANTHROPIC_API_KEY. The system prompt and user
-    content are folded into a single stdin payload (not passed as --system-prompt,
-    which truncates multi-line values on the .cmd shim path); the reply returns
-    as a single JSON envelope whose "result" field is the assistant text.
-    Returns (text, in_tok, out_tok).
+    subscription instead of an ANTHROPIC_API_KEY. The stage system prompt is
+    written to a temp file and loaded via --system-prompt-file so it keeps
+    SYSTEM priority over the untrusted diff (which goes on stdin) and avoids the
+    multi-line-argv truncation cmd.exe inflicts on --system-prompt for a .cmd/.bat
+    shim. The reply returns as a single JSON envelope whose "result" field is the
+    assistant text. Returns (text, in_tok, out_tok).
 
-    Reentrancy: the child inherits this repo's .claude/settings.json, hence
-    Bench's own PreToolUse hook. BENCH_SUBPROCESS=1 in the child env makes that
-    hook fail open immediately (see hooks/pre-tool-use.py); --disallowedTools is
-    a second layer in case the nested agent attempts an edit anyway.
+    Hardening: the call runs tool-less -- --tools "" drops the built-in tools
+    and --strict-mcp-config (no --mcp-config) drops every MCP server -- so a
+    prompt-injected diff cannot drive the judge to run Bash/Edit/MCP/etc. This
+    matters because the child runs with BENCH_SUBPROCESS=1, which makes Bench's
+    own PreToolUse hook fail open (see hooks/pre-tool-use.py); the env guard
+    still prevents recursion.
 
     max_tokens is accepted for signature parity with the other providers; the
     CLI manages its own output cap.
@@ -348,9 +352,11 @@ def _claude_cli_call(
     if binary is None:
         raise _ProviderError("claude_code: `claude` binary not found on PATH")
 
-    # Flatten messages into a single text body. Single-turn calls pass the user
-    # content as-is; the parse-retry path (user/assistant/user) is rendered with
-    # role labels so the prior reply and the JSON nudge both survive.
+    # Flatten messages into a single text body for stdin. Single-turn calls pass
+    # the user content as-is; the parse-retry path (user/assistant/user) is
+    # rendered with role labels so the prior reply and the JSON nudge survive.
+    # The system prompt is NOT folded in here — it goes to --system-prompt-file
+    # below so it keeps system priority over this (untrusted) payload.
     if len(messages) == 1:
         body: str = messages[0].get("content", "")
     else:
@@ -358,13 +364,6 @@ def _claude_cli_call(
             f"{m.get('role', 'user').upper()}: {m.get('content', '')}"
             for m in messages
         )
-
-    # Fold the system prompt into the stdin payload rather than passing it as
-    # --system-prompt. Bench's stage prompts are multi-line, and when `claude`
-    # resolves to a .cmd/.bat shim a multi-line argv is truncated at the first
-    # newline by cmd.exe, silently gutting the prompt. stdin carries arbitrary
-    # text safely on every platform.
-    prompt: str = f"{system_prompt}\n\n{body}" if system_prompt else body
 
     timeout: float = _DEFAULT_CLAUDE_CLI_TIMEOUT
     timeout_raw: str = os.environ.get("BENCH_CLAUDE_TIMEOUT", "")
@@ -390,9 +389,44 @@ def _claude_cli_call(
     child_env: dict[str, str] = dict(os.environ)
     child_env["BENCH_SUBPROCESS"] = "1"
 
-    # --disallowedTools is variadic; keep it last so it does not swallow other
-    # flags. "MultiEdit" is rejected as unknown by some CLI versions, so the
-    # env-var guard above is the load-bearing protection against recursion.
+    # Write the system prompt to a temp file loaded via --system-prompt-file so
+    # the stage's role/schema instructions keep SYSTEM priority over the
+    # untrusted diff on stdin (a prompt-injection diff cannot override a
+    # system-priority prompt), without the multi-line-argv truncation cmd.exe
+    # inflicts on --system-prompt for a .cmd/.bat shim. The file is ephemeral
+    # (model input only, never a governed project file) and removed in finally.
+    sys_prompt_path: str | None = None
+    if system_prompt:
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".txt", delete=False, encoding="utf-8"
+            ) as f:
+                # Record the path before writing: the file already exists on disk
+                # once NamedTemporaryFile is opened, so if the write (or the
+                # close-time flush) raises, the cleanup below still finds it.
+                sys_prompt_path = f.name
+                f.write(system_prompt)
+        except OSError as e:
+            if sys_prompt_path is not None:
+                try:
+                    os.unlink(sys_prompt_path)
+                except OSError as cleanup_err:
+                    print(
+                        "[bench api] failed to remove temp system-prompt file "
+                        f"after write error: {cleanup_err}",
+                        file=sys.stderr,
+                    )
+            raise _ProviderError(
+                "claude_code: failed to write system prompt file: "
+                f"{type(e).__name__}: {_sanitize_error_detail(str(e))}"
+            ) from e
+
+    # Give the judge NO tools at all: --tools "" removes the built-in tools and
+    # --strict-mcp-config (with no --mcp-config) removes every MCP server, so an
+    # injected diff cannot make the agent run Bash/Edit/MCP/etc. This matters
+    # because the child runs with BENCH_SUBPROCESS=1 (Bench's own hook is
+    # bypassed). Note --tools "" alone drops only built-ins, not MCP tools, and
+    # --bare would isolate further but strips the subscription auth (unusable).
     cmd: list[str] = [
         binary,
         "-p",
@@ -400,15 +434,17 @@ def _claude_cli_call(
         "json",
         "--model",
         model,
-        "--disallowedTools",
-        "Write",
-        "Edit",
+        "--tools",
+        "",
+        "--strict-mcp-config",
     ]
+    if sys_prompt_path is not None:
+        cmd += ["--system-prompt-file", sys_prompt_path]
 
     try:
         completed = subprocess.run(
             cmd,
-            input=prompt,
+            input=body,
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -429,6 +465,16 @@ def _claude_cli_call(
             f"claude_code: failed to run `claude`: {type(e).__name__}: "
             f"{_sanitize_error_detail(str(e))}"
         ) from e
+    finally:
+        if sys_prompt_path is not None:
+            try:
+                os.unlink(sys_prompt_path)
+            except OSError as cleanup_err:
+                print(
+                    "[bench api] failed to remove temp system-prompt file "
+                    f"{sys_prompt_path!r}: {cleanup_err}",
+                    file=sys.stderr,
+                )
 
     if completed.returncode != 0:
         detail: str = _sanitize_error_detail(
