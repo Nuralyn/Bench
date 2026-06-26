@@ -36,6 +36,14 @@ _LAST_N: int = 20
 _MAX_ERROR_MESSAGE_CHARS: int = 500
 _PATH_TRAVERSAL_PLACEHOLDER: str = "[PATH_TRAVERSAL_BLOCKED]"
 
+# Project root resolved from this file's location (utils/diff.py -> repo root),
+# NOT os.getcwd(): the hook can run with a working directory below the repo
+# root, and resolving against the CWD would wrongly reject in-repo edits that
+# live outside it (e.g. editing utils/api.py while CWD is tests/).
+_PROJECT_ROOT: str = os.path.realpath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir)
+)
+
 
 def _normalize_path(raw_path: str) -> str:
     """Normalize a file path and reject only genuine traversal.
@@ -49,7 +57,7 @@ def _normalize_path(raw_path: str) -> str:
     """
     if not raw_path:
         return raw_path
-    root: str = os.path.realpath(os.getcwd())
+    root: str = _PROJECT_ROOT
     # os.path.join leaves raw_path unchanged when it is already absolute, so this
     # resolves both absolute and relative inputs against the project root.
     candidate: str = os.path.realpath(os.path.join(root, raw_path))
