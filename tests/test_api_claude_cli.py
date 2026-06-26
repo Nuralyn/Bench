@@ -113,21 +113,25 @@ class ClaudeCliCallTests(unittest.TestCase):
 
     @mock.patch("utils.api.subprocess.run")
     @mock.patch("utils.api.shutil.which", return_value="/usr/bin/claude")
-    def test_sets_subprocess_env_and_disallowed_tools(self, _which, run) -> None:
+    def test_sets_subprocess_env_and_no_tools(self, _which, run) -> None:
         run.return_value = _completed(stdout=_OK_ENVELOPE)
-        _claude_cli_call("claude-opus-4-7", "sys", _msgs(), 4096)
+        _claude_cli_call("claude-opus-4-7", "SYSPROMPT_SENTINEL", _msgs(), 4096)
         args, kwargs = run.call_args
         cmd = args[0] if args else kwargs["args"]
-        self.assertIn("--disallowedTools", cmd)
-        self.assertIn("Write", cmd)
-        self.assertIn("Edit", cmd)
+        # Security: the judge gets NO tools (--tools ""), not just a Write/Edit
+        # deny list, since the child bypasses Bench's own hook.
+        self.assertEqual(cmd[cmd.index("--tools") + 1], "")
+        self.assertNotIn("--disallowedTools", cmd)
         self.assertIn("--model", cmd)
         self.assertIn("claude-opus-4-7", cmd)
         self.assertEqual(kwargs["env"].get("BENCH_SUBPROCESS"), "1")
         self.assertFalse(kwargs.get("shell", False))
-        self.assertNotIn("--system-prompt", cmd)
         self.assertEqual(kwargs.get("encoding"), "utf-8")
-        self.assertTrue(kwargs["input"].startswith("sys"))
+        # System prompt goes to --system-prompt-file, never onto the stdin
+        # payload or the argv (which would lose system priority / get truncated).
+        self.assertIn("--system-prompt-file", cmd)
+        self.assertNotIn("SYSPROMPT_SENTINEL", kwargs["input"])
+        self.assertNotIn("SYSPROMPT_SENTINEL", cmd)
 
     @mock.patch("utils.api.subprocess.run")
     @mock.patch("utils.api.shutil.which", return_value="/usr/bin/claude")
@@ -144,16 +148,27 @@ class ClaudeCliCallTests(unittest.TestCase):
         self.assertIn("ASSISTANT: bad output", sent)
         self.assertIn("USER: respond with JSON only", sent)
 
-    @mock.patch("utils.api.subprocess.run")
     @mock.patch("utils.api.shutil.which", return_value="/usr/bin/claude")
-    def test_folds_system_prompt_into_stdin(self, _which, run) -> None:
-        run.return_value = _completed(stdout=_OK_ENVELOPE)
-        _claude_cli_call("claude-sonnet-4-6", "SYSTEM_RULES", _msgs(), 4096)
-        args, kwargs = run.call_args
-        cmd = args[0] if args else kwargs["args"]
-        self.assertTrue(kwargs["input"].startswith("SYSTEM_RULES"))
-        self.assertNotIn("--system-prompt", cmd)
-        self.assertNotIn("SYSTEM_RULES", cmd)
+    def test_system_prompt_written_to_file_not_stdin(self, _which) -> None:
+        captured: dict[str, str] = {}
+
+        def fake_run(cmd, **kwargs):
+            # Read the system-prompt-file content while it still exists, before
+            # _claude_cli_call removes it in its finally block.
+            path = cmd[cmd.index("--system-prompt-file") + 1]
+            captured["file"] = Path(path).read_text(encoding="utf-8")
+            captured["input"] = kwargs.get("input", "")
+            captured["path"] = path
+            return _completed(stdout=_OK_ENVELOPE)
+
+        with mock.patch("utils.api.subprocess.run", side_effect=fake_run):
+            _claude_cli_call("claude-sonnet-4-6", "STRICT_JUDGE_RULES", _msgs(), 4096)
+
+        # System prompt reaches the file (system priority), not the stdin payload.
+        self.assertEqual(captured["file"], "STRICT_JUDGE_RULES")
+        self.assertNotIn("STRICT_JUDGE_RULES", captured["input"])
+        # The temp file is cleaned up after the call.
+        self.assertFalse(Path(captured["path"]).exists())
 
     @mock.patch("utils.api.subprocess.run")
     @mock.patch("utils.api.shutil.which", return_value="/usr/bin/claude")
