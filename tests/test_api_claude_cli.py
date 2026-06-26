@@ -125,6 +125,9 @@ class ClaudeCliCallTests(unittest.TestCase):
         self.assertIn("claude-opus-4-7", cmd)
         self.assertEqual(kwargs["env"].get("BENCH_SUBPROCESS"), "1")
         self.assertFalse(kwargs.get("shell", False))
+        self.assertNotIn("--system-prompt", cmd)
+        self.assertEqual(kwargs.get("encoding"), "utf-8")
+        self.assertTrue(kwargs["input"].startswith("sys"))
 
     @mock.patch("utils.api.subprocess.run")
     @mock.patch("utils.api.shutil.which", return_value="/usr/bin/claude")
@@ -140,6 +143,97 @@ class ClaudeCliCallTests(unittest.TestCase):
         sent = kwargs["input"]
         self.assertIn("ASSISTANT: bad output", sent)
         self.assertIn("USER: respond with JSON only", sent)
+
+    @mock.patch("utils.api.subprocess.run")
+    @mock.patch("utils.api.shutil.which", return_value="/usr/bin/claude")
+    def test_folds_system_prompt_into_stdin(self, _which, run) -> None:
+        run.return_value = _completed(stdout=_OK_ENVELOPE)
+        _claude_cli_call("claude-sonnet-4-6", "SYSTEM_RULES", _msgs(), 4096)
+        args, kwargs = run.call_args
+        cmd = args[0] if args else kwargs["args"]
+        self.assertTrue(kwargs["input"].startswith("SYSTEM_RULES"))
+        self.assertNotIn("--system-prompt", cmd)
+        self.assertNotIn("SYSTEM_RULES", cmd)
+
+    @mock.patch("utils.api.subprocess.run")
+    @mock.patch("utils.api.shutil.which", return_value="/usr/bin/claude")
+    def test_timeout_env_valid_is_passed(self, _which, run) -> None:
+        run.return_value = _completed(stdout=_OK_ENVELOPE)
+        with mock.patch.dict("os.environ", {"BENCH_CLAUDE_TIMEOUT": "5"}):
+            _claude_cli_call("claude-sonnet-4-6", "sys", _msgs(), 4096)
+        _args, kwargs = run.call_args
+        self.assertEqual(kwargs["timeout"], 5.0)
+
+    @mock.patch("utils.api.subprocess.run")
+    @mock.patch("utils.api.shutil.which", return_value="/usr/bin/claude")
+    def test_timeout_env_invalid_falls_back(self, _which, run) -> None:
+        run.return_value = _completed(stdout=_OK_ENVELOPE)
+        with mock.patch.dict("os.environ", {"BENCH_CLAUDE_TIMEOUT": "abc"}):
+            _claude_cli_call("claude-sonnet-4-6", "sys", _msgs(), 4096)
+        _args, kwargs = run.call_args
+        self.assertEqual(kwargs["timeout"], 120.0)
+
+    @mock.patch("utils.api.subprocess.run")
+    @mock.patch("utils.api.shutil.which", return_value="/usr/bin/claude")
+    def test_timeout_env_nonpositive_falls_back(self, _which, run) -> None:
+        run.return_value = _completed(stdout=_OK_ENVELOPE)
+        for bad in ("0", "-30"):
+            with mock.patch.dict("os.environ", {"BENCH_CLAUDE_TIMEOUT": bad}):
+                _claude_cli_call("claude-sonnet-4-6", "sys", _msgs(), 4096)
+            _args, kwargs = run.call_args
+            self.assertEqual(kwargs["timeout"], 120.0)
+
+    @mock.patch("utils.api.subprocess.run")
+    @mock.patch("utils.api.shutil.which", return_value="/usr/bin/claude")
+    def test_subtype_error_without_is_error_raises(self, _which, run) -> None:
+        run.return_value = _completed(
+            stdout=json.dumps({"subtype": "error_max_turns", "result": "partial"})
+        )
+        with self.assertRaises(_ProviderError):
+            _claude_cli_call("claude-sonnet-4-6", "sys", _msgs(), 4096)
+
+    @mock.patch("utils.api.subprocess.run")
+    @mock.patch("utils.api.shutil.which", return_value="/usr/bin/claude")
+    def test_sums_cache_tokens_into_input(self, _which, run) -> None:
+        run.return_value = _completed(
+            stdout=json.dumps(
+                {
+                    "subtype": "success",
+                    "is_error": False,
+                    "result": "{}",
+                    "usage": {
+                        "input_tokens": 2,
+                        "cache_creation_input_tokens": 100,
+                        "cache_read_input_tokens": 50,
+                        "output_tokens": 7,
+                    },
+                }
+            )
+        )
+        _text, in_tok, out_tok = _claude_cli_call(
+            "claude-sonnet-4-6", "sys", _msgs(), 4096
+        )
+        self.assertEqual(in_tok, 152)
+        self.assertEqual(out_tok, 7)
+
+    @mock.patch("utils.api.subprocess.run")
+    @mock.patch("utils.api.shutil.which", return_value="/usr/bin/claude")
+    def test_malformed_usage_does_not_raise(self, _which, run) -> None:
+        run.return_value = _completed(
+            stdout=json.dumps(
+                {
+                    "subtype": "success",
+                    "is_error": False,
+                    "result": "{}",
+                    "usage": {"input_tokens": "oops", "output_tokens": None},
+                }
+            )
+        )
+        text, in_tok, out_tok = _claude_cli_call(
+            "claude-sonnet-4-6", "sys", _msgs(), 4096
+        )
+        self.assertEqual((in_tok, out_tok), (0, 0))
+        self.assertEqual(text, "{}")
 
 
 class CallModelClaudeCliIntegrationTests(unittest.TestCase):
