@@ -212,5 +212,43 @@ class MainFlowTests(unittest.TestCase):
         mock_pipeline.assert_not_called()
 
 
+class ExtractDiffInfoFallbackTests(unittest.TestCase):
+    """The inline fallback (used when utils.diff fails to import) must use the
+    same project-root containment as utils.diff._normalize_path, not block every
+    absolute path (Write/Edit always supply absolute paths)."""
+
+    def test_fallback_allows_in_root_absolute_path(self) -> None:
+        import os
+
+        abs_in_root: str = os.path.join(os.getcwd(), "utils", "api.py")
+        original = _hook_module._build_diff_info_hardened
+        try:
+            _hook_module._build_diff_info_hardened = None  # force fallback
+            info: dict = _hook_module.extract_diff_info(
+                "Edit",
+                {"file_path": abs_in_root, "old_string": "a", "new_string": "b"},
+            )
+        finally:
+            _hook_module._build_diff_info_hardened = original
+        self.assertNotEqual(info["file_path"], "[PATH_TRAVERSAL_BLOCKED]")
+        self.assertEqual(info["file_path"], os.path.join("utils", "api.py"))
+
+    def test_fallback_blocks_escape(self) -> None:
+        original = _hook_module._build_diff_info_hardened
+        try:
+            _hook_module._build_diff_info_hardened = None
+            info: dict = _hook_module.extract_diff_info(
+                "Edit",
+                {
+                    "file_path": "../../../etc/passwd",
+                    "old_string": "a",
+                    "new_string": "b",
+                },
+            )
+        finally:
+            _hook_module._build_diff_info_hardened = original
+        self.assertEqual(info["file_path"], "[PATH_TRAVERSAL_BLOCKED]")
+
+
 if __name__ == "__main__":
     unittest.main()

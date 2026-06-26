@@ -89,17 +89,36 @@ def extract_diff_info(tool_name: str, tool_input: dict[str, Any]) -> dict[str, A
         file=sys.stderr,
     )
     raw_path: str = str(tool_input.get("file_path", ""))
-    normalized: str = os.path.normpath(raw_path) if raw_path else raw_path
-    if raw_path and (
-        os.path.isabs(normalized)
-        or raw_path.startswith("/")
-        or normalized.startswith("..")
-    ):
-        print(
-            f"[bench hook] path traversal blocked in fallback: {raw_path!r}",
-            file=sys.stderr,
-        )
-        normalized = "[PATH_TRAVERSAL_BLOCKED]"
+    normalized: str = raw_path
+    if raw_path:
+        # Mirror utils.diff._normalize_path: resolve against the project root and
+        # allow in-root paths (returned project-relative, nameable for
+        # governance), blocking only genuine escapes. Rejecting every absolute
+        # path would garble every edit, since Write/Edit always pass absolute
+        # paths — the bug this mirrors the fix for. Use the file-derived repo
+        # root (_REPO_ROOT), not os.getcwd(), which can be a subdir at runtime.
+        root: str = os.path.realpath(str(_REPO_ROOT))
+        candidate: str = os.path.realpath(os.path.join(root, raw_path))
+        try:
+            normalized = os.path.relpath(candidate, root)
+        except ValueError as exc:
+            # Different drive on Windows: cannot be inside the project root.
+            print(
+                f"[bench hook] path traversal blocked in fallback "
+                f"(cross-drive) {raw_path!r}: {exc}",
+                file=sys.stderr,
+            )
+            normalized = "[PATH_TRAVERSAL_BLOCKED]"
+        else:
+            if normalized == os.pardir or normalized.startswith(
+                os.pardir + os.sep
+            ):
+                print(
+                    f"[bench hook] path traversal blocked in fallback "
+                    f"(escapes project root) {raw_path!r}",
+                    file=sys.stderr,
+                )
+                normalized = "[PATH_TRAVERSAL_BLOCKED]"
     if tool_name == "Write":
         return {
             "file_path": normalized,
