@@ -335,11 +335,12 @@ def _claude_cli_call(
     shim. The reply returns as a single JSON envelope whose "result" field is the
     assistant text. Returns (text, in_tok, out_tok).
 
-    Hardening: the call runs with --tools "" (no tools at all). The child
-    inherits this repo's .claude/settings.json and runs with BENCH_SUBPROCESS=1,
-    which makes Bench's own PreToolUse hook fail open (see hooks/pre-tool-use.py);
-    with no tools available, a prompt-injected diff cannot drive the judge to
-    touch files, and the env guard still prevents recursion.
+    Hardening: the call runs tool-less -- --tools "" drops the built-in tools
+    and --strict-mcp-config (no --mcp-config) drops every MCP server -- so a
+    prompt-injected diff cannot drive the judge to run Bash/Edit/MCP/etc. This
+    matters because the child runs with BENCH_SUBPROCESS=1, which makes Bench's
+    own PreToolUse hook fail open (see hooks/pre-tool-use.py); the env guard
+    still prevents recursion.
 
     max_tokens is accepted for signature parity with the other providers; the
     CLI manages its own output cap.
@@ -400,17 +401,32 @@ def _claude_cli_call(
             with tempfile.NamedTemporaryFile(
                 mode="w", suffix=".txt", delete=False, encoding="utf-8"
             ) as f:
-                f.write(system_prompt)
+                # Record the path before writing: the file already exists on disk
+                # once NamedTemporaryFile is opened, so if the write (or the
+                # close-time flush) raises, the cleanup below still finds it.
                 sys_prompt_path = f.name
+                f.write(system_prompt)
         except OSError as e:
+            if sys_prompt_path is not None:
+                try:
+                    os.unlink(sys_prompt_path)
+                except OSError as cleanup_err:
+                    print(
+                        "[bench api] failed to remove temp system-prompt file "
+                        f"after write error: {cleanup_err}",
+                        file=sys.stderr,
+                    )
             raise _ProviderError(
                 "claude_code: failed to write system prompt file: "
                 f"{type(e).__name__}: {_sanitize_error_detail(str(e))}"
             ) from e
 
-    # --tools "" gives the judge NO tools. These are pure JSON-reasoning calls,
-    # and the child runs with BENCH_SUBPROCESS=1 (Bench's own hook is bypassed),
-    # so an injected diff must not be able to make the agent run Bash/Edit/etc.
+    # Give the judge NO tools at all: --tools "" removes the built-in tools and
+    # --strict-mcp-config (with no --mcp-config) removes every MCP server, so an
+    # injected diff cannot make the agent run Bash/Edit/MCP/etc. This matters
+    # because the child runs with BENCH_SUBPROCESS=1 (Bench's own hook is
+    # bypassed). Note --tools "" alone drops only built-ins, not MCP tools, and
+    # --bare would isolate further but strips the subscription auth (unusable).
     cmd: list[str] = [
         binary,
         "-p",
@@ -420,6 +436,7 @@ def _claude_cli_call(
         model,
         "--tools",
         "",
+        "--strict-mcp-config",
     ]
     if sys_prompt_path is not None:
         cmd += ["--system-prompt-file", sys_prompt_path]

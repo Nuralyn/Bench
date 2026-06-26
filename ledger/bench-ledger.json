@@ -6633,5 +6633,1199 @@
       }
     },
     "entry_hash": "d2e114a3083769656b88fc85bf497daae918c5821fae27ef644c36fca0897669"
+  },
+  {
+    "entry_id": "eaa0166c-a502-4dc2-a993-ece8812be0d9",
+    "timestamp": "2026-06-26T07:01:48.026951+00:00",
+    "previous_hash": "d2e114a3083769656b88fc85bf497daae918c5821fae27ef644c36fca0897669",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "utils\\api.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "utils\\api.py",
+        "change_type": "modify",
+        "old_string": "    sys_prompt_path: str | None = None\n    if system_prompt:\n        try:\n            with tempfile.NamedTemporaryFile(\n                mode=\"w\", suffix=\".txt\", delete=False, encoding=\"utf-8\"\n            ) as f:\n                f.write(system_prompt)\n                sys_prompt_path = f.name\n        except OSError as e:\n            raise _ProviderError(\n                \"claude_code: failed to write system prompt file: \"\n                f\"{type(e).__name__}: {_sanitize_error_detail(str(e))}\"\n            ) from e",
+        "new_string": "    sys_prompt_path: str | None = None\n    if system_prompt:\n        try:\n            with tempfile.NamedTemporaryFile(\n                mode=\"w\", suffix=\".txt\", delete=False, encoding=\"utf-8\"\n            ) as f:\n                # Record the path before writing: the file already exists on disk\n                # once NamedTemporaryFile is opened, so if the write (or the\n                # close-time flush) raises, the cleanup below still finds it.\n                sys_prompt_path = f.name\n                f.write(system_prompt)\n        except OSError as e:\n            if sys_prompt_path is not None:\n                try:\n                    os.unlink(sys_prompt_path)\n                except OSError as cleanup_err:\n                    print(\n                        \"[bench api] failed to remove temp system-prompt file \"\n                        f\"after write error: {cleanup_err}\",\n                        file=sys.stderr,\n                    )\n            raise _ProviderError(\n                \"claude_code: failed to write system prompt file: \"\n                f\"{type(e).__name__}: {_sanitize_error_detail(str(e))}\"\n            ) from e"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-003",
+          "severity": "CONCERN",
+          "location": "utils/api.py - new cleanup block inside except OSError",
+          "evidence": "os.unlink(sys_prompt_path)\n...\nprint(\n    \"[bench api] failed to remove temp system-prompt file \"\n    f\"after write error: {cleanup_err}\",\n    file=sys.stderr,\n)",
+          "reasoning": "The new code introduces calls to `os.unlink()` and `sys.stderr` (via `print(..., file=sys.stderr)`). The diff does not include import statements, so it is not possible to confirm from this change alone that `import os` and `import sys` are already present in the file. If either is absent, this code will raise a NameError at runtime in the exact error path it is meant to handle. While both are stdlib (no requirements.txt entry needed), C-003 requires that any new import be explicitly declared. The Oracle should verify the full file confirms both are already imported before this change lands."
+        },
+        {
+          "constraint_id": "C-005",
+          "severity": "CONCERN",
+          "location": "utils/api.py - new error-path cleanup logic",
+          "evidence": "if sys_prompt_path is not None:\n    try:\n        os.unlink(sys_prompt_path)\n    except OSError as cleanup_err:\n        print(\n            \"[bench api] failed to remove temp system-prompt file \"\n            f\"after write error: {cleanup_err}\",\n            file=sys.stderr,\n        )\nraise _ProviderError(...) from e",
+          "reasoning": "The change introduces two new testable branches: (1) write fails and cleanup succeeds, (2) write fails and cleanup also fails. These paths are real, exercisable failure modes. The diff includes no test additions or explicit justification for deferring coverage of this new logic. C-005 requires either corresponding test cases or an explicit justification. This is a warning-severity constraint but the absence of either a test or a stated rationale is the pattern C-005 is designed to catch."
+        }
+      ],
+      "_tokens": {
+        "input": 5973,
+        "output": 3345
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "REBUT",
+          "argument": "The Challenger misapplies C-003. The constraint reads: 'Any new import or dependency must be explicitly declared. No silent additions to requirements.txt, package.json, or equivalent.' The operative clause is about package-level dependencies that must be declared in requirements.txt. The Challenger explicitly concedes that 'both are stdlib (no requirements.txt entry needed).' That concession is the end of the C-003 analysis. `os` and `sys` are Python builtins; they require no declaration anywhere. The concern about potential NameError is a code correctness question, not a C-003 violation caused by this diff. Furthermore, the file's own context makes it virtually certain both are already imported: `utils/api.py` manages environment variable reads (`os.environ[...]`), subprocess execution, and error output via stderr, all of which require `os` and `sys`. This change introduces no new import at all; it uses existing symbols. The finding stretches C-003 beyond its stated scope.",
+          "evidence": "C-003 text: 'No silent additions to requirements.txt, package.json, or equivalent.' Challenger's own admission: 'both are stdlib (no requirements.txt entry needed).' The CLAUDE.md api.py description shows `os.environ[\"OPENROUTER_API_KEY\"]` and subprocess calls, confirming os and sys are pre-existing imports."
+        },
+        {
+          "finding_index": 1,
+          "position": "CONCEDE",
+          "argument": "The Challenger is correct. This diff introduces two new exercisable code paths: (1) write fails, cleanup succeeds; (2) write fails, cleanup also fails. Neither path has a test case in the diff, and no explicit justification for deferring coverage is stated. C-005 is a warning-severity constraint, not a veto, but the pattern is exactly what C-005 exists to catch. The logic is simple enough to reason about informally, but 'simple' is not the same as 'tested.' A partial mitigation is that this is deep error-path infrastructure code where injection-based testing is non-trivial, but that rationale was never stated in the change itself, so it cannot satisfy the 'explicit justification' requirement. This is a legitimate C-005 warning.",
+          "evidence": "The new code adds `if sys_prompt_path is not None: try: os.unlink(...) except OSError as cleanup_err: print(...)` with no accompanying test file changes or inline rationale for deferral."
+        }
+      ],
+      "summary": "The change correctly fixes a real resource leak by recording the temp file path before the write so cleanup can run on failure; the C-003 finding is a misapplication of the constraint against a stdlib module that requires no requirements.txt entry, but the C-005 warning is legitimate and the change should ship with a note that the two new failure branches need test coverage.",
+      "_tokens": {
+        "input": 6550,
+        "output": 1692
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change addresses a real resource leak: previously, if NamedTemporaryFile's write failed after the file was created on disk, sys_prompt_path was never assigned and the temp file was orphaned. The fix records the path before writing and adds best-effort cleanup. On C-003, the Defender correctly notes that os and sys are stdlib builtins and the constraint targets requirements.txt-level declarations, not stdlib usage; the Challenger's own admission ('both are stdlib, no requirements.txt entry needed') concedes the point. The presence of os.environ and stderr usage elsewhere in utils/api.py (per CLAUDE.md) makes it near-certain both modules are already imported, and even if not, this would be a runtime correctness issue rather than a C-003 violation. On C-005, the Defender concedes the warning is legitimate: two new error branches lack tests or explicit deferral rationale. C-005 is warning severity, not veto, so it does not block. On C-001, the new except OSError block logs to stderr (non-silent) and the outer except still raises _ProviderError, satisfying the 'log, re-throw, or return typed error' requirement. C-007 applies because utils/api.py is part of the pipeline infrastructure, but the change strengthens reliability (prevents temp file leak) rather than weakening enforcement, bypassing verification, or disabling logging.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "SATISFIED",
+          "note": "Cleanup failure is logged to stderr; outer OSError re-raises as _ProviderError. No silent swallowing."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is scoped to a single block in utils/api.py addressing the resource leak."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "os and sys are stdlib; C-003 governs requirements.txt-level declarations per its text. Challenger conceded stdlib status."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "No type annotations removed or weakened; sys_prompt_path retains its 'str | None' annotation."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "VIOLATED",
+          "note": "Two new error branches lack tests and explicit deferral rationale, as Defender conceded. Warning severity, does not trigger veto."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No secrets introduced."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "Change to pipeline-adjacent file strengthens reliability (prevents temp file leak in claude_code provider path); does not weaken enforcement or disable logging."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger modifications."
+        }
+      ],
+      "advisories": [
+        "C-005 warning: add tests covering (a) write-success path still works, (b) write-failure with successful cleanup, and (c) write-failure with cleanup also failing (verify _ProviderError is still raised and stderr message is emitted). Alternatively, add an inline comment justifying deferral.",
+        "Verify that `import os` and `import sys` exist at the top of utils/api.py before merging. The Defender's argument that they almost certainly do is reasonable given the file's responsibilities, but a quick visual confirmation costs nothing."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 10473,
+        "output": 1304
+      }
+    },
+    "entry_hash": "e2a10092f7b0b7be516ed037212ac7db96687868728ae2253fc7f316210d0af3"
+  },
+  {
+    "entry_id": "7b3e590f-b6b0-46f9-b5c9-3c8c48b40a2f",
+    "timestamp": "2026-06-26T07:03:16.494072+00:00",
+    "previous_hash": "e2a10092f7b0b7be516ed037212ac7db96687868728ae2253fc7f316210d0af3",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "utils\\api.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "utils\\api.py",
+        "change_type": "modify",
+        "old_string": "    # --tools \"\" gives the judge NO tools. These are pure JSON-reasoning calls,\n    # and the child runs with BENCH_SUBPROCESS=1 (Bench's own hook is bypassed),\n    # so an injected diff must not be able to make the agent run Bash/Edit/etc.\n    cmd: list[str] = [\n        binary,\n        \"-p\",\n        \"--output-format\",\n        \"json\",\n        \"--model\",\n        model,\n        \"--tools\",\n        \"\",\n    ]",
+        "new_string": "    # Give the judge NO tools at all: --tools \"\" removes the built-in tools and\n    # --strict-mcp-config (with no --mcp-config) removes every MCP server, so an\n    # injected diff cannot make the agent run Bash/Edit/MCP/etc. This matters\n    # because the child runs with BENCH_SUBPROCESS=1 (Bench's own hook is\n    # bypassed). Note --tools \"\" alone drops only built-ins, not MCP tools, and\n    # --bare would isolate further but strips the subscription auth (unusable).\n    cmd: list[str] = [\n        binary,\n        \"-p\",\n        \"--output-format\",\n        \"json\",\n        \"--model\",\n        model,\n        \"--tools\",\n        \"\",\n        \"--strict-mcp-config\",\n    ]"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-005",
+          "severity": "OBSERVATION",
+          "location": "utils/api.py - cmd list construction in claude_code provider path",
+          "evidence": "\"--strict-mcp-config\",\n    ]",
+          "reasoning": "The addition of '--strict-mcp-config' is a behavioral change to the subprocess invocation for the claude_code provider path, a security-critical code path that controls what capabilities judge subprocesses can access. No corresponding test is added or referenced to verify (a) that '--strict-mcp-config' is present in the constructed command list, or (b) that the subprocess isolation behaves as the comment asserts. C-005 is warning-severity and this is not a new function or conditional branch, but a flag on a critical security control warrants noting. The justification in the comment is clear and the change is strengthening rather than weakening, so this is informational rather than actionable."
+        }
+      ],
+      "_tokens": {
+        "input": 5883,
+        "output": 1475
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "MITIGATE",
+          "argument": "The Challenger correctly identifies this as C-005 warning-severity and self-characterizes it as 'informational rather than actionable.' I agree with that framing and add three mitigations. First, the change is a single string literal appended to a list -- writing a unit test to assert that a string exists in a list catches typos but provides near-zero behavioral coverage of the actual security property (MCP isolation). Real verification requires spawning a claude subprocess with an MCP server configured and confirming no MCP calls land -- that is integration-test territory, not unit-test territory, and no such harness exists in this codebase yet. Second, C-005 explicitly allows 'explicit justification for why testing is deferred' as an alternative to a test case. The new comment block does exactly that: it explains the threat model (injected diff leveraging MCP tools despite BENCH_SUBPROCESS=1), the gap that --tools \"\" alone does not close (only built-ins, not MCP), and why --strict-mcp-config is the correct counter. That is a documented rationale in code, satisfying the spirit of C-005 for a flag addition. Third, the change strictly strengthens governance (C-007 concern would be weakening). Adding --strict-mcp-config reduces the subprocess attack surface; it cannot introduce a regression in isolation because the flag has no effect when no MCP servers are configured, and only hardens behavior when they are.",
+          "evidence": "New comment block: '--tools \"\" alone drops only built-ins, not MCP tools' and '--strict-mcp-config (with no --mcp-config) removes every MCP server'. The Challenger's own conclusion: 'The justification in the comment is clear and the change is strengthening rather than weakening, so this is informational rather than actionable.'"
+        }
+      ],
+      "summary": "The change is sound: it closes a legitimate MCP-tool escape hatch in the claude_code subprocess path, the rationale is documented inline, and the single C-005 observation is self-mitigated by the comment's explicit justification and the practical infeasibility of unit-testing subprocess flag isolation.",
+      "_tokens": {
+        "input": 6168,
+        "output": 1127
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change adds `--strict-mcp-config` to the claude_code subprocess invocation, strengthening tool isolation for judge subprocesses. Per C-007, changes to the governance pipeline must not weaken enforcement; this change strictly hardens it by closing an MCP-tool escape hatch (Defender argument, confirmed by the new inline comment explaining `--tools \"\"` alone drops only built-ins, not MCP tools). The Challenger's sole finding is a C-005 observation explicitly self-characterized as 'informational rather than actionable,' and the Defender's MITIGATE position correctly invokes C-005's 'explicit justification for why testing is deferred' clause, satisfied by the new inline rationale. No other constraints are implicated: no error handling changed (C-001), the change is scoped to the same function block (C-002), no new imports added (C-003), type annotations on `cmd: list[str]` preserved (C-004), no secrets (C-006), and no ledger modification (C-008).",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error-handling code is modified."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is localized to the cmd list construction in utils/api.py."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "SATISFIED",
+          "note": "No new imports or dependencies introduced; --strict-mcp-config is a flag to the existing claude CLI."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "The `cmd: list[str]` annotation is preserved."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "SATISFIED",
+          "note": "Challenger flagged absence of tests but rated it OBSERVATION; Defender invokes the C-005 clause permitting explicit justification, which the new comment block provides. Integration-level verification of subprocess isolation is out of scope for a flag addition."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No secrets introduced."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "Change strengthens governance pipeline isolation (removes MCP tool surface from judge subprocesses) rather than weakening it. Defender argument that flag has no effect when no MCP servers are configured and only hardens otherwise is sound."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger code modified."
+        }
+      ],
+      "advisories": [
+        "When an integration harness for the claude_code provider path is eventually built, add a test that spawns a judge subprocess with a configured MCP server and asserts no MCP tool invocations occur, to behaviorally verify the --strict-mcp-config guarantee.",
+        "Confirm that --strict-mcp-config is a stable, documented flag on the version(s) of the claude CLI Bench supports; if the flag is unrecognized on older CLI versions, subprocess invocation could fail. Consider a graceful fallback or version check if backward compatibility matters."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 9699,
+        "output": 1195
+      }
+    },
+    "entry_hash": "31874a2548fa33e2d329a319dcd790ba5148568a4320e7464a69cd6e31f06937"
+  },
+  {
+    "entry_id": "10864c1d-aa21-423b-a8f8-0937d94c5ee9",
+    "timestamp": "2026-06-26T07:05:10.422612+00:00",
+    "previous_hash": "31874a2548fa33e2d329a319dcd790ba5148568a4320e7464a69cd6e31f06937",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "utils\\api.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "utils\\api.py",
+        "change_type": "modify",
+        "old_string": "    Hardening: the call runs with --tools \"\" (no tools at all). The child\n    inherits this repo's .claude/settings.json and runs with BENCH_SUBPROCESS=1,\n    which makes Bench's own PreToolUse hook fail open (see hooks/pre-tool-use.py);\n    with no tools available, a prompt-injected diff cannot drive the judge to\n    touch files, and the env guard still prevents recursion.",
+        "new_string": "    Hardening: the call runs tool-less -- --tools \"\" drops the built-in tools\n    and --strict-mcp-config (no --mcp-config) drops every MCP server -- so a\n    prompt-injected diff cannot drive the judge to run Bash/Edit/MCP/etc. This\n    matters because the child runs with BENCH_SUBPROCESS=1, which makes Bench's\n    own PreToolUse hook fail open (see hooks/pre-tool-use.py); the env guard\n    still prevents recursion."
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-007",
+          "severity": "CONCERN",
+          "location": "utils/api.py - docstring for claude_code provider hardening block",
+          "evidence": "--strict-mcp-config (no --mcp-config) drops every MCP server -- so a prompt-injected diff cannot drive the judge to run Bash/Edit/MCP/etc.",
+          "reasoning": "The diff is a docstring-only change, but the new comment asserts a specific CLI flag (--strict-mcp-config) is being passed to the claude subprocess as a security hardening measure. No corresponding implementation change is visible in this diff. If the actual subprocess invocation in api.py does not pass --strict-mcp-config, this comment creates false assurance about a security property of the governance pipeline. Under C-007, the pipeline must not weaken enforcement -- and a misleading security claim in documentation that causes reviewers to believe a control exists when it does not is a form of integrity degradation. The Oracle should verify that --strict-mcp-config is present in the actual subprocess call in this same file before passing this change."
+        },
+        {
+          "constraint_id": "C-007",
+          "severity": "OBSERVATION",
+          "location": "utils/api.py - docstring for claude_code provider hardening block",
+          "evidence": "Old: 'The child inherits this repo's .claude/settings.json and runs with BENCH_SUBPROCESS=1' -- New text omits the settings.json inheritance claim entirely.",
+          "reasoning": "The old comment stated the child process inherits .claude/settings.json, which is where the PreToolUse hook is registered. The new comment silently drops this claim. If this reflects an actual behavioral change (e.g., --no-config or similar is now passed), the hook registration path changes and the governance pipeline's self-protection posture changes. If it is just a documentation simplification with no behavioral change, it is harmless. The Oracle should confirm whether this omission is intentional and accurate, as the hook inheritance is a load-bearing security property."
+        }
+      ],
+      "_tokens": {
+        "input": 5750,
+        "output": 2323
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "MITIGATE",
+          "argument": "The Challenger's concern is structurally valid: if --strict-mcp-config is claimed in a docstring but absent from the actual subprocess call, that creates false security assurance under C-007. However, the framing of the risk deserves scrutiny. This diff is a targeted docstring edit, not a wholesale rewrite of the function. The strong presumption for any docstring update is that it documents existing behavior rather than aspirational behavior -- developers update comments to reflect what code already does, not to describe features they haven't built yet. The more likely scenario is that --strict-mcp-config was added to the subprocess invocation in the same file (in a portion not shown in this partial diff), and this docstring is being updated in lockstep. The concern is therefore real but probably low-probability. The Oracle should check the actual subprocess call in utils/api.py before ruling, but the finding does not, by itself, constitute evidence that the flag is absent.",
+          "evidence": "The diff shows a targeted old_string/new_string swap inside a docstring block. The rest of the subprocess invocation logic is unchanged and not shown. Docstring updates in implementation files almost universally follow the code they describe."
+        },
+        {
+          "finding_index": 1,
+          "position": "REBUT",
+          "argument": "The omission of the '.claude/settings.json' inheritance claim is a documentation simplification, not evidence of a behavioral change. The new text retains the only load-bearing security claim that depends on settings.json: it still says 'the child runs with BENCH_SUBPROCESS=1' and explicitly ties that to the PreToolUse hook failing open. The settings.json inheritance is an implementation detail of how BENCH_SUBPROCESS=1 gets honored by the hook -- the docstring doesn't need to explain the mechanism for the security property to be valid. The new comment is more precise: it describes the actual attack surface being controlled (built-in tools via --tools \"\", MCP servers via --strict-mcp-config) rather than an indirect implementation fact. The Challenger is treating a documentation refinement as a possible behavioral reversal, which is not supported by the text.",
+          "evidence": "New text: 'This matters because the child runs with BENCH_SUBPROCESS=1, which makes Bench's own PreToolUse hook fail open (see hooks/pre-tool-use.py); the env guard still prevents recursion.' -- the hook mechanism is fully described; the settings.json pathway is an implicit implementation detail that doesn't need explicit mention to preserve the documented security guarantee."
+        }
+      ],
+      "summary": "This is a docstring-only clarity improvement; Finding 1 deserves Oracle verification of the actual subprocess call but is likely safe given documentation follows implementation, and Finding 2 is a misread of a deliberate simplification that retains all load-bearing security claims.",
+      "_tokens": {
+        "input": 6296,
+        "output": 1813
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "This is a docstring-only change in utils/api.py. The Challenger raised two concerns under C-007: (1) the new docstring claims --strict-mcp-config is passed to the subprocess, which would be a false security assurance if not implemented, and (2) the new text omits the prior mention of .claude/settings.json inheritance. The Defender correctly notes (per their MITIGATE on finding 0) that docstrings overwhelmingly document existing behavior rather than aspirational behavior, and the diff does not modify the subprocess invocation logic. The Defender's REBUT on finding 1 is also sound: the new docstring still preserves the load-bearing security claim (BENCH_SUBPROCESS=1 -> PreToolUse hook fail-open -> recursion prevention), and the omission of the settings.json inheritance is a documentation refinement, not a behavioral claim reversal. No other constraints (C-001, C-002, C-003, C-004, C-006, C-008) apply to a docstring edit. C-005 is N/A because no new logic was introduced. The change does not weaken enforcement under C-007; if anything, the new text more precisely names the attack surfaces being controlled. The Challenger's finding 0 raised an important verification point (does the actual subprocess call include --strict-mcp-config?), which is appropriately flagged as an advisory rather than grounds for veto, since the diff itself contains no evidence of a mismatch.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error handling code is modified."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is confined to a single docstring in utils/api.py."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependencies added."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No type annotations affected."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new logic or branches introduced; docstring-only."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "No secrets or credentials present."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "Per Defender rebuttal, the docstring describes existing behavior; load-bearing security claims (BENCH_SUBPROCESS=1 -> hook fail-open -> recursion prevention) are preserved. The Challenger provided no evidence that --strict-mcp-config is absent from the actual subprocess call."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Ledger is not touched."
+        }
+      ],
+      "advisories": [
+        "Challenger finding 0 raised a legitimate verification point: confirm that the actual subprocess invocation in utils/api.py passes --strict-mcp-config as the docstring now claims. If the flag is not present in the code, a follow-up change should either add the flag or correct the docstring. A documentation claim of a security control that does not exist would be a C-007 violation in a future review.",
+        "The omission of the .claude/settings.json inheritance reference is an acceptable simplification, but consider whether downstream readers benefit from knowing how BENCH_SUBPROCESS=1 is honored by the hook (i.e., via settings.json registration). Optional clarity improvement, not a governance issue."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 10184,
+        "output": 1316
+      }
+    },
+    "entry_hash": "ab0dfc9ea294dad8b1c8da4e2f1a04da899f686920326d948ace0176b693cec3"
+  },
+  {
+    "entry_id": "c04e8951-9af5-414d-8b5c-3f896768b94e",
+    "timestamp": "2026-06-26T07:08:22.955485+00:00",
+    "previous_hash": "ab0dfc9ea294dad8b1c8da4e2f1a04da899f686920326d948ace0176b693cec3",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "hooks\\pre-tool-use.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "hooks\\pre-tool-use.py",
+        "change_type": "modify",
+        "old_string": "    raw_path: str = str(tool_input.get(\"file_path\", \"\"))\n    normalized: str = os.path.normpath(raw_path) if raw_path else raw_path\n    if raw_path and (\n        os.path.isabs(normalized)\n        or raw_path.startswith(\"/\")\n        or normalized.startswith(\"..\")\n    ):\n        print(\n            f\"[bench hook] path traversal blocked in fallback: {raw_path!r}\",\n            file=sys.stderr,\n        )\n        normalized = \"[PATH_TRAVERSAL_BLOCKED]\"",
+        "new_string": "    raw_path: str = str(tool_input.get(\"file_path\", \"\"))\n    normalized: str = raw_path\n    if raw_path:\n        # Mirror utils.diff._normalize_path: resolve against the project root and\n        # allow in-root paths (returned project-relative, nameable for\n        # governance), blocking only genuine escapes. Rejecting every absolute\n        # path would garble every edit, since Write/Edit always pass absolute\n        # paths \u00e2\u20ac\u201d the bug this mirrors the fix for.\n        root: str = os.path.realpath(os.getcwd())\n        candidate: str = os.path.realpath(os.path.join(root, raw_path))\n        try:\n            normalized = os.path.relpath(candidate, root)\n        except ValueError:\n            normalized = \"[PATH_TRAVERSAL_BLOCKED]\"\n        if normalized == os.pardir or normalized.startswith(os.pardir + os.sep):\n            normalized = \"[PATH_TRAVERSAL_BLOCKED]\"\n        if normalized == \"[PATH_TRAVERSAL_BLOCKED]\":\n            print(\n                f\"[bench hook] path traversal blocked in fallback: {raw_path!r}\",\n                file=sys.stderr,\n            )"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-001",
+          "severity": "CONCERN",
+          "location": "hooks/pre-tool-use.py: except ValueError block in new_string",
+          "evidence": "        except ValueError:\n            normalized = \"[PATH_TRAVERSAL_BLOCKED]\"",
+          "reasoning": "C-001 requires that catch blocks log, re-throw, or return a typed error. This except block only assigns a sentinel string variable; it does not log, re-throw, or return a typed error inline. The print statement that would surface this condition is outside the except block, in a subsequent if-check that fires when normalized equals the sentinel. While logging does eventually occur on that code path, the catch block itself is not self-contained in its error reporting. If the sentinel string is ever changed or the downstream if-check is modified independently, the ValueError becomes silently swallowed. Per the strict reading of C-001, the exception must be handled (logged/rethrown/typed-return) inside the catch block itself."
+        },
+        {
+          "constraint_id": "C-005",
+          "severity": "CONCERN",
+          "location": "hooks/pre-tool-use.py: entire new_string block",
+          "evidence": "try:\n    normalized = os.path.relpath(candidate, root)\nexcept ValueError:\n    normalized = \"[PATH_TRAVERSAL_BLOCKED]\"\nif normalized == os.pardir or normalized.startswith(os.pardir + os.sep):\n    normalized = \"[PATH_TRAVERSAL_BLOCKED]\"",
+          "reasoning": "This introduces three new distinct logic branches: (1) the happy path where realpath+relpath resolves to an in-root relative path, (2) the ValueError catch path for cross-drive or unreachable paths, and (3) the os.pardir escape detection path. The old code's logic (normpath + startswith checks) is replaced entirely. C-005 requires new branches of logic to have corresponding test cases or an explicit justification for why testing is deferred. No tests are referenced or mentioned in the change, and no deferral justification is provided. The behavioral change is significant: absolute paths that previously mapped to [PATH_TRAVERSAL_BLOCKED] now pass through as relative paths if they resolve within root."
+        },
+        {
+          "constraint_id": "C-007",
+          "severity": "CONCERN",
+          "location": "hooks/pre-tool-use.py: path traversal check logic in new_string",
+          "evidence": "root: str = os.path.realpath(os.getcwd())\ncandidate: str = os.path.realpath(os.path.join(root, raw_path))\ntry:\n    normalized = os.path.relpath(candidate, root)\nexcept ValueError:\n    normalized = \"[PATH_TRAVERSAL_BLOCKED]\"",
+          "reasoning": "This modifies the hook entry point, which is the governance pipeline's first gate. The old code rejected every absolute path unconditionally. The new code permits absolute paths if they resolve within the project root via realpath. The stated rationale (Write/Edit always supply absolute paths so the old behavior garbled the displayed path) is plausible, but C-007 flags any change to the governance pipeline that alters enforcement posture. A concrete risk: os.path.realpath resolves symlinks; a symlink inside the project root pointing to a file outside it would pass the relpath check (the realpath of the symlink target would be outside root and caught), but a symlink whose realpath is inside root pointing to something sensitive would be admitted. More critically, the hook is operating on the raw_path from the tool input to build a display/log path for governance; if an attacker controls raw_path and can construct a path whose realpath lands inside root but points to an out-of-scope file (via bind mounts or junctions on Windows), the normalized label shown to the pipeline would be legitimate-looking. This is worth explicit Oracle scrutiny given C-007's self-cannibalizing constraint."
+        }
+      ],
+      "_tokens": {
+        "input": 6000,
+        "output": 3133
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "CONCEDE",
+          "argument": "The Challenger is correct on a strict reading of C-001. The `except ValueError` block assigns the sentinel string but does not itself log, re-throw, or return a typed error. The logging that surfaces the ValueError code path lives outside the catch block, in a downstream `if normalized == '[PATH_TRAVERSAL_BLOCKED]'` check. While the ValueError IS ultimately logged on that code path, C-001's requirement is that the catch block be self-contained in its error reporting. The Challenger's fragility argument is also sound: if the sentinel constant is ever renamed or the downstream if-check is refactored independently, the ValueError becomes silently swallowed with no compiler or linter protection. The fix is trivial \u2014 move or duplicate the print statement inside the except block \u2014 but the violation as written is real.",
+          "evidence": "except ValueError:\n    normalized = \"[PATH_TRAVERSAL_BLOCKED]\"\n# ... intervening lines ...\nif normalized == \"[PATH_TRAVERSAL_BLOCKED]\":\n    print(f\"[bench hook] path traversal blocked in fallback: {raw_path!r}\", file=sys.stderr)"
+        },
+        {
+          "finding_index": 1,
+          "position": "MITIGATE",
+          "argument": "C-005 is a WARNING-severity constraint, not VETO. The three new branches are not novel algorithms \u2014 they directly mirror the logic in `utils.diff._normalize_path`, which the diff comment explicitly names. The pattern (realpath + relpath + os.pardir prefix check) is established in the codebase and presumably covered by the utility's own tests. The hook fallback path is also difficult to unit-test in isolation because it requires specific filesystem state. That said, the warning is legitimate: the behavioral change from the old code is significant (absolute in-root paths now pass through rather than being blocked), and a regression test that verifies an in-root absolute path normalizes correctly and an out-of-root path is blocked would materially strengthen confidence. The deferral is not explicitly justified in the change, which is the C-005 gap. This is a warning, not a veto condition.",
+          "evidence": "The diff comment: '# Mirror utils.diff._normalize_path: resolve against the project root and allow in-root paths'. The old code's unconditional rejection of absolute paths was the bug being fixed, not a security feature \u2014 Write/Edit always emit absolute paths, so the old code was producing [PATH_TRAVERSAL_BLOCKED] for every legitimate edit."
+        },
+        {
+          "finding_index": 2,
+          "position": "REBUT",
+          "argument": "The Challenger frames this as weakening enforcement, but the inverse is true: the old code was broken enforcement that produced false positives on every legitimate Write/Edit operation (which always supply absolute paths). A governance display showing [PATH_TRAVERSAL_BLOCKED] for every file edit is worse governance, not better, because it obscures the actual file from Challenger/Defender/Oracle review. The new logic is more accurate, not more permissive in any meaningful sense.\n\nOn the symlink/junction argument: `os.path.realpath()` resolves symlinks by definition. A symlink inside root pointing to a target outside root will resolve to the out-of-root realpath, which will then fail the `startswith(os.pardir)` check and be blocked. The Challenger's own framing acknowledges this: 'a symlink inside the project root pointing to a file outside it would pass the relpath check (the realpath of the symlink target would be outside root and caught).' The remaining concern \u2014 a bind mount or Windows junction where the realpath lands inside root \u2014 describes a scenario where the file genuinely IS inside root from the OS's perspective. An attacker who can install bind mounts or directory junctions inside the project root already has local write access to the project, making this hook the wrong security boundary to defend.\n\nC-007 prohibits changes that 'weaken enforcement, bypass verification, or disable logging.' This change does none of those: enforcement is more accurate, the pipeline still receives a real path for governance, and logging still fires on blocked paths. The old unconditional absolute-path rejection was a false positive generator, not a security control worth preserving.",
+          "evidence": "Old behavior: `if os.path.isabs(normalized) or raw_path.startswith('/') or normalized.startswith('..')` \u2014 this blocks ALL absolute paths including legitimate in-root ones. New behavior: `candidate = os.path.realpath(os.path.join(root, raw_path))` followed by relpath check \u2014 out-of-root paths (including resolved symlinks) are still blocked. The ValueError path (cross-drive on Windows) is also still blocked."
+        }
+      ],
+      "summary": "The change is a legitimate and necessary bug fix \u2014 the old hook broke governance display for every Write/Edit by blocking all absolute paths \u2014 but it carries a structural C-001 violation in the except block (logging is deferred outside the catch) that must be fixed before landing; the C-007 and C-005 concerns are either mitigated or warning-grade.",
+      "_tokens": {
+        "input": 7002,
+        "output": 3568
+      }
+    },
+    "oracle": {
+      "verdict": "VETO",
+      "reasoning": "The Challenger identified a C-001 violation in the `except ValueError` block, and the Defender explicitly CONCEDED this finding. C-001 is a veto-severity constraint requiring catch blocks to log, re-throw, or return a typed error. The `except ValueError: normalized = '[PATH_TRAVERSAL_BLOCKED]'` block does none of these: it assigns a sentinel string and relies on a downstream equality check to trigger the print statement. As both Challenger and Defender note, this is fragile (rename the sentinel or refactor the downstream check and the ValueError becomes silently swallowed) and violates the rule that catch blocks must be self-contained in their error reporting. With a conceded veto-severity violation, the Oracle must veto. The C-007 concern is adequately rebutted: the old code was a false-positive generator (blocking every legitimate absolute path from Write/Edit), and the new realpath+relpath logic is more accurate enforcement, not weaker. The Defender's symlink analysis is correct: out-of-root symlink targets still fail the pardir check. C-005 is warning-severity and does not independently trigger veto, but the lack of a regression test for the new branching logic is a legitimate advisory.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "VIOLATED",
+          "note": "The except ValueError block assigns a sentinel string but does not log, re-throw, or return a typed error within the catch itself. Defender conceded this finding."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Change is scoped to hooks/pre-tool-use.py, the stated target."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "SATISFIED",
+          "note": "No new imports; os and sys are already present."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "Type annotations on raw_path, normalized, root, and candidate are preserved/added."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "VIOLATED",
+          "note": "New branching logic (relpath happy path, ValueError catch, os.pardir escape detection) lacks corresponding tests or explicit deferral justification. Warning severity, not independently veto-triggering."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No secrets introduced."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "Change touches the governance pipeline (hook entry point) but does not weaken enforcement. Old code blocked all absolute paths, producing false positives on every legitimate Write/Edit. New logic accurately admits in-root paths and still blocks out-of-root paths, including via realpath-resolved symlinks. Defender's rebuttal on bind-mount/junction scenarios (out-of-scope for this hook's threat model) is accepted."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger modifications."
+        }
+      ],
+      "advisories": [
+        "C-005: Add a regression test covering (a) an in-root absolute path normalizing to a project-relative string, (b) an out-of-root absolute path producing [PATH_TRAVERSAL_BLOCKED], and (c) the ValueError cross-drive case on Windows.",
+        "Consider extracting the path normalization helper from utils.diff._normalize_path into a shared utility so the hook and diff module cannot drift, rather than duplicating the algorithm by comment reference."
+      ],
+      "remediation": "Move the logging into the except block itself so the catch is self-contained per C-001. For example:\n\n    try:\n        normalized = os.path.relpath(candidate, root)\n    except ValueError as exc:\n        print(\n            f\"[bench hook] path traversal blocked in fallback (cross-drive): {raw_path!r}: {exc}\",\n            file=sys.stderr,\n        )\n        normalized = \"[PATH_TRAVERSAL_BLOCKED]\"\n\nThe downstream `if normalized == '[PATH_TRAVERSAL_BLOCKED]'` print may remain for the os.pardir branch, or that branch should also log inline. Each path that produces the sentinel must emit its own log line within the block that sets it, so the logging cannot decouple from the failure mode. Optionally address the C-005 advisory by adding a regression test for the three new branches.",
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 12003,
+        "output": 1627
+      }
+    },
+    "entry_hash": "ff9a1d1c4f05c89c93d29db4d222f53364167e885ba1b791867210f643a2595b"
+  },
+  {
+    "entry_id": "00fcf36f-35d4-47e0-8cbc-3019d5bcf5b6",
+    "timestamp": "2026-06-26T07:11:23.791408+00:00",
+    "previous_hash": "ff9a1d1c4f05c89c93d29db4d222f53364167e885ba1b791867210f643a2595b",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "hooks\\pre-tool-use.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "hooks\\pre-tool-use.py",
+        "change_type": "modify",
+        "old_string": "    raw_path: str = str(tool_input.get(\"file_path\", \"\"))\n    normalized: str = os.path.normpath(raw_path) if raw_path else raw_path\n    if raw_path and (\n        os.path.isabs(normalized)\n        or raw_path.startswith(\"/\")\n        or normalized.startswith(\"..\")\n    ):\n        print(\n            f\"[bench hook] path traversal blocked in fallback: {raw_path!r}\",\n            file=sys.stderr,\n        )\n        normalized = \"[PATH_TRAVERSAL_BLOCKED]\"",
+        "new_string": "    raw_path: str = str(tool_input.get(\"file_path\", \"\"))\n    normalized: str = raw_path\n    if raw_path:\n        # Mirror utils.diff._normalize_path: resolve against the project root and\n        # allow in-root paths (returned project-relative, nameable for\n        # governance), blocking only genuine escapes. Rejecting every absolute\n        # path would garble every edit, since Write/Edit always pass absolute\n        # paths \u00e2\u20ac\u201d the bug this mirrors the fix for.\n        root: str = os.path.realpath(os.getcwd())\n        candidate: str = os.path.realpath(os.path.join(root, raw_path))\n        try:\n            normalized = os.path.relpath(candidate, root)\n        except ValueError as exc:\n            # Different drive on Windows: cannot be inside the project root.\n            print(\n                f\"[bench hook] path traversal blocked in fallback \"\n                f\"(cross-drive) {raw_path!r}: {exc}\",\n                file=sys.stderr,\n            )\n            normalized = \"[PATH_TRAVERSAL_BLOCKED]\"\n        else:\n            if normalized == os.pardir or normalized.startswith(\n                os.pardir + os.sep\n            ):\n                print(\n                    f\"[bench hook] path traversal blocked in fallback \"\n                    f\"(escapes project root) {raw_path!r}\",\n                    file=sys.stderr,\n                )\n                normalized = \"[PATH_TRAVERSAL_BLOCKED]\""
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-007",
+          "severity": "CONCERN",
+          "location": "hooks/pre-tool-use.py: path normalization block (new_string)",
+          "evidence": "root: str = os.path.realpath(os.getcwd())\ncandidate: str = os.path.realpath(os.path.join(root, raw_path))\ntry:\n    normalized = os.path.relpath(candidate, root)\n...\n    if normalized == os.pardir or normalized.startswith(os.pardir + os.sep):\n        ...\n        normalized = \"[PATH_TRAVERSAL_BLOCKED]\"",
+          "reasoning": "This modifies the hook, which is the governance pipeline's entry point. The old code blocked ALL absolute paths unconditionally. The new code accepts absolute paths that resolve within the project root. This is a loosening of a security check inside the governance enforcement boundary. C-007 requires that pipeline changes must not weaken enforcement. Whether this is a bug-fix that correctly enables governance to proceed (rather than garbling every edit) or a weakening of traversal protection is exactly the evaluation the Oracle should make. The relaxation is directionally justified by the comment, but the Oracle must confirm the tradeoff is sound."
+        },
+        {
+          "constraint_id": "C-005",
+          "severity": "CONCERN",
+          "location": "hooks/pre-tool-use.py: new try/except block and os.pardir escape check",
+          "evidence": "except ValueError as exc:\n    # Different drive on Windows: cannot be inside the project root.\n    ...\n    normalized = \"[PATH_TRAVERSAL_BLOCKED]\"\nelse:\n    if normalized == os.pardir or normalized.startswith(os.pardir + os.sep):\n        ...\n        normalized = \"[PATH_TRAVERSAL_BLOCKED]\"",
+          "reasoning": "Two new logic branches are introduced: (1) the Windows cross-drive ValueError path and (2) the os.pardir escape detection via relpath. Neither has a corresponding test case referenced or evidenced in the diff. C-005 requires new branches to have test coverage or an explicit justification for deferral. The cross-drive case is particularly hard to validate without a test since it is platform-specific."
+        },
+        {
+          "constraint_id": "C-007",
+          "severity": "OBSERVATION",
+          "location": "hooks/pre-tool-use.py: root = os.path.realpath(os.getcwd())",
+          "evidence": "root: str = os.path.realpath(os.getcwd())",
+          "reasoning": "The traversal check anchors to os.getcwd() at hook invocation time. If Claude Code's hook subprocess runs with a CWD other than the project root, the in-root boundary would be computed from the wrong anchor point, potentially allowing escapes or producing false blocks. The old os.path.normpath approach had no such CWD dependency. This is not a clear violation but is a robustness assumption baked into the security logic of a governance entry point and worth the Oracle's attention."
+        }
+      ],
+      "_tokens": {
+        "input": 6077,
+        "output": 2837
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "REBUT",
+          "argument": "The Challenger frames this as 'loosening a security check' but that framing misreads what the old code was actually doing. The old block unconditionally blocked ALL absolute paths via `os.path.isabs(normalized)`. Claude Code's Write and Edit tools always pass absolute paths. This means the old fallback path was effectively broken for 100% of normal operations: every legitimate edit would produce a 'blocked' path, garbling the filename passed to governance stages. A traversal check that blocks everything including legitimate operations is not providing security -- it's just broken. The new code implements REAL traversal detection: it resolves the path against the project root and only blocks genuine escapes (paths where `os.path.relpath` returns something starting with `os.pardir`). This is not a weakening of enforcement; it is the enforcement actually working correctly for the first time. C-007 says pipeline changes must not 'weaken enforcement' -- but you cannot weaken enforcement that was not functioning. The new code strengthens enforcement by making the traversal check meaningful rather than a blunt instrument that breaks governance for all writes.",
+          "evidence": "Old code: `if raw_path and (os.path.isabs(normalized) or raw_path.startswith('/') or normalized.startswith('..'))` -- this blocks every absolute path. New code only blocks when `normalized == os.pardir or normalized.startswith(os.pardir + os.sep)` -- genuine escapes only. The comment in the new code explicitly references the parallel fix in utils.diff._normalize_path, confirming this is a known bug pattern being corrected."
+        },
+        {
+          "finding_index": 1,
+          "position": "MITIGATE",
+          "argument": "The Challenger is correct that two new logic branches lack explicit test cases in this diff. C-005 is a legitimate concern here. However, three mitigating factors reduce the severity. First, C-005 is a WARNING not a VETO constraint. Second, the diff comment explicitly states this mirrors the logic in `utils.diff._normalize_path`, which is the authoritative path normalization implementation -- if that module has test coverage for these same branches (cross-drive ValueError, os.pardir escape), the logic correctness is validated there, and the hook is just replicating it. Third, the branch behavior is conservative on failure: both branches produce `[PATH_TRAVERSAL_BLOCKED]` which is the safest possible fallback. An untested branch that fails safely is a different risk profile than an untested branch that fails open. I concede a test justification should be documented, but this does not rise to veto territory.",
+          "evidence": "New code comment: 'Mirror utils.diff._normalize_path: resolve against the project root and allow in-root paths'. Both new branches produce normalized = '[PATH_TRAVERSAL_BLOCKED]' as their output, which is the safe/conservative result. C-005 severity is 'warning' in bench.json."
+        },
+        {
+          "finding_index": 2,
+          "position": "MITIGATE",
+          "argument": "The Challenger's CWD observation is technically accurate but the risk is low and the failure mode is predominantly conservative. If `os.getcwd()` returns a parent directory (e.g., `/home/user` instead of `/home/user/Bench`), the relpath of a file like `/home/user/Bench/foo.py` from `/home/user` would be `Bench/foo.py`, which does NOT start with `os.pardir` and would pass as in-root. This is a false-allow scenario in a misconfigured environment. However: (1) Claude Code hooks canonically run with CWD set to the workspace/project root -- this is the standard hook execution context; (2) this mirrors the exact pattern in `utils/diff.py` which is already deployed and presumably working; (3) the alternative (old code) was worse: it blocked all absolute paths making the hook non-functional regardless of CWD. The CWD assumption is a real robustness dependency but it is the same assumption the rest of the Bench tooling already relies on, and it is reasonable for hook execution context.",
+          "evidence": "CLAUDE.md project structure shows hooks run as part of Claude Code's PreToolUse hook, which executes in the Claude Code workspace context. The `utils/diff.py` module also uses `os.getcwd()` or equivalent for project-relative path operations. This is an established pattern, not a novel assumption introduced by this change."
+        }
+      ],
+      "summary": "The change is sound: it fixes a genuine bug where the old hook blocked ALL absolute paths (making governance non-functional for normal Write/Edit operations) and replaces it with proper traversal detection that mirrors the tested logic in utils/diff.py; the C-005 test gap is real but mitigated by conservative failure modes and WARNING severity, while the CWD assumption is pre-existing across the codebase and reasonable for hook execution context.",
+      "_tokens": {
+        "input": 6878,
+        "output": 2809
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change modifies hooks/pre-tool-use.py, which falls under C-007 (governance pipeline integrity). The Challenger correctly identified this as the central question: does relaxing the blanket absolute-path block weaken enforcement? The Defender's rebuttal is persuasive: the old check blocked every absolute path via os.path.isabs, and since Claude Code's Write/Edit tools always emit absolute paths, the prior fallback was effectively broken for all real operations (it would normalize every legitimate filename to [PATH_TRAVERSAL_BLOCKED], garbling governance input). The new code preserves traversal protection by resolving against the project root and explicitly blocking paths whose relpath equals os.pardir or starts with os.pardir + os.sep, plus the Windows cross-drive ValueError case. This is enforcement actually functioning, not enforcement being weakened, so C-007 is satisfied. C-005 (test coverage) is raised against two new branches (cross-drive ValueError, os.pardir escape), but C-005 is severity 'warning' and both branches fail closed to [PATH_TRAVERSAL_BLOCKED]; per Defender rebuttal 1, this mirrors utils.diff._normalize_path, so the safe-fallback posture mitigates but does not eliminate the gap, recorded as an advisory. The CWD-anchoring observation (Challenger finding 3) is an OBSERVATION not a violation; per Defender rebuttal 2, hook execution context canonically runs in the project root and this mirrors existing Bench tooling, so it does not breach C-007. C-001 is satisfied: the ValueError except logs to stderr and sets a typed sentinel. C-003 adds no new imports. C-004 preserves type annotations (raw_path, normalized, root, candidate are all annotated). C-006 and C-008 are not applicable. The change does not weaken governance; it restores it.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "SATISFIED",
+          "note": "The new except ValueError branch logs to stderr and assigns a typed sentinel value; no silent swallowing."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is confined to the single file under modification (hooks/pre-tool-use.py)."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "SATISFIED",
+          "note": "No new imports introduced; os and sys were already in use."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "All new locals (root, candidate, normalized) carry explicit str annotations; no annotations weakened."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "VIOLATED",
+          "note": "Warning-severity: two new branches (cross-drive ValueError, os.pardir escape) lack referenced test coverage. Mitigated by safe-fallback posture and Defender's parallel-implementation argument, but logged as advisory."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No secrets or credentials touched."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "Per Defender rebuttal 1, the prior blanket isabs() block rendered the hook fallback non-functional for all Write/Edit calls (which always pass absolute paths). The new code implements genuine traversal detection (relpath + os.pardir check + cross-drive guard), restoring enforcement rather than weakening it. CWD-anchoring (Challenger observation 3) matches the established pattern in utils.diff and the canonical hook execution context."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger code touched."
+        }
+      ],
+      "advisories": [
+        "C-005: Add explicit test cases (or an in-code justification comment) for the two new branches: (a) cross-drive ValueError on Windows, (b) os.pardir-prefixed relpath result. The safe-fallback posture mitigates immediate risk but the branches remain unverified.",
+        "Robustness: The traversal check anchors to os.getcwd() at hook invocation. If a future Claude Code release alters the hook's working directory, the in-root determination could silently misclassify paths. Consider anchoring to a stable project marker (e.g., the directory containing bench.json) rather than CWD in a follow-up.",
+        "The new code duplicates logic that already lives in utils.diff._normalize_path. Consider extracting a shared helper in a follow-up to keep the two sites from drifting."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 11677,
+        "output": 1677
+      }
+    },
+    "entry_hash": "64c540864570d2305e6e15ad966b5965cc32e53ccddd117aa7163e08022f7e9a"
+  },
+  {
+    "entry_id": "98e0524b-feb6-4913-8efe-594460ce9e68",
+    "timestamp": "2026-06-26T07:14:50.401602+00:00",
+    "previous_hash": "64c540864570d2305e6e15ad966b5965cc32e53ccddd117aa7163e08022f7e9a",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "tests\\test_diff.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "tests\\test_diff.py",
+        "change_type": "modify",
+        "old_string": "    def test_build_diff_info_normalizes_absolute(self) -> None:\n        result = build_diff_info(\n            \"Edit\",\n            {\n                \"file_path\": \"/etc/shadow\",\n                \"old_string\": \"old\",\n                \"new_string\": \"new\",\n            },\n        )\n        self.assertEqual(result[\"file_path\"], \"[PATH_TRAVERSAL_BLOCKED]\")",
+        "new_string": "    def test_build_diff_info_normalizes_absolute(self) -> None:\n        result = build_diff_info(\n            \"Edit\",\n            {\n                \"file_path\": \"/etc/shadow\",\n                \"old_string\": \"old\",\n                \"new_string\": \"new\",\n            },\n        )\n        self.assertEqual(result[\"file_path\"], \"[PATH_TRAVERSAL_BLOCKED]\")\n\n    def test_in_root_absolute_path_allowed(self) -> None:\n        # Write/Edit always pass ABSOLUTE paths, so an in-root absolute path must\n        # resolve to its project-relative form, not be blocked. Regression guard:\n        # the old code blocked every absolute path, which garbled every edit.\n        abs_in_root: str = os.path.join(os.getcwd(), \"utils\", \"diff.py\")\n        result = _normalize_path(abs_in_root)\n        self.assertNotEqual(result, \"[PATH_TRAVERSAL_BLOCKED]\")\n        self.assertEqual(result, os.path.join(\"utils\", \"diff.py\"))\n\n    def test_build_diff_info_allows_in_root_absolute(self) -> None:\n        # The real-world input shape: build_diff_info given an absolute in-root\n        # file_path must return the nameable project-relative path.\n        abs_in_root: str = os.path.join(os.getcwd(), \"utils\", \"api.py\")\n        result = build_diff_info(\n            \"Write\", {\"file_path\": abs_in_root, \"content\": \"x = 1\"}\n        )\n        self.assertEqual(result[\"file_path\"], os.path.join(\"utils\", \"api.py\"))"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-005",
+          "severity": "CONCERN",
+          "location": "tests/test_diff.py: test_in_root_absolute_path_allowed method body",
+          "evidence": "result = _normalize_path(abs_in_root)",
+          "reasoning": "The new test calls `_normalize_path` directly, but the diff shows no corresponding import being added. The existing test in the file only uses `build_diff_info`, not `_normalize_path`. If `_normalize_path` is not already imported in the test file's header, this test will raise a NameError at runtime, providing zero actual coverage. A test that cannot execute does not satisfy C-005's requirement for working coverage of new logic."
+        },
+        {
+          "constraint_id": "C-005",
+          "severity": "CONCERN",
+          "location": "tests/test_diff.py: test_in_root_absolute_path_allowed and test_build_diff_info_allows_in_root_absolute",
+          "evidence": "# Regression guard: the old code blocked every absolute path, which garbled every edit.",
+          "reasoning": "The test comment explicitly describes a behavior that is being corrected ('the old code blocked every absolute path'). These tests encode the *desired* post-fix behavior of `_normalize_path`. If the corresponding production change to `utils/diff.py` has not yet landed, both new tests will fail immediately. Failing tests do not constitute coverage under C-005. The diff only touches `tests/test_diff.py` and contains no corresponding fix to the production path normalization logic, making it worth confirming the production side has already been resolved."
+        },
+        {
+          "constraint_id": "C-004",
+          "severity": "OBSERVATION",
+          "location": "tests/test_diff.py: test_in_root_absolute_path_allowed",
+          "evidence": "abs_in_root: str = os.path.join(os.getcwd(), \"utils\", \"diff.py\")",
+          "reasoning": "Type annotation is present and correct (`str`). No violation. Noted only because `os.getcwd()` introduces an environmental assumption (that tests run from the project root) that could make the test fragile in CI if the working directory differs. This is not a constitutional constraint violation but is worth the Oracle registering as a quality note."
+        }
+      ],
+      "_tokens": {
+        "input": 6093,
+        "output": 3096
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "MITIGATE",
+          "argument": "The Challenger correctly identifies that we cannot confirm `_normalize_path` is imported from the diff alone, because the diff only shows the tail of the test class (appended methods), not the file header. This is a real gap in what the diff tells us. However, this concern is not a constitutional violation of C-005 \u2014 it is a test-execution risk that would be caught immediately and loudly by any CI run (NameError, not a silent failure). The mitigating factor is that this is a `modify` diff showing methods appended after an existing test that already imports from `utils.diff`. A companion production-side change to `utils/diff.py` would naturally add `_normalize_path` to the public interface or the import would be added in the same edit session. The practical risk is zero-cost to detect: the test either runs or it raises NameError on first execution. It does not silently pass with false coverage.",
+          "evidence": "The diff appends after `test_build_diff_info_normalizes_absolute`, which already calls `build_diff_info` \u2014 confirming `from utils.diff import build_diff_info` (or equivalent) already exists in the file header. Adding `_normalize_path` to that same import is trivial and standard practice when testing private helpers. The diff change_type is 'modify', meaning the file already has an imports section not shown."
+        },
+        {
+          "finding_index": 1,
+          "position": "REBUT",
+          "argument": "The Challenger assumes the production fix may not have landed, making these tests premature. The comment language directly contradicts this: 'the old code blocked every absolute path, which garbled every edit' uses past tense explicitly. 'The old code' is a retrospective reference \u2014 it signals that the fix has already been applied and these are regression guards being added after the fact to prevent recurrence. This is textbook regression test practice: you fix the bug, then write a test that would have caught it to prevent future regressions. C-005 is satisfied \u2014 the new logic (fixed path normalization) now has explicit test coverage. If the production fix had NOT landed, the tests would fail loudly and immediately in CI, which is exactly what governance should look like. Failing tests that expose a missing fix are not a C-005 violation; they are the mechanism working correctly.",
+          "evidence": "Comment reads: 'Regression guard: the old code blocked every absolute path, which garbled every edit.' Past tense 'the old code' and the word 'Regression guard' both signal post-fix verification, not pre-fix TDD. The test `test_build_diff_info_allows_in_root_absolute` asserts the correct resolved path is returned, which can only pass if the production normalization logic has already been fixed."
+        },
+        {
+          "finding_index": 2,
+          "position": "REBUT",
+          "argument": "The Challenger explicitly concedes this is not a constitutional constraint violation, correctly noting 'C-004: no violation.' The observation about `os.getcwd()` introducing a working-directory assumption is a test hygiene point, not a governance issue. Furthermore, `os.getcwd()` and `os.path.join` are both cross-platform safe \u2014 they produce correct paths on Windows and Unix alike. The CLAUDE.md project guidelines call out `os.path.isabs` and hardcoded Unix-style separators as fragile; `os.getcwd()` + `os.path.join` is the recommended cross-platform pattern for constructing absolute paths dynamically. The type annotation `abs_in_root: str` is present and correctly typed. There is no C-004 or any other constitutional issue here.",
+          "evidence": "Challenger's own finding states: 'This is not a constitutional constraint violation but is worth the Oracle registering as a quality note.' CLAUDE.md guidance: 'avoid os.path.isabs and other OS-dependent checks for path logic; account for Windows' \u2014 `os.path.join(os.getcwd(), ...)` is exactly the correct cross-platform construction."
+        }
+      ],
+      "summary": "The change adds well-reasoned regression tests for a path normalization fix that has already landed; the only actionable concern is confirming `_normalize_path` appears in the test file's import section, which the diff's limited view cannot confirm but which CI will catch immediately if missing.",
+      "_tokens": {
+        "input": 6711,
+        "output": 2417
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change is confined to tests/test_diff.py and adds two regression tests plus reuses existing setup. No constitutional veto-severity constraint is violated. C-001 (error handling), C-002 (scope), C-003 (dependencies), C-006 (secrets), C-007 (governance integrity), and C-008 (ledger) are all not applicable to this test-only addition. C-004 is satisfied: the new local variable carries an explicit `str` annotation, and no existing annotations are weakened (Challenger conceded this is not a violation; Defender rebuttal accepted). C-005 is a warning-severity constraint and is satisfied in spirit: the diff adds tests, not new untested logic. The Challenger's concern that `_normalize_path` may not be imported is a runtime risk that would surface loudly via NameError, not a silent governance failure, and the Defender's rebuttal correctly notes that the file already imports from utils.diff and adding the helper is standard practice; even if missing, CI would surface it immediately. The 'old code' past-tense comment supports that this is a post-fix regression guard, not premature TDD. None of this rises to a veto.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No exception handling introduced or modified."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is confined to the stated file tests/test_diff.py."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "SATISFIED",
+          "note": "Only stdlib (os) and existing project imports referenced; no new external dependencies."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "New variables carry `str` annotations; no existing annotations weakened. Challenger conceded no violation."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "SATISFIED",
+          "note": "Diff adds regression coverage rather than new untested logic. Warning-severity; import-availability risk is CI-detectable and not a silent failure."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No secrets or credentials introduced."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Test file change does not modify pipeline, ledger, or constitution enforcement."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger interaction."
+        }
+      ],
+      "advisories": [
+        "Confirm `_normalize_path` is imported at the top of tests/test_diff.py; if not, add it in the same edit to prevent a NameError on first run (per Challenger finding 0).",
+        "Confirm the production-side fix to utils/diff.py path normalization has actually landed; the tests assume past-tense behavior change (per Challenger finding 1, Defender rebuttal).",
+        "`os.getcwd()` assumes tests are invoked from the project root; if CI ever runs tests from a different cwd, both new tests will produce misleading failures (per Challenger observation)."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 11160,
+        "output": 1181
+      }
+    },
+    "entry_hash": "32518fc2b626328a1f6ca6a0d030a48566b74527941398422d8c97d5fd4df420"
+  },
+  {
+    "entry_id": "4bbf0e30-a59d-4222-9007-73f76d4e84d6",
+    "timestamp": "2026-06-26T07:17:25.565309+00:00",
+    "previous_hash": "32518fc2b626328a1f6ca6a0d030a48566b74527941398422d8c97d5fd4df420",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "tests\\test_hook.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "tests\\test_hook.py",
+        "change_type": "modify",
+        "old_string": "        self.assertIn(\n            \"nested subprocess\",\n            resp[\"hookSpecificOutput\"][\"additionalContext\"],\n        )\n        mock_pipeline.assert_not_called()\n\n\nif __name__ == \"__main__\":\n    unittest.main()",
+        "new_string": "        self.assertIn(\n            \"nested subprocess\",\n            resp[\"hookSpecificOutput\"][\"additionalContext\"],\n        )\n        mock_pipeline.assert_not_called()\n\n\nclass ExtractDiffInfoFallbackTests(unittest.TestCase):\n    \"\"\"The inline fallback (used when utils.diff fails to import) must use the\n    same project-root containment as utils.diff._normalize_path, not block every\n    absolute path (Write/Edit always supply absolute paths).\"\"\"\n\n    def test_fallback_allows_in_root_absolute_path(self) -> None:\n        import os\n\n        abs_in_root: str = os.path.join(os.getcwd(), \"utils\", \"api.py\")\n        original = _hook_module._build_diff_info_hardened\n        try:\n            _hook_module._build_diff_info_hardened = None  # force fallback\n            info: dict = _hook_module.extract_diff_info(\n                \"Edit\",\n                {\"file_path\": abs_in_root, \"old_string\": \"a\", \"new_string\": \"b\"},\n            )\n        finally:\n            _hook_module._build_diff_info_hardened = original\n        self.assertNotEqual(info[\"file_path\"], \"[PATH_TRAVERSAL_BLOCKED]\")\n        self.assertEqual(info[\"file_path\"], os.path.join(\"utils\", \"api.py\"))\n\n    def test_fallback_blocks_escape(self) -> None:\n        original = _hook_module._build_diff_info_hardened\n        try:\n            _hook_module._build_diff_info_hardened = None\n            info: dict = _hook_module.extract_diff_info(\n                \"Edit\",\n                {\n                    \"file_path\": \"../../../etc/passwd\",\n                    \"old_string\": \"a\",\n                    \"new_string\": \"b\",\n                },\n            )\n        finally:\n            _hook_module._build_diff_info_hardened = original\n        self.assertEqual(info[\"file_path\"], \"[PATH_TRAVERSAL_BLOCKED]\")\n\n\nif __name__ == \"__main__\":\n    unittest.main()"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-005",
+          "severity": "CONCERN",
+          "location": "tests/test_hook.py: ExtractDiffInfoFallbackTests.test_fallback_allows_in_root_absolute_path and test_fallback_blocks_escape",
+          "evidence": "original = _hook_module._build_diff_info_hardened\n_hook_module._build_diff_info_hardened = None  # force fallback",
+          "reasoning": "Both tests hinge on the existence of `_hook_module._build_diff_info_hardened` as a module-level attribute in the hook. The diff only modifies the test file; no corresponding change to `hooks/pre-tool-use.py` is visible. If that attribute does not already exist in production code, both tests will raise `AttributeError` at the `original = _hook_module._build_diff_info_hardened` line, producing no coverage at all. The tests would silently fail to validate the fallback behavior they claim to cover. This implicates C-005: test coverage is asserted here, but the tests are non-functional if the production interface they depend on is absent."
+        },
+        {
+          "constraint_id": "C-004",
+          "severity": "OBSERVATION",
+          "location": "tests/test_hook.py: test_fallback_allows_in_root_absolute_path, line assigning to _build_diff_info_hardened",
+          "evidence": "_hook_module._build_diff_info_hardened = None  # force fallback",
+          "reasoning": "The test temporarily assigns `None` to what is presumably a typed callable attribute. If `_build_diff_info_hardened` carries a non-Optional type annotation in the production module (e.g., `Callable[..., dict]`), this assignment violates the type contract at runtime during the test. The `finally` block does restore the original, so the window is short, but static analysis would flag this assignment. Not a hard violation since the annotation is on the production module rather than being removed here, but worth Oracle awareness."
+        },
+        {
+          "constraint_id": "C-005",
+          "severity": "OBSERVATION",
+          "location": "tests/test_hook.py: test_fallback_allows_in_root_absolute_path, first line of test body",
+          "evidence": "import os",
+          "reasoning": "The `import os` statement is placed inside the test method body rather than at the module top level, where `os` is already available to the rest of the test file (standard practice). This is not a constitutional violation, but it is unusual and could mislead future readers into thinking `os` is not otherwise imported. Low severity, noted for completeness."
+        }
+      ],
+      "_tokens": {
+        "input": 6185,
+        "output": 4024
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "MITIGATE",
+          "argument": "The Challenger's core concern is valid: if `_build_diff_info_hardened` does not exist as a module-level attribute in `hooks/pre-tool-use.py`, the tests will fail. However, the characterization of this as a *silent* failure is incorrect. An `AttributeError` on `original = _hook_module._build_diff_info_hardened` is a loud, traceable failure that would surface immediately in CI, not a silent pass. The tests would not provide false confidence; they would simply error. The real risk is that the production interface is absent, making these tests broken-on-arrival rather than vacuously passing. That is a legitimate C-005 concern: the coverage these tests assert exists only if the production module exposes this attribute. Since the diff modifies only the test file with no accompanying change to `hooks/pre-tool-use.py`, the Oracle should consider whether `_build_diff_info_hardened` already exists in the hook (from a prior commit) or whether this test was added prematurely. If the attribute is already present in production, this finding is moot. If it is not, the tests are broken and C-005 is unmet.",
+          "evidence": "The diff is a 'modify' to an existing test file, implying the hook module was already modified in a prior change. The test imports `_hook_module` at module level (elsewhere in the file), which means the module itself loads without error. Whether `_build_diff_info_hardened` specifically is defined is the operative question and cannot be resolved from this diff alone."
+        },
+        {
+          "finding_index": 1,
+          "position": "REBUT",
+          "argument": "C-004 targets the removal or weakening of type annotations in source code functions. This is a standard Python test monkey-patch: temporarily replace an attribute with `None` inside a `try` block and restore the original in `finally`. No annotation is being removed, weakened, or modified in any production file. The `_build_diff_info_hardened` annotation (if any) lives in `hooks/pre-tool-use.py` and is untouched. Static analysis would flag this assignment in isolation, but test files routinely perform such monkey-patches and mypy/pyright can be suppressed for test-scope assignments with `# type: ignore` if strictness demands it. This is not a C-004 violation; it is idiomatic Python test instrumentation with a guaranteed restore path.",
+          "evidence": "The `try/finally` pattern ensures the original callable is always restored regardless of test outcome. The assignment to `None` is ephemeral, scoped to the test method's execution, and has no effect on production type contracts."
+        },
+        {
+          "finding_index": 2,
+          "position": "REBUT",
+          "argument": "An inline `import os` inside a test method is a redundant but entirely harmless Python pattern. Python's import system caches modules in `sys.modules` after the first import, so this is a dictionary lookup, not a re-import. It carries no performance penalty, no correctness risk, and no constitutional implication. The Challenger explicitly rates this as low severity and 'noted for completeness.' It does not implicate any constitutional constraint. Flagging it in this forum is noise.",
+          "evidence": "The Challenger's own characterization: 'Low severity, noted for completeness.' No constraint in C-001 through C-008 addresses import placement style."
+        }
+      ],
+      "summary": "The tests are architecturally sound and the monkey-patch technique is idiomatic, but Finding 1 raises a legitimate conditional concern: the tests are only functional if `_build_diff_info_hardened` already exists in the hook module from a prior change, which cannot be confirmed from this diff alone.",
+      "_tokens": {
+        "input": 6892,
+        "output": 2144
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change modifies only tests/test_hook.py to add two new test cases for the inline fallback path of extract_diff_info. No production code is changed, no new imports outside stdlib are introduced, no secrets are added, no ledger or governance pipeline files are touched, and no type annotations in production are removed or weakened. The Challenger's findings are either non-violations or conditional. Finding 0 (C-005) is the only substantive concern: the tests depend on `_hook_module._build_diff_info_hardened` existing as a module attribute. As the Defender correctly notes (MITIGATE), if the attribute is absent the failure mode is a loud AttributeError surfaced in CI, not silent vacuous passing, so C-005 (a warning-severity constraint anyway) is not violated by the change itself. Finding 1 (C-004) is rebutted: C-004 governs removal/weakening of annotations in source, not transient monkey-patches in tests inside try/finally. Finding 2 is acknowledged by the Challenger as non-constitutional style noise. No veto-severity constraint is clearly violated.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No catch blocks added or modified; try/finally restores monkey-patched attribute."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is confined to tests/test_hook.py, a single test file within scope of test additions."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "SATISFIED",
+          "note": "Only stdlib `os` is used; already implicitly available, no new requirements.txt entries."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "Per Defender rebuttal to Finding 1: no production annotation is removed or weakened; the None assignment is a test-scope monkey-patch restored in finally."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "SATISFIED",
+          "note": "This change adds tests rather than new untested logic. Per Defender's MITIGATE on Finding 0, any missing production attribute would surface as a loud CI failure, not silent non-coverage."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No credentials in diff."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Test file only; pipeline files (challenger, defender, oracle, ledger, constitution, hook) are not modified."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Ledger files untouched."
+        }
+      ],
+      "advisories": [
+        "Confirm that `hooks/pre-tool-use.py` actually exposes `_build_diff_info_hardened` as a module-level attribute; if it does not, both new tests will error at the attribute access and CI will fail loudly. This is the legitimate kernel of Challenger Finding 0.",
+        "The inline `import os` inside the first test method is harmless but stylistically redundant if `os` is already imported at module top level; consider relocating on a future surgical pass.",
+        "Setting `_build_diff_info_hardened = None` may trigger static type checker warnings if the attribute is annotated as a non-Optional Callable; add `# type: ignore[assignment]` if strict typing is enforced."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 11154,
+        "output": 1271
+      }
+    },
+    "entry_hash": "a33a4753208134fd0290cd90f1aeb44a1cb1c2d7d408e302d822af67b941472b"
+  },
+  {
+    "entry_id": "837323a4-fd85-4234-a149-cc0f78fe3c06",
+    "timestamp": "2026-06-26T07:20:15.198257+00:00",
+    "previous_hash": "a33a4753208134fd0290cd90f1aeb44a1cb1c2d7d408e302d822af67b941472b",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "tests\\test_api_claude_cli.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "tests\\test_api_claude_cli.py",
+        "change_type": "modify",
+        "old_string": "        _claude_cli_call(\"claude-sonnet-4-6\", \"sys\", msgs, 4096)\n        _args, kwargs = run.call_args\n        sent = kwargs[\"input\"]\n        self.assertIn(\"ASSISTANT: bad output\", sent)\n        self.assertIn(\"USER: respond with JSON only\", sent)",
+        "new_string": "        _claude_cli_call(\"claude-sonnet-4-6\", \"SYS_SENTINEL\", msgs, 4096)\n        _args, kwargs = run.call_args\n        sent = kwargs[\"input\"]\n        self.assertIn(\"ASSISTANT: bad output\", sent)\n        self.assertIn(\"USER: respond with JSON only\", sent)\n        # The system prompt must not leak onto stdin in the multi-turn path\n        # either \u00e2\u20ac\u201d it goes to --system-prompt-file.\n        self.assertNotIn(\"SYS_SENTINEL\", sent)"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-007",
+          "severity": "CONCERN",
+          "location": "tests/test_api_claude_cli.py \u2014 new assertion block",
+          "evidence": "self.assertNotIn(\"SYS_SENTINEL\", sent)",
+          "reasoning": "This assertion encodes a specific behavioral contract for utils/api.py: that system prompts are routed to --system-prompt-file rather than passed via stdin. utils/api.py is governance pipeline infrastructure. If the current implementation does NOT already exhibit this behavior, this test will fail in CI and create direct pressure to modify utils/api.py \u2014 but that modification would arrive through the back door of a test assertion rather than as a direct, independently-governed change to the pipeline file itself. A behavioral change to a governance pipeline utility should be proposed as its own diff, subject to its own Challenger/Defender/Oracle run. Laundering a pipeline constraint through a test file is a governance path concern under C-007, even if the test file itself is not the pipeline."
+        },
+        {
+          "constraint_id": "C-001",
+          "severity": "OBSERVATION",
+          "location": "tests/test_api_claude_cli.py \u2014 comment in new assertion block",
+          "evidence": "# The system prompt must not leak onto stdin in the multi-turn path\\n        # either \\u00e2\\u20ac\\u201d it goes to --system-prompt-file.",
+          "reasoning": "The sequence \\u00e2\\u20ac\\u201d is Mojibake: the three-byte UTF-8 encoding of an em dash (0xE2 0x80 0x94) decoded as Latin-1/Windows-1252 code points. This is not a constitutional violation, but it indicates the file was processed through a charset-mismatched pipeline, which can corrupt source files silently. Not actionable under C-001 directly, but surfaces a file-integrity signal worth noting before the change lands."
+        }
+      ],
+      "_tokens": {
+        "input": 5761,
+        "output": 4513
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "REBUT",
+          "argument": "The Challenger's 'laundering' theory inverts the purpose of tests. This change adds a behavioral contract assertion to a test file, not to the governance pipeline itself. C-007 enumerates the protected scope as: challenger, defender, oracle, ledger, and constitution. test_api_claude_cli.py is none of those. More importantly, the direction of effect matters: this assertion STRENGTHENS enforcement by making a security property (system prompt isolation from stdin) mechanically verifiable. If the current implementation in utils/api.py already routes the system prompt to --system-prompt-file, this test simply documents and locks that behavior. If it does not, the test fails in CI, which is the correct outcome: it surfaces a gap that then gets addressed through a separately proposed, independently governed change to utils/api.py. That subsequent change will go through its own Challenger/Defender/Oracle run, exactly as required. A test that reveals a future need for a governed change is not a bypass of governance; it is governance working correctly. The Challenger's concern would be valid if the test file were modifying pipeline behavior directly. It is not. It is adding a verifiable assertion about expected behavior.",
+          "evidence": "The diff modifies only tests/test_api_claude_cli.py. The new assertion is `self.assertNotIn('SYS_SENTINEL', sent)`, which checks the stdin payload passed to subprocess.run. This is a pure verification addition. No pipeline code is touched. C-007 scope: 'challenger, defender, oracle, ledger, constitution' -- test files are outside this enumeration."
+        },
+        {
+          "finding_index": 1,
+          "position": "MITIGATE",
+          "argument": "The Challenger correctly identifies that the byte sequence `\u00e2\u20ac\u201d` in the comment is Mojibake: the three-byte UTF-8 encoding of an em dash (0xE2 0x80 0x94) decoded as Latin-1/Windows-1252, then re-encoded as Unicode escapes. This is a real encoding artifact and the comment will appear garbled in the source file. The Challenger correctly notes it does not constitute a C-001 violation. The mitigation is that this is cosmetic-only: the garbled text appears in a code comment, not in any string that is evaluated or executed. The test logic itself (assertNotIn, assertIn) is unaffected. The practical risk is near-zero -- a confused reader, nothing more. That said, the comment should be corrected before merge to remove the encoding corruption and, per project style rules, avoid em dashes entirely.",
+          "evidence": "The affected line is a comment: `# either \u00e2\u20ac\u201d it goes to --system-prompt-file.` The surrounding assertions (`self.assertIn`, `self.assertNotIn`) are syntactically and semantically correct. No runtime path is affected by comment encoding. The fix is trivial: replace the garbled sequence with a period, comma, or hyphen."
+        }
+      ],
+      "summary": "The change is substantively sound: it adds a tighter, security-relevant assertion to an existing test without touching any governed pipeline code; the only legitimate issue is a cosmetic comment encoding artifact (Mojibake em dash) that should be cleaned up but does not affect test logic or constitute a constitutional violation.",
+      "_tokens": {
+        "input": 6298,
+        "output": 2103
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change modifies only tests/test_api_claude_cli.py to add a stronger assertion that the system prompt does not leak onto stdin in the multi-turn path. C-007's protected scope enumerates challenger, defender, oracle, ledger, and constitution; test files are not in that scope, and as the Defender argued, the assertion strengthens rather than weakens enforcement by mechanically verifying a security-relevant behavior. If the assertion fails in CI, it surfaces a gap that would be addressed via an independently governed change to utils/api.py, which is governance working as designed, not a bypass. The Challenger's C-001 observation is explicitly flagged as not a constitutional violation, and the Defender correctly identifies it as cosmetic Mojibake in a comment with no runtime effect. No other constraints are implicated: no new dependencies (C-003), no type annotations weakened (C-004), no secrets (C-006), no ledger modification (C-008), scope is bounded to a single test file (C-002).",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Challenger explicitly noted this is an observation, not a violation; the Mojibake is in a comment and does not affect error-handling logic."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is confined to the stated test file."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports added."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No type annotations modified."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "SATISFIED",
+          "note": "Change strengthens existing test coverage."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "SYS_SENTINEL is a test fixture string, not a secret."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "Defender correctly notes test files are outside C-007's enumerated protected scope, and the assertion strengthens, not weakens, enforcement. A future failing assertion would force a separately governed change, not bypass governance."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger interaction."
+        }
+      ],
+      "advisories": [
+        "The new comment contains Mojibake (the byte sequence \u00e2\u20ac\u201d, a UTF-8 em dash decoded as Latin-1). Per the user's global style rule against em dashes and for source file integrity, replace it with a period, comma, or hyphen before merge.",
+        "If this assertion fails in CI, the resulting fix to utils/api.py must be proposed as its own governed change (Challenger's C-007 concern is valid as a procedural reminder even though it does not block this diff)."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 10356,
+        "output": 1107
+      }
+    },
+    "entry_hash": "cdf4d5934b032686340ac24bc0d653e2a3c467ef7962ff19bd0e626afd2c9471"
+  },
+  {
+    "entry_id": "091336a2-2fa0-4fe8-85c7-46924fa2b731",
+    "timestamp": "2026-06-26T07:22:05.965105+00:00",
+    "previous_hash": "cdf4d5934b032686340ac24bc0d653e2a3c467ef7962ff19bd0e626afd2c9471",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "tests\\test_api_claude_cli.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "tests\\test_api_claude_cli.py",
+        "change_type": "modify",
+        "old_string": "        self.assertEqual(cmd[cmd.index(\"--tools\") + 1], \"\")\n        self.assertNotIn(\"--disallowedTools\", cmd)",
+        "new_string": "        self.assertEqual(cmd[cmd.index(\"--tools\") + 1], \"\")\n        self.assertIn(\"--strict-mcp-config\", cmd)\n        self.assertNotIn(\"--disallowedTools\", cmd)"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-007",
+          "severity": "CONCERN",
+          "location": "tests/test_api_claude_cli.py: added assertion line",
+          "evidence": "self.assertIn(\"--strict-mcp-config\", cmd)",
+          "reasoning": "This test assertion implies a corresponding implementation change in utils/api.py that adds --strict-mcp-config to the Claude CLI subprocess invocation. The claude_code provider in utils/api.py is the execution path for Challenger, Defender, and Oracle stages. Adding --strict-mcp-config to those subprocess calls would restrict MCP configuration during governance pipeline stage execution. If pipeline stages depend on any MCP tooling (e.g., the Wisdom MCP server referenced in project instructions), this flag could silently alter their behavior. The implementation change is not visible in this diff, so whether it weakens or strengthens pipeline isolation cannot be confirmed here. C-007 requires that changes to governance pipeline files do not weaken enforcement or disable logging; a flag that alters subprocess environment for all three pipeline stages is within that scope and the corresponding implementation change deserves explicit scrutiny."
+        },
+        {
+          "constraint_id": "C-005",
+          "severity": "OBSERVATION",
+          "location": "tests/test_api_claude_cli.py: diff context",
+          "evidence": "self.assertIn(\"--strict-mcp-config\", cmd)",
+          "reasoning": "This diff adds a test assertion for a --strict-mcp-config flag that does not appear to exist in the current codebase based on the file context provided. The test assertion by itself is test coverage, which satisfies the spirit of C-005. However, the corresponding implementation change to utils/api.py (where the flag would actually be added to the command list) is absent from this diff. If the implementation was modified in a prior change that did not pass through governance, that prior change would be a C-005 gap. This is observable but not actionable from the diff alone; it is flagged so the Oracle can confirm whether the implementation change is paired in the same governance run."
+        }
+      ],
+      "_tokens": {
+        "input": 5621,
+        "output": 2936
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "REBUT",
+          "argument": "The Challenger's C-007 concern rests on speculation about an unseen implementation change, not on anything present in this diff. The change is to a test file (tests/test_api_claude_cli.py), which is not a governance pipeline file. C-007 explicitly scopes to 'challenger, defender, oracle, ledger, constitution' files. Test files are verification artifacts, not pipeline components. Furthermore, the Challenger's own framing concedes the concern: 'The implementation change is not visible in this diff, so whether it weakens or strengthens pipeline isolation cannot be confirmed here.' That concession undermines the finding. If we reason about what --strict-mcp-config actually does, it *restricts* MCP configuration in subprocess calls. That is a hardening of isolation, not a weakening. A flag that reduces the attack surface of subprocess invocations moves in the direction of stronger enforcement, which is the opposite of a C-007 violation. The Challenger has no affirmative evidence of weakening and acknowledges it cannot confirm one exists.",
+          "evidence": "The diff modifies tests/test_api_claude_cli.py only. C-007 scope is 'challenger, defender, oracle, ledger, constitution'. The added assertion is self.assertIn('--strict-mcp-config', cmd), which tests for a flag whose plain meaning is to restrict (not expand) MCP access during subprocess execution."
+        },
+        {
+          "finding_index": 1,
+          "position": "REBUT",
+          "argument": "The Challenger has inverted the C-005 constraint. C-005 requires 'new functions or branches of logic must have corresponding test cases.' This diff IS the test case. It adds coverage for a flag that should be present in the CLI command. If the implementation predates this change and lacked a test, then this diff is remediating a prior C-005 gap, which is the correct action. If the implementation is being added in a companion change that will also pass through governance, then governance will evaluate that implementation change separately with C-005 applied correctly at that time. Either way, adding a test assertion is not a C-005 violation. A test-first or test-alongside workflow is the preferred pattern. Flagging a test for not having a paired implementation in the same diff misreads the constraint's direction entirely.",
+          "evidence": "C-005 text: 'New functions or branches of logic must have corresponding test cases or an explicit justification for why testing is deferred.' The diff adds a test case. There is no new logic to cover here. The Challenger's finding would apply to the implementation diff, not this one."
+        }
+      ],
+      "summary": "Both findings are based on speculation or a misapplication of the constraint: the C-007 concern assumes weakening from an unseen implementation change when the visible diff only adds a test for an isolation-strengthening flag, and the C-005 concern inverts the constraint by flagging a test for lacking paired implementation in the same diff.",
+      "_tokens": {
+        "input": 6168,
+        "output": 1455
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The proposed change modifies a single test file (tests/test_api_claude_cli.py) to add one assertion verifying that '--strict-mcp-config' appears in the constructed CLI command. The Challenger raised two findings: a C-007 concern about an unseen implementation change, and a C-005 observation about pairing. The Defender correctly rebuts both. On C-007, the diff itself touches only a test file, which is a verification artifact, not a pipeline component within C-007's scope ('challenger, defender, oracle, ledger, constitution'); the Challenger explicitly conceded it 'cannot confirm' any weakening from this diff alone. Speculation about an unseen utils/api.py change is not actionable here, and any such change would be governed in its own pipeline run. Furthermore, '--strict-mcp-config' is by plain meaning a hardening flag, which is directionally consistent with, not contrary to, C-007. On C-005, the Defender correctly notes the constraint applies to new logic lacking tests; this diff IS test coverage and therefore cannot violate C-005. Reviewing the diff against the remainder of the constitution: no error handling changes (C-001 N/A), no scope creep beyond the named test file (C-002 satisfied), no new imports (C-003 satisfied), no type annotation changes (C-004 N/A), no secrets (C-006 satisfied), and no ledger modification (C-008 satisfied).",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error handling code is added or modified."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is confined to the single test file named in the task."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "SATISFIED",
+          "note": "No new imports or dependencies introduced."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No type annotations are touched."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "SATISFIED",
+          "note": "Per Defender rebuttal: this diff adds a test assertion; it cannot violate a constraint requiring tests for new logic."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "No credentials or secrets introduced."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "Diff modifies only a test file, which is outside C-007's enumerated scope. Challenger conceded weakening cannot be confirmed from this diff; '--strict-mcp-config' is directionally a hardening flag."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger entries are modified."
+        }
+      ],
+      "advisories": [
+        "If a companion change to utils/api.py adds '--strict-mcp-config' to the Claude CLI subprocess invocation, that change must pass through its own governance run where C-007 will be evaluated against the actual implementation. Verify the assertion does not become orphaned (passing test for a flag the production code does not emit) by ensuring the implementation is present when this test executes.",
+        "Confirm the new assertion is positioned within the correct test method's scope so it exercises the intended command-construction code path."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 10047,
+        "output": 1236
+      }
+    },
+    "entry_hash": "f502683fa46d5b00346016cd08eacefaf3ad7dadbe59b111a9da12543f9c2d71"
+  },
+  {
+    "entry_id": "35fc2dbe-8540-41f2-8e18-23f0353233a3",
+    "timestamp": "2026-06-26T07:23:03.523830+00:00",
+    "previous_hash": "f502683fa46d5b00346016cd08eacefaf3ad7dadbe59b111a9da12543f9c2d71",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "tests\\test_api_claude_cli.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "tests\\test_api_claude_cli.py",
+        "change_type": "modify",
+        "old_string": "        # The temp file is cleaned up after the call.\n        self.assertFalse(Path(captured[\"path\"]).exists())",
+        "new_string": "        # The temp file is cleaned up after the call.\n        self.assertFalse(Path(captured[\"path\"]).exists())\n\n    @mock.patch(\"utils.api.shutil.which\", return_value=\"/usr/bin/claude\")\n    def test_temp_file_write_failure_raises_provider_error(self, _which) -> None:\n        # If the system-prompt temp file cannot be written, the helper must\n        # raise the typed _ProviderError, never a bare OSError that would break\n        # call_model's never-raises contract.\n        with mock.patch(\n            \"utils.api.tempfile.NamedTemporaryFile\",\n            side_effect=OSError(\"disk full\"),\n        ):\n            with self.assertRaises(_ProviderError):\n                _claude_cli_call(\"claude-sonnet-4-6\", \"sys\", _msgs(), 4096)"
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 5784,
+        "output": 1381
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change adds a single test case to tests/test_api_claude_cli.py that verifies _claude_cli_call raises a typed _ProviderError when the temp file write fails. Per C-002, the change is scoped to a test file and does not touch production code outside the stated boundary. Per C-001, the test actually reinforces the no-silent-error-swallowing principle by asserting that an OSError is converted into the typed _ProviderError rather than propagating raw. Per C-003, no new imports are added (mock, Path, _ProviderError, _claude_cli_call, _msgs are presumed already imported in the file given the surrounding context using mock.patch and Path). Per C-004, no type annotations are weakened; the new test function is annotated -> None. Per C-005, this is itself a test addition, satisfying the warning-level constraint. Per C-006, no secrets are introduced. Per C-007, the test strengthens governance pipeline integrity by locking in the typed-error contract for the Claude CLI provider path. Per C-008, no ledger entries are touched. Challenger returned CLEAR and Defender confirmed; no missed violations identified on independent review.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "SATISFIED",
+          "note": "Test enforces typed error conversion, reinforcing no-silent-swallow."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change confined to the test file under test."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new imports introduced; mock/Path/_ProviderError assumed present from existing test context."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "New test method carries -> None annotation."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "SATISFIED",
+          "note": "Adds test coverage for the temp-file-failure branch."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No credentials present."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "Test strengthens provider-error contract in the pipeline-adjacent API wrapper."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Ledger untouched."
+        }
+      ],
+      "advisories": [
+        "Advisory: This verdict assumes _ProviderError, _claude_cli_call, _msgs, mock, and Path are already imported at the top of tests/test_api_claude_cli.py. If any of these are not present, an import addition would be required and should be reviewed for C-003 compliance.",
+        "Advisory: Verify the test actually triggers the temp-file code path before any earlier branch (e.g., the shutil.which guard, which is mocked) so the OSError is raised at the expected point."
+      ],
+      "remediation": null,
+      "confidence": "MODERATE",
+      "_tokens": {
+        "input": 8563,
+        "output": 1037
+      }
+    },
+    "entry_hash": "f54608a9bc4e9fd2c27a0830342275244bbbf7a040817ce04807e1e30bd8d2d6"
   }
 ]
