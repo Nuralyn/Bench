@@ -5145,5 +5145,379 @@
       }
     },
     "entry_hash": "ef123e18bebbe1b7afc76bfc91df9850afb888d72ba11c7749f1c519b3dfc3e5"
+  },
+  {
+    "entry_id": "a8a1da7b-59a8-4577-ba78-37389e549593",
+    "timestamp": "2026-06-26T04:06:52.082102+00:00",
+    "previous_hash": "ef123e18bebbe1b7afc76bfc91df9850afb888d72ba11c7749f1c519b3dfc3e5",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "[PATH_TRAVERSAL_BLOCKED]",
+      "tool": "Write",
+      "diff_summary": {
+        "file_path": "[PATH_TRAVERSAL_BLOCKED]",
+        "change_type": "create",
+        "content": "# Run Bench on the Claude Code subscription (no API key)\n\n## Context\n\nBench's pipeline talks to the raw Anthropic Messages API. `utils/api.py:210`\nconstructs a bare `anthropic.Anthropic()`, which falls back to\n`ANTHROPIC_API_KEY` (the pay-as-you-go API billing rail). That key is **unset**\non this machine, so today every stage returns `API_ERROR` and the hook fails\nopen: Bench is effectively a no-op until a user tops up a separate API key. The\nuser already pays for Claude Code (Pro/Max subscription) and wants Bench to ride\nthat existing entitlement instead of requiring a second, separately-billed\ncredential.\n\nThe subscription and the API are deliberately separate billing rails. The\n**sanctioned** way to use the subscription programmatically is the `claude` CLI\n/ Agent SDK, not raw-token reuse. Since Bench runs *inside* Claude Code (a\nPreToolUse hook), a `claude -p` (headless / print mode) subprocess inherits the\nrunning session's subscription auth automatically. No API key, no token\nscraping. The user selected this approach (Option B).\n\nConfirmed in this environment: `claude` v2.1.193 is on PATH at\n`~/.local/bin/claude`; print mode supports `--system-prompt`, `--model`,\n`--output-format json`, `--disallowedTools`, and stdin input.\n\n## Approach\n\nAdd a third provider to `utils/api.py` selected via `BENCH_PROVIDER=claude_code`,\nparallel to the existing `anthropic` and `openrouter` paths. It shells out to\n`claude -p` per stage. The `call_model` signature and the never-raises /\n`_tokens` contract are unchanged; only a new `_claude_cli_call` helper is added\nto the dispatch in `call_model` (`utils/api.py:81-92`).\n\n`claude -p` invocation (grounded in `claude --help`):\n\n```\nclaude -p --output-format json \\\n  --model <CHALLENGER/DEFENDER/ORACLE model> \\\n  --system-prompt \"<stage system prompt>\" \\\n  --disallowedTools Write Edit MultiEdit\n# user_content piped on stdin (default --input-format text)\n```\n\n- `--system-prompt` carries the stage system prompt directly (no need to mash\n  system + user into one string).\n- `user_content` goes on **stdin**, not as a positional arg, so large diffs\n  cannot hit the Windows command-line length limit.\n- `--output-format json` returns a single JSON envelope. The helper parses it,\n  pulls the assistant text out of the `result` field, and maps the envelope's\n  `usage` to `(input_tokens, output_tokens)`. That text is then handed back to\n  `call_model`, whose existing `_try_parse_dict` parses it as the stage's JSON\n  (the parse-retry path still applies unchanged).\n- Resolve the binary with `shutil.which(\"claude\")` so Windows finds\n  `claude.cmd`/`.exe`; missing binary raises `_ProviderError` -> `API_ERROR`.\n- Run via `subprocess.run(..., capture_output=True, text=True, timeout=...)`\n  with `shell=False`. Timeout configurable via env (default generous, e.g.\n  120s, since cold-start + inference is slow); timeout or non-zero exit raises\n  `_ProviderError`. `subprocess` and `shutil` are stdlib, so no\n  `requirements.txt` change (C-003 satisfied).\n\n## Reentrancy guard (the load-bearing detail)\n\nThe nested `claude -p` runs in the Bench repo cwd, so it loads\n`.claude/settings.json` and re-registers the same PreToolUse hook. If the nested\nagent ever issues a Write/Edit, Bench recurses.\n\nTwo layers:\n1. **Env-var bypass (primary).** The provider spawns the child with an extra env\n   var (e.g. `BENCH_SUBPROCESS=1`). At the top of `main()` in\n   `hooks/pre-tool-use.py`, before any pipeline work, check that var and\n   immediately return an allow response. Deterministic regardless of what the\n   nested agent does.\n2. **`--disallowedTools Write Edit MultiEdit` (belt-and-suspenders).** Stops the\n   nested analysis agent from editing in the first place.\n\nBoth `hooks/pre-tool-use.py` and `utils/api.py` are governance-pipeline files,\nso **C-007 applies** (CLAUDE.md rule 16): Bench will scrutinize these changes.\nMake each edit discrete (rule 14: one change per tool call).\n\n## Files to change\n\n- `utils/api.py` - add `_PROVIDER_CLAUDE_CLI = \"claude_code\"`, wire it into the\n  `call_model` dispatch, add `_claude_cli_call(model, system_prompt, messages,\n  max_tokens) -> tuple[str, int, int]`. Reuse `_sanitize_error_detail` for error\n  text and raise `_ProviderError` on all failure modes (C-001: no silent\n  swallowing).\n- `hooks/pre-tool-use.py` - add the `BENCH_SUBPROCESS` early-return bypass in\n  `main()`.\n- `tests/test_api_claude_cli.py` (new) - mirror the existing provider tests in\n  `tests/test_api.py`: mock `subprocess.run` / `shutil.which` and assert\n  envelope parsing, token mapping, and each error path (binary missing,\n  non-zero exit, timeout, malformed envelope JSON). Covers C-005 for the new\n  logic.\n- `README.md` - document `BENCH_PROVIDER=claude_code` as the \"use your existing\n  Claude subscription, no API key\" path, with the honest caveats (higher\n  per-edit latency because each stage cold-starts an agent; this is the\n  sanctioned subprocess route).\n- `CLAUDE.md` - extend the \"API Configuration\" / Models provider notes to list\n  the new `claude_code` provider value alongside `anthropic` / `openrouter`.\n\n## Open verification points (resolve during implementation, all read-only)\n\n1. **Exact `--model` strings.** Confirm `claude -p --model claude-sonnet-4-6`\n   and `claude-opus-4-7` are accepted, or whether the CLI wants aliases\n   (`sonnet`/`opus`) or a different ID set tied to the subscription. Map\n   Bench's `CHALLENGER_MODEL` / `DEFENDER_MODEL` / `ORACLE_MODEL` accordingly.\n2. **Envelope shape.** Confirm the `--output-format json` field names\n   (`result`, `usage.input_tokens`, `usage.output_tokens`) with one live call.\n3. **stdin prompt.** Confirm `claude -p` with no positional prompt reads the\n   prompt from stdin.\n\nOptional hardening (not required for v1): `--json-schema <schema>` per stage to\nforce valid JSON and drop the parse-retry round trip (aligns with C-011/C-012).\n\n## Verification (end to end)\n\n1. `claude -p --help` for the three flag/format facts above; one manual smoke\n   call: pipe a trivial prompt with `--system-prompt \"Return only the JSON\n   {\\\"ok\\\":true}\"` `--output-format json --model claude-sonnet-4-6\n   --disallowedTools Write Edit MultiEdit` and confirm the envelope + `result`.\n2. Run the new targeted unit tests only (CLAUDE.md rule 13: no bulk `pytest`):\n   `python -m pytest tests/test_api_claude_cli.py`.\n3. Set `BENCH_PROVIDER=claude_code`, have the agent make one governed edit to a\n   throwaway file, and confirm: the ledger records a real PASS/VETO with\n   non-zero `_tokens` (proves the subscription path ran, not a fail-open), no\n   recursion occurred, and `python -m bench verify` shows the chain intact.\n\n## Notes / deferred decisions\n\n- Selection is **explicit** (`BENCH_PROVIDER=claude_code`), matching the\n  existing `openrouter` pattern, rather than silently auto-switching rails when\n  no key is present. If the user later wants zero-config (auto-fall-back to\n  `claude_code` when `ANTHROPIC_API_KEY` is unset), that is a one-line default\n  change to revisit.\n- Latency is the real cost of this path: three agent cold-starts per Write/Edit,\n  synchronously, inside a blocking hook. The plan keeps the door open to the\n  `--json-schema` optimization and to running stages concurrently if per-edit\n  latency proves painful in practice.\n",
+        "formatted_diff": "+# Run Bench on the Claude Code subscription (no API key)\n+\n+## Context\n+\n+Bench's pipeline talks to the raw Anthropic Messages API. `utils/api.py:210`\n+constructs a bare `anthropic.Anthropic()`, which falls back to\n+`ANTHROPIC_API_KEY` (the pay-as-you-go API billing rail). That key is **unset**\n+on this machine, so today every stage returns `API_ERROR` and the hook fails\n+open: Bench is effectively a no-op until a user tops up a separate API key. The\n+user already pays for Claude Code (Pro/Max subscription) and wants Bench to ride\n+that existing entitlement instead of requiring a second, separately-billed\n+credential.\n+\n+The subscription and the API are deliberately separate billing rails. The\n+**sanctioned** way to use the subscription programmatically is the `claude` CLI\n+/ Agent SDK, not raw-token reuse. Since Bench runs *inside* Claude Code (a\n+PreToolUse hook), a `claude -p` (headless / print mode) subprocess inherits the\n+running session's subscription auth automatically. No API key, no token\n+scraping. The user selected this approach (Option B).\n+\n+Confirmed in this environment: `claude` v2.1.193 is on PATH at\n+`~/.local/bin/claude`; print mode supports `--system-prompt`, `--model`,\n+`--output-format json`, `--disallowedTools`, and stdin input.\n+\n+## Approach\n+\n+Add a third provider to `utils/api.py` selected via `BENCH_PROVIDER=claude_code`,\n+parallel to the existing `anthropic` and `openrouter` paths. It shells out to\n+`claude -p` per stage. The `call_model` signature and the never-raises /\n+`_tokens` contract are unchanged; only a new `_claude_cli_call` helper is added\n+to the dispatch in `call_model` (`utils/api.py:81-92`).\n+\n+`claude -p` invocation (grounded in `claude --help`):\n+\n+```\n+claude -p --output-format json \\\n+  --model <CHALLENGER/DEFENDER/ORACLE model> \\\n+  --system-prompt \"<stage system prompt>\" \\\n+  --disallowedTools Write Edit MultiEdit\n+# user_content piped on stdin (default --input-format text)\n+```\n+\n+- `--system-prompt` carries the stage system prompt directly (no need to mash\n+  system + user into one string).\n+- `user_content` goes on **stdin**, not as a positional arg, so large diffs\n+  cannot hit the Windows command-line length limit.\n+- `--output-format json` returns a single JSON envelope. The helper parses it,\n+  pulls the assistant text out of the `result` field, and maps the envelope's\n+  `usage` to `(input_tokens, output_tokens)`. That text is then handed back to\n+  `call_model`, whose existing `_try_parse_dict` parses it as the stage's JSON\n+  (the parse-retry path still applies unchanged).\n+- Resolve the binary with `shutil.which(\"claude\")` so Windows finds\n+  `claude.cmd`/`.exe`; missing binary raises `_ProviderError` -> `API_ERROR`.\n+- Run via `subprocess.run(..., capture_output=True, text=True, timeout=...)`\n+  with `shell=False`. Timeout configurable via env (default generous, e.g.\n+  120s, since cold-start + inference is slow); timeout or non-zero exit raises\n+  `_ProviderError`. `subprocess` and `shutil` are stdlib, so no\n+  `requirements.txt` change (C-003 satisfied).\n+\n+## Reentrancy guard (the load-bearing detail)\n+\n+The nested `claude -p` runs in the Bench repo cwd, so it loads\n+`.claude/settings.json` and re-registers the same PreToolUse hook. If the nested\n+agent ever issues a Write/Edit, Bench recurses.\n+\n+Two layers:\n+1. **Env-var bypass (primary).** The provider spawns the child with an extra env\n+   var (e.g. `BENCH_SUBPROCESS=1`). At the top of `main()` in\n+   `hooks/pre-tool-use.py`, before any pipeline work, check that var and\n+   immediately return an allow response. Deterministic regardless of what the\n+   nested agent does.\n+2. **`--disallowedTools Write Edit MultiEdit` (belt-and-suspenders).** Stops the\n+   nested analysis agent from editing in the first place.\n+\n+Both `hooks/pre-tool-use.py` and `utils/api.py` are governance-pipeline files,\n+so **C-007 applies** (CLAUDE.md rule 16): Bench will scrutinize these changes.\n+Make each edit discrete (rule 14: one change per tool call).\n+\n+## Files to change\n+\n+- `utils/api.py` - add `_PROVIDER_CLAUDE_CLI = \"claude_code\"`, wire it into the\n+  `call_model` dispatch, add `_claude_cli_call(model, system_prompt, messages,\n+  max_tokens) -> tuple[str, int, int]`. Reuse `_sanitize_error_detail` for error\n+  text and raise `_ProviderError` on all failure modes (C-001: no silent\n+  swallowing).\n+- `hooks/pre-tool-use.py` - add the `BENCH_SUBPROCESS` early-return bypass in\n+  `main()`.\n+- `tests/test_api_claude_cli.py` (new) - mirror the existing provider tests in\n+  `tests/test_api.py`: mock `subprocess.run` / `shutil.which` and assert\n+  envelope parsing, token mapping, and each error path (binary missing,\n+  non-zero exit, timeout, malformed envelope JSON). Covers C-005 for the new\n+  logic.\n+- `README.md` - document `BENCH_PROVIDER=claude_code` as the \"use your existing\n+  Claude subscription, no API key\" path, with the honest caveats (higher\n+  per-edit latency because each stage cold-starts an agent; this is the\n+  sanctioned subprocess route).\n+- `CLAUDE.md` - extend the \"API Configuration\" / Models provider notes to list\n+  the new `claude_code` provider value alongside `anthropic` / `openrouter`.\n+\n+## Open verification points (resolve during implementation, all read-only)\n+\n+1. **Exact `--model` strings.** Confirm `claude -p --model claude-sonnet-4-6`\n+   and `claude-opus-4-7` are accepted, or whether the CLI wants aliases\n+   (`sonnet`/`opus`) or a different ID set tied to the subscription. Map\n+   Bench's `CHALLENGER_MODEL` / `DEFENDER_MODEL` / `ORACLE_MODEL` accordingly.\n+2. **Envelope shape.** Confirm the `--output-format json` field names\n+   (`result`, `usage.input_tokens`, `usage.output_tokens`) with one live call.\n+3. **stdin prompt.** Confirm `claude -p` with no positional prompt reads the\n+   prompt from stdin.\n+\n+Optional hardening (not required for v1): `--json-schema <schema>` per stage to\n+force valid JSON and drop the parse-retry round trip (aligns with C-011/C-012).\n+\n+## Verification (end to end)\n+\n+1. `claude -p --help` for the three flag/format facts above; one manual smoke\n+   call: pipe a trivial prompt with `--system-prompt \"Return only the JSON\n+   {\\\"ok\\\":true}\"` `--output-format json --model claude-sonnet-4-6\n+   --disallowedTools Write Edit MultiEdit` and confirm the envelope + `result`.\n+2. Run the new targeted unit tests only (CLAUDE.md rule 13: no bulk `pytest`):\n+   `python -m pytest tests/test_api_claude_cli.py`.\n+3. Set `BENCH_PROVIDER=claude_code`, have the agent make one governed edit to a\n+   throwaway file, and confirm: the ledger records a real PASS/VETO with\n+   non-zero `_tokens` (proves the subscription path ran, not a fail-open), no\n+   recursion occurred, and `python -m bench verify` shows the chain intact.\n+\n+## Notes / deferred decisions\n+\n+- Selection is **explicit** (`BENCH_PROVIDER=claude_code`), matching the\n+  existing `openrouter` pattern, rather than silently auto-switching rails when\n+  no key is present. If the user later wants zero-config (auto-fall-back to\n+  `claude_code` when `ANTHROPIC_API_KEY` is unset), that is a one-line default\n+  change to revisit.\n+- Latency is the real cost of this path: three agent cold-starts per Write/Edit,\n+  synchronously, inside a blocking hook. The plan keeps the door open to the\n+  `--json-schema` optimization and to running stages concurrently if per-edit\n+  latency proves painful in practice.\n"
+      }
+    },
+    "challenger": {
+      "status": "PIPELINE_ERROR",
+      "error": {
+        "error": "API_ERROR",
+        "detail": "openrouter: APIStatusError: Error code: 402 - {'error': {'message': 'This request requires more credits, or fewer max_tokens. You requested up to 4096 tokens, but can only afford 760. To increase, visit https://openrouter.ai/settings/credits and add more credits', 'code': 402, 'metadata': {'provider_name': None, 'previous_errors': [{'code': 402, 'message': 'This request requires more credits, or fewer max_tokens. You requested up to 4096 tokens, but can only afford 760. To increase, visit https:... [truncated]",
+        "_tokens": {
+          "input": 0,
+          "output": 0
+        }
+      },
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "defender": {},
+    "oracle": {},
+    "entry_hash": "dbb039ba6e46e594d26477dbf4aca13c8e8fb9aac158ed82e58015a4a3fc408a"
+  },
+  {
+    "entry_id": "4f133255-ca4a-4231-bfd0-c59d57d0a8ef",
+    "timestamp": "2026-06-26T04:12:31.515343+00:00",
+    "previous_hash": "dbb039ba6e46e594d26477dbf4aca13c8e8fb9aac158ed82e58015a4a3fc408a",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "[PATH_TRAVERSAL_BLOCKED]",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "[PATH_TRAVERSAL_BLOCKED]",
+        "change_type": "modify",
+        "old_string": "import json\nimport os\nimport re\nimport sys\nfrom typing import Any",
+        "new_string": "import json\nimport os\nimport re\nimport shutil\nimport subprocess\nimport sys\nfrom typing import Any"
+      }
+    },
+    "challenger": {
+      "status": "PIPELINE_ERROR",
+      "error": {
+        "error": "API_ERROR",
+        "detail": "openrouter: APIStatusError: Error code: 402 - {'error': {'message': 'This request requires more credits, or fewer max_tokens. You requested up to 4096 tokens, but can only afford 760. To increase, visit https://openrouter.ai/settings/credits and add more credits', 'code': 402, 'metadata': {'provider_name': None, 'previous_errors': [{'code': 402, 'message': 'This request requires more credits, or fewer max_tokens. You requested up to 4096 tokens, but can only afford 760. To increase, visit https:... [truncated]",
+        "_tokens": {
+          "input": 0,
+          "output": 0
+        }
+      },
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "defender": {},
+    "oracle": {},
+    "entry_hash": "ee8c3815789971e8f4c82cdd8b990d0cc3582c751ff84d6cc9326865767a1f3a"
+  },
+  {
+    "entry_id": "df7e65e3-8ad6-4e7d-b769-e3474868f546",
+    "timestamp": "2026-06-26T04:12:40.411994+00:00",
+    "previous_hash": "ee8c3815789971e8f4c82cdd8b990d0cc3582c751ff84d6cc9326865767a1f3a",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "[PATH_TRAVERSAL_BLOCKED]",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "[PATH_TRAVERSAL_BLOCKED]",
+        "change_type": "modify",
+        "old_string": "_PROVIDER_ANTHROPIC: str = \"anthropic\"\n_PROVIDER_OPENROUTER: str = \"openrouter\"\n_OPENROUTER_BASE_URL: str = \"https://openrouter.ai/api/v1\"",
+        "new_string": "_PROVIDER_ANTHROPIC: str = \"anthropic\"\n_PROVIDER_OPENROUTER: str = \"openrouter\"\n_PROVIDER_CLAUDE_CLI: str = \"claude_code\"\n_OPENROUTER_BASE_URL: str = \"https://openrouter.ai/api/v1\"\n_DEFAULT_CLAUDE_CLI_TIMEOUT: float = 120.0"
+      }
+    },
+    "challenger": {
+      "status": "PIPELINE_ERROR",
+      "error": {
+        "error": "API_ERROR",
+        "detail": "openrouter: APIStatusError: Error code: 402 - {'error': {'message': 'This request requires more credits, or fewer max_tokens. You requested up to 4096 tokens, but can only afford 760. To increase, visit https://openrouter.ai/settings/credits and add more credits', 'code': 402, 'metadata': {'provider_name': None, 'previous_errors': [{'code': 402, 'message': 'This request requires more credits, or fewer max_tokens. You requested up to 4096 tokens, but can only afford 760. To increase, visit https:... [truncated]",
+        "_tokens": {
+          "input": 0,
+          "output": 0
+        }
+      },
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "defender": {},
+    "oracle": {},
+    "entry_hash": "720ea58896f9e2bfa560bfa8bdf472d5646befad77cabc9bec5b777c46b19cb3"
+  },
+  {
+    "entry_id": "ef6c5de4-5089-4913-a3b9-468daf2cffdc",
+    "timestamp": "2026-06-26T04:12:47.595160+00:00",
+    "previous_hash": "720ea58896f9e2bfa560bfa8bdf472d5646befad77cabc9bec5b777c46b19cb3",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "[PATH_TRAVERSAL_BLOCKED]",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "[PATH_TRAVERSAL_BLOCKED]",
+        "change_type": "modify",
+        "old_string": "    if provider == _PROVIDER_ANTHROPIC:\n        provider_call = _anthropic_call\n    elif provider == _PROVIDER_OPENROUTER:\n        provider_call = _openrouter_call\n    else:",
+        "new_string": "    if provider == _PROVIDER_ANTHROPIC:\n        provider_call = _anthropic_call\n    elif provider == _PROVIDER_OPENROUTER:\n        provider_call = _openrouter_call\n    elif provider == _PROVIDER_CLAUDE_CLI:\n        provider_call = _claude_cli_call\n    else:"
+      }
+    },
+    "challenger": {
+      "status": "PIPELINE_ERROR",
+      "error": {
+        "error": "API_ERROR",
+        "detail": "openrouter: APIStatusError: Error code: 402 - {'error': {'message': 'This request requires more credits, or fewer max_tokens. You requested up to 4096 tokens, but can only afford 760. To increase, visit https://openrouter.ai/settings/credits and add more credits', 'code': 402, 'metadata': {'provider_name': None, 'previous_errors': [{'code': 402, 'message': 'This request requires more credits, or fewer max_tokens. You requested up to 4096 tokens, but can only afford 760. To increase, visit https:... [truncated]",
+        "_tokens": {
+          "input": 0,
+          "output": 0
+        }
+      },
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "defender": {},
+    "oracle": {},
+    "entry_hash": "a43597b5b4c8d38649bbadcded19d55075fb62040ee8a036b9faab8237c8fcd1"
+  },
+  {
+    "entry_id": "db85f5f5-5359-4db4-a3b4-88ab0e9067da",
+    "timestamp": "2026-06-26T04:13:12.363877+00:00",
+    "previous_hash": "a43597b5b4c8d38649bbadcded19d55075fb62040ee8a036b9faab8237c8fcd1",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "[PATH_TRAVERSAL_BLOCKED]",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "[PATH_TRAVERSAL_BLOCKED]",
+        "change_type": "modify",
+        "old_string": "    output_tokens: int = (\n        getattr(usage, \"completion_tokens\", 0) if usage is not None else 0\n    )\n\n    return text, input_tokens, output_tokens",
+        "new_string": "    output_tokens: int = (\n        getattr(usage, \"completion_tokens\", 0) if usage is not None else 0\n    )\n\n    return text, input_tokens, output_tokens\n\n\ndef _claude_cli_call(\n    model: str,\n    system_prompt: str,\n    messages: list[dict[str, str]],\n    max_tokens: int,\n) -> tuple[str, int, int]:\n    \"\"\"One call via the local `claude` CLI in headless print mode.\n\n    Routes the stage through `claude -p` so it rides the user's Claude Code\n    subscription instead of an ANTHROPIC_API_KEY. The stage system prompt goes\n    on --system-prompt and the user content on stdin (avoiding command-line\n    length limits on large diffs); the reply returns as a single JSON envelope\n    whose \"result\" field is the assistant text. Returns (text, in_tok, out_tok).\n\n    Reentrancy: the child inherits this repo's .claude/settings.json, hence\n    Bench's own PreToolUse hook. BENCH_SUBPROCESS=1 in the child env makes that\n    hook fail open immediately (see hooks/pre-tool-use.py); --disallowedTools is\n    a second layer in case the nested agent attempts an edit anyway.\n\n    max_tokens is accepted for signature parity with the other providers; the\n    CLI manages its own output cap.\n\n    Raises _ProviderError if the binary is missing, the call exits non-zero or\n    times out, or the JSON envelope is malformed or reports an error.\n    \"\"\"\n    binary = shutil.which(\"claude\")\n    if binary is None:\n        raise _ProviderError(\"claude_code: `claude` binary not found on PATH\")\n\n    # Flatten messages into a single text prompt. Single-turn calls pass the\n    # user content as-is; the parse-retry path (user/assistant/user) is rendered\n    # with role labels so the prior reply and the JSON nudge both survive.\n    if len(messages) == 1:\n        prompt: str = messages[0].get(\"content\", \"\")\n    else:\n        prompt = \"\\n\\n\".join(\n            f\"{m.get('role', 'user').upper()}: {m.get('content', '')}\"\n            for m in messages\n        )\n\n    timeout_raw: str = os.environ.get(\"BENCH_CLAUDE_TIMEOUT\", \"\")\n    if timeout_raw:\n        try:\n            timeout: float = float(timeout_raw)\n        except ValueError:\n            print(\n                f\"[bench api] invalid BENCH_CLAUDE_TIMEOUT={timeout_raw!r}; \"\n                f\"using {_DEFAULT_CLAUDE_CLI_TIMEOUT}s\",\n                file=sys.stderr,\n            )\n            timeout = _DEFAULT_CLAUDE_CLI_TIMEOUT\n    else:\n        timeout = _DEFAULT_CLAUDE_CLI_TIMEOUT\n\n    child_env: dict[str, str] = dict(os.environ)\n    child_env[\"BENCH_SUBPROCESS\"] = \"1\"\n\n    # --disallowedTools is variadic; keep it last so it does not swallow other\n    # flags. \"MultiEdit\" is rejected as unknown by some CLI versions, so the\n    # env-var guard above is the load-bearing protection against recursion.\n    cmd: list[str] = [\n        binary,\n        \"-p\",\n        \"--output-format\",\n        \"json\",\n        \"--model\",\n        model,\n        \"--system-prompt\",\n        system_prompt,\n        \"--disallowedTools\",\n        \"Write\",\n        \"Edit\",\n    ]\n\n    try:\n        completed = subprocess.run(\n            cmd,\n            input=prompt,\n            capture_output=True,\n            text=True,\n            timeout=timeout,\n            env=child_env,\n            shell=False,\n        )\n    except subprocess.TimeoutExpired as e:\n        raise _ProviderError(\n            f\"claude_code: `claude` timed out after {timeout}s\"\n        ) from e\n    except OSError as e:\n        raise _ProviderError(\n            f\"claude_code: failed to spawn `claude`: {type(e).__name__}: \"\n            f\"{_sanitize_error_detail(str(e))}\"\n        ) from e\n\n    if completed.returncode != 0:\n        detail: str = _sanitize_error_detail(\n            completed.stderr or completed.stdout or \"\"\n        )\n        raise _ProviderError(\n            f\"claude_code: `claude` exited {completed.returncode}: {detail}\"\n        )\n\n    try:\n        envelope: Any = json.loads(completed.stdout)\n    except json.JSONDecodeError as e:\n        raise _ProviderError(\n            \"claude_code: response was not valid JSON: \"\n            f\"{_sanitize_error_detail(completed.stdout)}\"\n        ) from e\n\n    if not isinstance(envelope, dict):\n        raise _ProviderError(\n            \"claude_code: response envelope was not a JSON object\"\n        )\n\n    if envelope.get(\"is_error\") or envelope.get(\"subtype\") != \"success\":\n        detail = _sanitize_error_detail(str(envelope.get(\"result\", envelope)))\n        raise _ProviderError(f\"claude_code: CLI reported error: {detail}\")\n\n    text: str = envelope.get(\"result\", \"\") or \"\"\n\n    usage = envelope.get(\"usage\")\n    if isinstance(usage, dict):\n        input_tokens: int = int(usage.get(\"input_tokens\", 0) or 0)\n        output_tokens: int = int(usage.get(\"output_tokens\", 0) or 0)\n    else:\n        input_tokens = 0\n        output_tokens = 0\n\n    return text, input_tokens, output_tokens"
+      }
+    },
+    "challenger": {
+      "status": "PIPELINE_ERROR",
+      "error": {
+        "error": "API_ERROR",
+        "detail": "openrouter: APIStatusError: Error code: 402 - {'error': {'message': 'This request requires more credits, or fewer max_tokens. You requested up to 4096 tokens, but can only afford 760. To increase, visit https://openrouter.ai/settings/credits and add more credits', 'code': 402, 'metadata': {'provider_name': None, 'previous_errors': [{'code': 402, 'message': 'This request requires more credits, or fewer max_tokens. You requested up to 4096 tokens, but can only afford 760. To increase, visit https:... [truncated]",
+        "_tokens": {
+          "input": 0,
+          "output": 0
+        }
+      },
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "defender": {},
+    "oracle": {},
+    "entry_hash": "60c3e097418fd6db399e6e07e91db3b4ee2afe6563f460048a648816d6ee1b0f"
+  },
+  {
+    "entry_id": "07ff43ed-65d3-439b-a6d5-fe8ad84bffd0",
+    "timestamp": "2026-06-26T04:13:28.607053+00:00",
+    "previous_hash": "60c3e097418fd6db399e6e07e91db3b4ee2afe6563f460048a648816d6ee1b0f",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "[PATH_TRAVERSAL_BLOCKED]",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "[PATH_TRAVERSAL_BLOCKED]",
+        "change_type": "modify",
+        "old_string": "def main() -> int:\n    \"\"\"Entry point. Always returns 0; flow control is via stdout JSON.\"\"\"\n    try:\n        raw_stdin: str = sys.stdin.read()",
+        "new_string": "def main() -> int:\n    \"\"\"Entry point. Always returns 0; flow control is via stdout JSON.\"\"\"\n    if os.environ.get(\"BENCH_SUBPROCESS\") == \"1\":\n        # Reentrancy guard: this hook is firing inside a `claude -p` subprocess\n        # that Bench itself spawned (utils/api.py claude_code provider).\n        # Governing the nested agent would recurse, so fail open immediately.\n        bypass: dict[str, Any] = build_allow_response(\n            \"Bench governance: nested subprocess (BENCH_SUBPROCESS=1), skipping.\"\n        )\n        json.dump(bypass, sys.stdout)\n        sys.stdout.write(\"\\n\")\n        sys.stdout.flush()\n        return 0\n\n    try:\n        raw_stdin: str = sys.stdin.read()"
+      }
+    },
+    "challenger": {
+      "status": "PIPELINE_ERROR",
+      "error": {
+        "error": "API_ERROR",
+        "detail": "openrouter: APIStatusError: Error code: 402 - {'error': {'message': 'This request requires more credits, or fewer max_tokens. You requested up to 4096 tokens, but can only afford 760. To increase, visit https://openrouter.ai/settings/credits and add more credits', 'code': 402, 'metadata': {'provider_name': None, 'previous_errors': [{'code': 402, 'message': 'This request requires more credits, or fewer max_tokens. You requested up to 4096 tokens, but can only afford 760. To increase, visit https:... [truncated]",
+        "_tokens": {
+          "input": 0,
+          "output": 0
+        }
+      },
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "defender": {},
+    "oracle": {},
+    "entry_hash": "70efd32c54daf540d5b5b8a24c9dd2b139d883539e4755364fe379b3997a843e"
+  },
+  {
+    "entry_id": "681bac40-411a-41ec-8ba3-a1d37c566244",
+    "timestamp": "2026-06-26T04:15:05.847903+00:00",
+    "previous_hash": "70efd32c54daf540d5b5b8a24c9dd2b139d883539e4755364fe379b3997a843e",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "[PATH_TRAVERSAL_BLOCKED]",
+      "tool": "Write",
+      "diff_summary": {
+        "file_path": "[PATH_TRAVERSAL_BLOCKED]",
+        "change_type": "create",
+        "content": "\"\"\"Tests for the claude_code (`claude -p`) provider in utils.api.\n\nRun: python -m unittest tests.test_api_claude_cli -v\n\"\"\"\n\nimport json\nimport subprocess\nimport sys\nimport unittest\nfrom pathlib import Path\nfrom unittest import mock\n\n_REPO_ROOT: Path = Path(__file__).resolve().parent.parent\nif str(_REPO_ROOT) not in sys.path:\n    sys.path.insert(0, str(_REPO_ROOT))\n\nfrom utils.api import (  # noqa: E402\n    _ProviderError,\n    _claude_cli_call,\n    call_model,\n)\n\n\ndef _completed(\n    stdout: str = \"\", stderr: str = \"\", returncode: int = 0\n) -> subprocess.CompletedProcess:\n    return subprocess.CompletedProcess(\n        args=[\"claude\"], returncode=returncode, stdout=stdout, stderr=stderr\n    )\n\n\n_OK_ENVELOPE: str = json.dumps(\n    {\n        \"type\": \"result\",\n        \"subtype\": \"success\",\n        \"is_error\": False,\n        \"result\": '{\"verdict\": \"PASS\"}',\n        \"usage\": {\"input_tokens\": 12, \"output_tokens\": 5},\n    }\n)\n\n\ndef _msgs() -> list[dict[str, str]]:\n    return [{\"role\": \"user\", \"content\": \"review this diff\"}]\n\n\nclass ClaudeCliCallTests(unittest.TestCase):\n    @mock.patch(\"utils.api.subprocess.run\")\n    @mock.patch(\"utils.api.shutil.which\", return_value=\"/usr/bin/claude\")\n    def test_success_returns_text_and_tokens(self, _which, run) -> None:\n        run.return_value = _completed(stdout=_OK_ENVELOPE)\n        text, in_tok, out_tok = _claude_cli_call(\n            \"claude-sonnet-4-6\", \"sys\", _msgs(), 4096\n        )\n        self.assertEqual(text, '{\"verdict\": \"PASS\"}')\n        self.assertEqual(in_tok, 12)\n        self.assertEqual(out_tok, 5)\n\n    @mock.patch(\"utils.api.shutil.which\", return_value=None)\n    def test_binary_missing_raises(self, _which) -> None:\n        with self.assertRaises(_ProviderError):\n            _claude_cli_call(\"claude-sonnet-4-6\", \"sys\", _msgs(), 4096)\n\n    @mock.patch(\"utils.api.subprocess.run\")\n    @mock.patch(\"utils.api.shutil.which\", return_value=\"/usr/bin/claude\")\n    def test_nonzero_exit_raises_and_sanitizes(self, _which, run) -> None:\n        run.return_value = _completed(\n            stderr=\"boom sk-ant-secret1234567890\", returncode=1\n        )\n        with self.assertRaises(_ProviderError) as ctx:\n            _claude_cli_call(\"claude-sonnet-4-6\", \"sys\", _msgs(), 4096)\n        self.assertNotIn(\"sk-ant-secret1234567890\", str(ctx.exception))\n        self.assertIn(\"[REDACTED]\", str(ctx.exception))\n\n    @mock.patch(\n        \"utils.api.subprocess.run\",\n        side_effect=subprocess.TimeoutExpired(cmd=\"claude\", timeout=120),\n    )\n    @mock.patch(\"utils.api.shutil.which\", return_value=\"/usr/bin/claude\")\n    def test_timeout_raises(self, _which, _run) -> None:\n        with self.assertRaises(_ProviderError) as ctx:\n            _claude_cli_call(\"claude-sonnet-4-6\", \"sys\", _msgs(), 4096)\n        self.assertIn(\"timed out\", str(ctx.exception))\n\n    @mock.patch(\"utils.api.subprocess.run\")\n    @mock.patch(\"utils.api.shutil.which\", return_value=\"/usr/bin/claude\")\n    def test_malformed_json_raises(self, _which, run) -> None:\n        run.return_value = _completed(stdout=\"not json at all\")\n        with self.assertRaises(_ProviderError):\n            _claude_cli_call(\"claude-sonnet-4-6\", \"sys\", _msgs(), 4096)\n\n    @mock.patch(\"utils.api.subprocess.run\")\n    @mock.patch(\"utils.api.shutil.which\", return_value=\"/usr/bin/claude\")\n    def test_envelope_is_error_raises(self, _which, run) -> None:\n        run.return_value = _completed(\n            stdout=json.dumps(\n                {\n                    \"subtype\": \"error_during_execution\",\n                    \"is_error\": True,\n                    \"result\": \"nope\",\n                }\n            )\n        )\n        with self.assertRaises(_ProviderError):\n            _claude_cli_call(\"claude-sonnet-4-6\", \"sys\", _msgs(), 4096)\n\n    @mock.patch(\"utils.api.subprocess.run\")\n    @mock.patch(\"utils.api.shutil.which\", return_value=\"/usr/bin/claude\")\n    def test_envelope_not_object_raises(self, _which, run) -> None:\n        run.return_value = _completed(stdout=\"[1, 2, 3]\")\n        with self.assertRaises(_ProviderError):\n            _claude_cli_call(\"claude-sonnet-4-6\", \"sys\", _msgs(), 4096)\n\n    @mock.patch(\"utils.api.subprocess.run\")\n    @mock.patch(\"utils.api.shutil.which\", return_value=\"/usr/bin/claude\")\n    def test_sets_subprocess_env_and_disallowed_tools(self, _which, run) -> None:\n        run.return_value = _completed(stdout=_OK_ENVELOPE)\n        _claude_cli_call(\"claude-opus-4-7\", \"sys\", _msgs(), 4096)\n        args, kwargs = run.call_args\n        cmd = args[0] if args else kwargs[\"args\"]\n        self.assertIn(\"--disallowedTools\", cmd)\n        self.assertIn(\"Write\", cmd)\n        self.assertIn(\"Edit\", cmd)\n        self.assertIn(\"--model\", cmd)\n        self.assertIn(\"claude-opus-4-7\", cmd)\n        self.assertEqual(kwargs[\"env\"].get(\"BENCH_SUBPROCESS\"), \"1\")\n        self.assertFalse(kwargs.get(\"shell\", False))\n\n    @mock.patch(\"utils.api.subprocess.run\")\n    @mock.patch(\"utils.api.shutil.which\", return_value=\"/usr/bin/claude\")\n    def test_multi_turn_flattening(self, _which, run) -> None:\n        run.return_value = _completed(stdout=_OK_ENVELOPE)\n        msgs = [\n            {\"role\": \"user\", \"content\": \"first\"},\n            {\"role\": \"assistant\", \"content\": \"bad output\"},\n            {\"role\": \"user\", \"content\": \"respond with JSON only\"},\n        ]\n        _claude_cli_call(\"claude-sonnet-4-6\", \"sys\", msgs, 4096)\n        _args, kwargs = run.call_args\n        sent = kwargs[\"input\"]\n        self.assertIn(\"ASSISTANT: bad output\", sent)\n        self.assertIn(\"USER: respond with JSON only\", sent)\n\n\nclass CallModelClaudeCliIntegrationTests(unittest.TestCase):\n    @mock.patch(\"utils.api.subprocess.run\")\n    @mock.patch(\"utils.api.shutil.which\", return_value=\"/usr/bin/claude\")\n    def test_call_model_routes_to_cli_and_appends_tokens(\n        self, _which, run\n    ) -> None:\n        run.return_value = _completed(stdout=_OK_ENVELOPE)\n        with mock.patch.dict(\"os.environ\", {\"BENCH_PROVIDER\": \"claude_code\"}):\n            result = call_model(\"claude-sonnet-4-6\", \"sys\", \"content\")\n        self.assertEqual(result.get(\"verdict\"), \"PASS\")\n        self.assertEqual(result[\"_tokens\"], {\"input\": 12, \"output\": 5})\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n",
+        "formatted_diff": "+\"\"\"Tests for the claude_code (`claude -p`) provider in utils.api.\n+\n+Run: python -m unittest tests.test_api_claude_cli -v\n+\"\"\"\n+\n+import json\n+import subprocess\n+import sys\n+import unittest\n+from pathlib import Path\n+from unittest import mock\n+\n+_REPO_ROOT: Path = Path(__file__).resolve().parent.parent\n+if str(_REPO_ROOT) not in sys.path:\n+    sys.path.insert(0, str(_REPO_ROOT))\n+\n+from utils.api import (  # noqa: E402\n+    _ProviderError,\n+    _claude_cli_call,\n+    call_model,\n+)\n+\n+\n+def _completed(\n+    stdout: str = \"\", stderr: str = \"\", returncode: int = 0\n+) -> subprocess.CompletedProcess:\n+    return subprocess.CompletedProcess(\n+        args=[\"claude\"], returncode=returncode, stdout=stdout, stderr=stderr\n+    )\n+\n+\n+_OK_ENVELOPE: str = json.dumps(\n+    {\n+        \"type\": \"result\",\n+        \"subtype\": \"success\",\n+        \"is_error\": False,\n+        \"result\": '{\"verdict\": \"PASS\"}',\n+        \"usage\": {\"input_tokens\": 12, \"output_tokens\": 5},\n+    }\n+)\n+\n+\n+def _msgs() -> list[dict[str, str]]:\n+    return [{\"role\": \"user\", \"content\": \"review this diff\"}]\n+\n+\n+class ClaudeCliCallTests(unittest.TestCase):\n+    @mock.patch(\"utils.api.subprocess.run\")\n+    @mock.patch(\"utils.api.shutil.which\", return_value=\"/usr/bin/claude\")\n+    def test_success_returns_text_and_tokens(self, _which, run) -> None:\n+        run.return_value = _completed(stdout=_OK_ENVELOPE)\n+        text, in_tok, out_tok = _claude_cli_call(\n+            \"claude-sonnet-4-6\", \"sys\", _msgs(), 4096\n+        )\n+        self.assertEqual(text, '{\"verdict\": \"PASS\"}')\n+        self.assertEqual(in_tok, 12)\n+        self.assertEqual(out_tok, 5)\n+\n+    @mock.patch(\"utils.api.shutil.which\", return_value=None)\n+    def test_binary_missing_raises(self, _which) -> None:\n+        with self.assertRaises(_ProviderError):\n+            _claude_cli_call(\"claude-sonnet-4-6\", \"sys\", _msgs(), 4096)\n+\n+    @mock.patch(\"utils.api.subprocess.run\")\n+    @mock.patch(\"utils.api.shutil.which\", return_value=\"/usr/bin/claude\")\n+    def test_nonzero_exit_raises_and_sanitizes(self, _which, run) -> None:\n+        run.return_value = _completed(\n+            stderr=\"boom sk-ant-secret1234567890\", returncode=1\n+        )\n+        with self.assertRaises(_ProviderError) as ctx:\n+            _claude_cli_call(\"claude-sonnet-4-6\", \"sys\", _msgs(), 4096)\n+        self.assertNotIn(\"sk-ant-secret1234567890\", str(ctx.exception))\n+        self.assertIn(\"[REDACTED]\", str(ctx.exception))\n+\n+    @mock.patch(\n+        \"utils.api.subprocess.run\",\n+        side_effect=subprocess.TimeoutExpired(cmd=\"claude\", timeout=120),\n+    )\n+    @mock.patch(\"utils.api.shutil.which\", return_value=\"/usr/bin/claude\")\n+    def test_timeout_raises(self, _which, _run) -> None:\n+        with self.assertRaises(_ProviderError) as ctx:\n+            _claude_cli_call(\"claude-sonnet-4-6\", \"sys\", _msgs(), 4096)\n+        self.assertIn(\"timed out\", str(ctx.exception))\n+\n+    @mock.patch(\"utils.api.subprocess.run\")\n+    @mock.patch(\"utils.api.shutil.which\", return_value=\"/usr/bin/claude\")\n+    def test_malformed_json_raises(self, _which, run) -> None:\n+        run.return_value = _completed(stdout=\"not json at all\")\n+        with self.assertRaises(_ProviderError):\n+            _claude_cli_call(\"claude-sonnet-4-6\", \"sys\", _msgs(), 4096)\n+\n+    @mock.patch(\"utils.api.subprocess.run\")\n+    @mock.patch(\"utils.api.shutil.which\", return_value=\"/usr/bin/claude\")\n+    def test_envelope_is_error_raises(self, _which, run) -> None:\n+        run.return_value = _completed(\n+            stdout=json.dumps(\n+                {\n+                    \"subtype\": \"error_during_execution\",\n+                    \"is_error\": True,\n+                    \"result\": \"nope\",\n+                }\n+            )\n+        )\n+        with self.assertRaises(_ProviderError):\n+            _claude_cli_call(\"claude-sonnet-4-6\", \"sys\", _msgs(), 4096)\n+\n+    @mock.patch(\"utils.api.subprocess.run\")\n+    @mock.patch(\"utils.api.shutil.which\", return_value=\"/usr/bin/claude\")\n+    def test_envelope_not_object_raises(self, _which, run) -> None:\n+        run.return_value = _completed(stdout=\"[1, 2, 3]\")\n+        with self.assertRaises(_ProviderError):\n+            _claude_cli_call(\"claude-sonnet-4-6\", \"sys\", _msgs(), 4096)\n+\n+    @mock.patch(\"utils.api.subprocess.run\")\n+    @mock.patch(\"utils.api.shutil.which\", return_value=\"/usr/bin/claude\")\n+    def test_sets_subprocess_env_and_disallowed_tools(self, _which, run) -> None:\n+        run.return_value = _completed(stdout=_OK_ENVELOPE)\n+        _claude_cli_call(\"claude-opus-4-7\", \"sys\", _msgs(), 4096)\n+        args, kwargs = run.call_args\n+        cmd = args[0] if args else kwargs[\"args\"]\n+        self.assertIn(\"--disallowedTools\", cmd)\n+        self.assertIn(\"Write\", cmd)\n+        self.assertIn(\"Edit\", cmd)\n+        self.assertIn(\"--model\", cmd)\n+        self.assertIn(\"claude-opus-4-7\", cmd)\n+        self.assertEqual(kwargs[\"env\"].get(\"BENCH_SUBPROCESS\"), \"1\")\n+        self.assertFalse(kwargs.get(\"shell\", False))\n+\n+    @mock.patch(\"utils.api.subprocess.run\")\n+    @mock.patch(\"utils.api.shutil.which\", return_value=\"/usr/bin/claude\")\n+    def test_multi_turn_flattening(self, _which, run) -> None:\n+        run.return_value = _completed(stdout=_OK_ENVELOPE)\n+        msgs = [\n+            {\"role\": \"user\", \"content\": \"first\"},\n+            {\"role\": \"assistant\", \"content\": \"bad output\"},\n+            {\"role\": \"user\", \"content\": \"respond with JSON only\"},\n+        ]\n+        _claude_cli_call(\"claude-sonnet-4-6\", \"sys\", msgs, 4096)\n+        _args, kwargs = run.call_args\n+        sent = kwargs[\"input\"]\n+        self.assertIn(\"ASSISTANT: bad output\", sent)\n+        self.assertIn(\"USER: respond with JSON only\", sent)\n+\n+\n+class CallModelClaudeCliIntegrationTests(unittest.TestCase):\n+    @mock.patch(\"utils.api.subprocess.run\")\n+    @mock.patch(\"utils.api.shutil.which\", return_value=\"/usr/bin/claude\")\n+    def test_call_model_routes_to_cli_and_appends_tokens(\n+        self, _which, run\n+    ) -> None:\n+        run.return_value = _completed(stdout=_OK_ENVELOPE)\n+        with mock.patch.dict(\"os.environ\", {\"BENCH_PROVIDER\": \"claude_code\"}):\n+            result = call_model(\"claude-sonnet-4-6\", \"sys\", \"content\")\n+        self.assertEqual(result.get(\"verdict\"), \"PASS\")\n+        self.assertEqual(result[\"_tokens\"], {\"input\": 12, \"output\": 5})\n+\n+\n+if __name__ == \"__main__\":\n+    unittest.main()\n"
+      }
+    },
+    "challenger": {
+      "status": "PIPELINE_ERROR",
+      "error": {
+        "error": "API_ERROR",
+        "detail": "openrouter: APIStatusError: Error code: 402 - {'error': {'message': 'This request requires more credits, or fewer max_tokens. You requested up to 4096 tokens, but can only afford 760. To increase, visit https://openrouter.ai/settings/credits and add more credits', 'code': 402, 'metadata': {'provider_name': None, 'previous_errors': [{'code': 402, 'message': 'This request requires more credits, or fewer max_tokens. You requested up to 4096 tokens, but can only afford 760. To increase, visit https:... [truncated]",
+        "_tokens": {
+          "input": 0,
+          "output": 0
+        }
+      },
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "defender": {},
+    "oracle": {},
+    "entry_hash": "6234f2b2b50fdb556a082b60743b280801e97367da1b5448c950f83183fc68d9"
+  },
+  {
+    "entry_id": "bb306cce-d29b-4806-b8c6-bb8293043743",
+    "timestamp": "2026-06-26T04:17:47.025061+00:00",
+    "previous_hash": "6234f2b2b50fdb556a082b60743b280801e97367da1b5448c950f83183fc68d9",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "[PATH_TRAVERSAL_BLOCKED]",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "[PATH_TRAVERSAL_BLOCKED]",
+        "change_type": "modify",
+        "old_string": "Bench defaults to the Anthropic API. To route through OpenRouter instead, set the `BENCH_PROVIDER` environment variable:\n\n```bash\n# Default (Anthropic direct)\nexport BENCH_PROVIDER=anthropic\n\n# OpenRouter\nexport BENCH_PROVIDER=openrouter\nexport OPENROUTER_API_KEY=your-key-here\n```\n\nWhen using OpenRouter, the same model roles apply (Challenger, Defender, Oracle). Only the routing changes.",
+        "new_string": "Bench defaults to the Anthropic API (`ANTHROPIC_API_KEY`). Two alternative backends are selectable via the `BENCH_PROVIDER` environment variable: OpenRouter, and `claude_code`, which routes every stage through your existing Claude Code subscription so no separate API key is needed.\n\n```bash\n# Default (Anthropic direct, uses ANTHROPIC_API_KEY)\nexport BENCH_PROVIDER=anthropic\n\n# OpenRouter\nexport BENCH_PROVIDER=openrouter\nexport OPENROUTER_API_KEY=your-key-here\n\n# Claude Code subscription (no API key \u00e2\u20ac\u201d uses your logged-in `claude` CLI)\nexport BENCH_PROVIDER=claude_code\n```\n\nWhen using OpenRouter, the same model roles apply (Challenger, Defender, Oracle). Only the routing changes.\n\n### Using your Claude Code subscription (`claude_code`)\n\nSet `BENCH_PROVIDER=claude_code` to run the pipeline on the subscription that already powers your Claude Code session, with no `ANTHROPIC_API_KEY`. Each stage is dispatched through `claude -p` (headless mode), which inherits your logged-in session's auth. Requirements and tradeoffs:\n\n- The `claude` CLI must be installed and logged in (it is, if you run Claude Code).\n- Higher per-edit latency: every stage cold-starts a `claude` invocation, so a governed edit is noticeably slower than the direct-API path. Tune the per-stage timeout with `BENCH_CLAUDE_TIMEOUT` (seconds, default 120).\n- This is the sanctioned subprocess route, not raw token reuse. Bench sets `BENCH_SUBPROCESS=1` on the child so its own hook does not recurse."
+      }
+    },
+    "challenger": {
+      "status": "PIPELINE_ERROR",
+      "error": {
+        "error": "API_ERROR",
+        "detail": "openrouter: APIStatusError: Error code: 402 - {'error': {'message': 'This request requires more credits, or fewer max_tokens. You requested up to 4096 tokens, but can only afford 760. To increase, visit https://openrouter.ai/settings/credits and add more credits', 'code': 402, 'metadata': {'provider_name': None, 'previous_errors': [{'code': 402, 'message': 'This request requires more credits, or fewer max_tokens. You requested up to 4096 tokens, but can only afford 760. To increase, visit https:... [truncated]",
+        "_tokens": {
+          "input": 0,
+          "output": 0
+        }
+      },
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "defender": {},
+    "oracle": {},
+    "entry_hash": "b47c5d6a350906dead0309e1fd07c2a3921dfe27123dab151a3286ec749c2cb1"
+  },
+  {
+    "entry_id": "376256fb-0d72-4cec-a08b-2ec04dd8bde3",
+    "timestamp": "2026-06-26T04:18:06.609210+00:00",
+    "previous_hash": "b47c5d6a350906dead0309e1fd07c2a3921dfe27123dab151a3286ec749c2cb1",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "[PATH_TRAVERSAL_BLOCKED]",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "[PATH_TRAVERSAL_BLOCKED]",
+        "change_type": "modify",
+        "old_string": "function. The provider is selected at call time by the `BENCH_PROVIDER`\nenvironment variable; the function signature is identical for both backends.",
+        "new_string": "function. The provider is selected at call time by the `BENCH_PROVIDER`\nenvironment variable; the function signature is identical across all backends."
+      }
+    },
+    "challenger": {
+      "status": "PIPELINE_ERROR",
+      "error": {
+        "error": "API_ERROR",
+        "detail": "openrouter: APIStatusError: Error code: 402 - {'error': {'message': 'This request requires more credits, or fewer max_tokens. You requested up to 4096 tokens, but can only afford 760. To increase, visit https://openrouter.ai/settings/credits and add more credits', 'code': 402, 'metadata': {'provider_name': None, 'previous_errors': [{'code': 402, 'message': 'This request requires more credits, or fewer max_tokens. You requested up to 4096 tokens, but can only afford 760. To increase, visit https:... [truncated]",
+        "_tokens": {
+          "input": 0,
+          "output": 0
+        }
+      },
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "defender": {},
+    "oracle": {},
+    "entry_hash": "c56ecbc4721f781754d29d9cdc95dbaf6400e6f9d63caba26c2a7012b6828cb0"
+  },
+  {
+    "entry_id": "6690b9a2-8dab-4746-9ffb-1ed44b71a5c0",
+    "timestamp": "2026-06-26T04:18:15.058329+00:00",
+    "previous_hash": "c56ecbc4721f781754d29d9cdc95dbaf6400e6f9d63caba26c2a7012b6828cb0",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "[PATH_TRAVERSAL_BLOCKED]",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "[PATH_TRAVERSAL_BLOCKED]",
+        "change_type": "modify",
+        "old_string": "# The openai SDK is a soft dependency \u00e2\u20ac\u201d install it only if you set\n# BENCH_PROVIDER=openrouter.\n\n# Model strings (same on both providers; routing handles the prefix)",
+        "new_string": "# The openai SDK is a soft dependency \u00e2\u20ac\u201d install it only if you set\n# BENCH_PROVIDER=openrouter.\n\n# Provider: claude_code (BENCH_PROVIDER=claude_code) \u00e2\u20ac\u201d no API key.\n# Dispatches each stage through the local `claude` CLI in headless mode\n# (`claude -p --output-format json --model ... --system-prompt ...`, with the\n# user content on stdin) so calls ride the user's Claude Code subscription.\n# The child is spawned with BENCH_SUBPROCESS=1 so Bench's own PreToolUse hook\n# fails open instead of recursing. subprocess/shutil are stdlib, so this path\n# adds no dependency. Per-stage timeout is BENCH_CLAUDE_TIMEOUT seconds\n# (default 120).\n\n# Model strings (same across all providers; routing handles any prefix)"
+      }
+    },
+    "challenger": {
+      "status": "PIPELINE_ERROR",
+      "error": {
+        "error": "API_ERROR",
+        "detail": "openrouter: APIStatusError: Error code: 402 - {'error': {'message': 'This request requires more credits, or fewer max_tokens. You requested up to 4096 tokens, but can only afford 760. To increase, visit https://openrouter.ai/settings/credits and add more credits', 'code': 402, 'metadata': {'provider_name': None, 'previous_errors': [{'code': 402, 'message': 'This request requires more credits, or fewer max_tokens. You requested up to 4096 tokens, but can only afford 760. To increase, visit https:... [truncated]",
+        "_tokens": {
+          "input": 0,
+          "output": 0
+        }
+      },
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "defender": {},
+    "oracle": {},
+    "entry_hash": "53aa0e0669496f74fb7ee77f4b540434301821702fb2d9a2d4743715a8ac26bf"
+  },
+  {
+    "entry_id": "393dfdcd-e006-4086-b59a-a964a73b326b",
+    "timestamp": "2026-06-26T04:34:04.877484+00:00",
+    "previous_hash": "53aa0e0669496f74fb7ee77f4b540434301821702fb2d9a2d4743715a8ac26bf",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "[PATH_TRAVERSAL_BLOCKED]",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "[PATH_TRAVERSAL_BLOCKED]",
+        "change_type": "modify",
+        "old_string": "# Set your API key\nexport ANTHROPIC_API_KEY=your-key-here",
+        "new_string": "# Pick how Bench reaches the models (see \"Provider Configuration\" below):\n#   Option A: use your own Anthropic API key\nexport ANTHROPIC_API_KEY=your-key-here\n#   Option B: use your existing Claude Code subscription instead (no API key)\n# export BENCH_PROVIDER=claude_code"
+      }
+    },
+    "challenger": {
+      "status": "PIPELINE_ERROR",
+      "error": {
+        "error": "API_ERROR",
+        "detail": "openrouter: APIStatusError: Error code: 402 - {'error': {'message': 'This request requires more credits, or fewer max_tokens. You requested up to 4096 tokens, but can only afford 760. To increase, visit https://openrouter.ai/settings/credits and add more credits', 'code': 402, 'metadata': {'provider_name': None, 'previous_errors': [{'code': 402, 'message': 'This request requires more credits, or fewer max_tokens. You requested up to 4096 tokens, but can only afford 760. To increase, visit https:... [truncated]",
+        "_tokens": {
+          "input": 0,
+          "output": 0
+        }
+      },
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "defender": {},
+    "oracle": {},
+    "entry_hash": "bf068d212a3e921841d74f9e76248f012864fc260df640566f05751c7dfb8bc9"
   }
 ]
