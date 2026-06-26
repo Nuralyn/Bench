@@ -36,31 +36,47 @@ _LAST_N: int = 20
 _MAX_ERROR_MESSAGE_CHARS: int = 500
 _PATH_TRAVERSAL_PLACEHOLDER: str = "[PATH_TRAVERSAL_BLOCKED]"
 
+# Project root resolved from this file's location (utils/diff.py -> repo root),
+# NOT os.getcwd(): the hook can run with a working directory below the repo
+# root, and resolving against the CWD would wrongly reject in-repo edits that
+# live outside it (e.g. editing utils/api.py while CWD is tests/).
+_PROJECT_ROOT: str = os.path.realpath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir)
+)
+
 
 def _normalize_path(raw_path: str) -> str:
-    """Normalize a file path and reject traversal attempts.
+    """Normalize a file path and reject only genuine traversal.
 
-    Collapses '..' segments, rejects absolute paths and paths that escape
-    the project directory. Returns a sanitized placeholder for rejected
-    paths so governance still runs (fail-open) but the misleading path
-    never reaches LLM prompts or the ledger.
+    Resolves the path against the project root. Absolute or relative inputs that
+    stay inside the root are returned project-relative (nameable for governance);
+    only paths that escape the root return a sanitized placeholder so governance
+    still runs (fail-open) but the misleading path never reaches LLM prompts or
+    the ledger. (Previously every absolute path was rejected, which blocked the
+    in-root absolute paths that Write/Edit always supply.)
     """
     if not raw_path:
         return raw_path
-    normalized: str = os.path.normpath(raw_path)
-    if os.path.isabs(normalized) or raw_path.startswith("/"):
+    root: str = _PROJECT_ROOT
+    # os.path.join leaves raw_path unchanged when it is already absolute, so this
+    # resolves both absolute and relative inputs against the project root.
+    candidate: str = os.path.realpath(os.path.join(root, raw_path))
+    try:
+        rel: str = os.path.relpath(candidate, root)
+    except ValueError:
+        # Different drive on Windows: cannot be inside the project root.
         print(
-            f"[bench diff] path traversal blocked: absolute path {raw_path!r}",
+            f"[bench diff] path traversal blocked: outside project root {raw_path!r}",
             file=sys.stderr,
         )
         return _PATH_TRAVERSAL_PLACEHOLDER
-    if normalized.startswith(".."):
+    if rel == os.pardir or rel.startswith(os.pardir + os.sep):
         print(
             f"[bench diff] path traversal blocked: escapes project root {raw_path!r}",
             file=sys.stderr,
         )
         return _PATH_TRAVERSAL_PLACEHOLDER
-    return normalized
+    return rel
 
 
 def build_diff_info(tool_name: str, tool_input: dict) -> dict[str, Any]:
