@@ -1,4 +1,7 @@
 {
+  "env": {
+    "BENCH_PROVIDER": "claude_code"
+  },
   "hooks": {
     "PreToolUse": [
       {
