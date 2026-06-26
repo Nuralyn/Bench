@@ -61,8 +61,11 @@ cd bench
 # Install
 pip install -r requirements.txt
 
-# Set your API key
+# Pick how Bench reaches the models (see "Provider Configuration" below):
+#   Option A: use your own Anthropic API key
 export ANTHROPIC_API_KEY=your-key-here
+#   Option B: use your existing Claude Code subscription instead (no API key)
+# export BENCH_PROVIDER=claude_code
 
 # Add Bench hooks to your Claude Code project
 cp settings.json /your-project/.claude/settings.json
@@ -80,18 +83,29 @@ python -m cli stats
 
 ## Provider Configuration
 
-Bench defaults to the Anthropic API. To route through OpenRouter instead, set the `BENCH_PROVIDER` environment variable:
+Bench defaults to the Anthropic API (`ANTHROPIC_API_KEY`). Two alternative backends are selectable via the `BENCH_PROVIDER` environment variable: OpenRouter, and `claude_code`, which routes every stage through your existing Claude Code subscription so no separate API key is needed.
 
 ```bash
-# Default (Anthropic direct)
+# Default (Anthropic direct, uses ANTHROPIC_API_KEY)
 export BENCH_PROVIDER=anthropic
 
 # OpenRouter
 export BENCH_PROVIDER=openrouter
 export OPENROUTER_API_KEY=your-key-here
+
+# Claude Code subscription (no API key — uses your logged-in `claude` CLI)
+export BENCH_PROVIDER=claude_code
 ```
 
 When using OpenRouter, the same model roles apply (Challenger, Defender, Oracle). Only the routing changes.
+
+### Using your Claude Code subscription (`claude_code`)
+
+Set `BENCH_PROVIDER=claude_code` to run the pipeline on the subscription that already powers your Claude Code session, with no `ANTHROPIC_API_KEY`. Each stage is dispatched through `claude -p` (headless mode), which inherits your logged-in session's auth. Requirements and tradeoffs:
+
+- The `claude` CLI must be installed and logged in (it is, if you run Claude Code).
+- Higher per-edit latency: every stage cold-starts a `claude` invocation, so a governed edit is noticeably slower than the direct-API path. Tune the per-stage timeout with `BENCH_CLAUDE_TIMEOUT` (seconds, default 120).
+- This is the sanctioned subprocess route, not raw token reuse. Bench sets `BENCH_SUBPROCESS=1` on the child so its own hook does not recurse.
 
 ## Design Decisions
 

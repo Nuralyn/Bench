@@ -21,6 +21,8 @@ Invariants:
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 from typing import Any
 
@@ -34,7 +36,9 @@ UTILITY_MODEL: str = "claude-haiku-4-5-20251001"
 
 _PROVIDER_ANTHROPIC: str = "anthropic"
 _PROVIDER_OPENROUTER: str = "openrouter"
+_PROVIDER_CLAUDE_CLI: str = "claude_code"
 _OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
+_DEFAULT_CLAUDE_CLI_TIMEOUT: float = 120.0
 _RETRY_NUDGE: str = (
     "Your previous response was not valid JSON. Respond ONLY with valid JSON."
 )
@@ -84,6 +88,8 @@ def call_model(
         provider_call = _anthropic_call
     elif provider == _PROVIDER_OPENROUTER:
         provider_call = _openrouter_call
+    elif provider == _PROVIDER_CLAUDE_CLI:
+        provider_call = _claude_cli_call
     else:
         return {
             "error": "API_ERROR",
@@ -300,5 +306,171 @@ def _openrouter_call(
     output_tokens: int = (
         getattr(usage, "completion_tokens", 0) if usage is not None else 0
     )
+
+    return text, input_tokens, output_tokens
+
+
+def _coerce_int(value: Any) -> int:
+    """Best-effort int coercion for token counts; returns 0 on bad input."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _claude_cli_call(
+    model: str,
+    system_prompt: str,
+    messages: list[dict[str, str]],
+    max_tokens: int,
+) -> tuple[str, int, int]:
+    """One call via the local `claude` CLI in headless print mode.
+
+    Routes the stage through `claude -p` so it rides the user's Claude Code
+    subscription instead of an ANTHROPIC_API_KEY. The system prompt and user
+    content are folded into a single stdin payload (not passed as --system-prompt,
+    which truncates multi-line values on the .cmd shim path); the reply returns
+    as a single JSON envelope whose "result" field is the assistant text.
+    Returns (text, in_tok, out_tok).
+
+    Reentrancy: the child inherits this repo's .claude/settings.json, hence
+    Bench's own PreToolUse hook. BENCH_SUBPROCESS=1 in the child env makes that
+    hook fail open immediately (see hooks/pre-tool-use.py); --disallowedTools is
+    a second layer in case the nested agent attempts an edit anyway.
+
+    max_tokens is accepted for signature parity with the other providers; the
+    CLI manages its own output cap.
+
+    Raises _ProviderError if the binary is missing, the call exits non-zero or
+    times out, or the JSON envelope is malformed or reports an error.
+    """
+    binary = shutil.which("claude")
+    if binary is None:
+        raise _ProviderError("claude_code: `claude` binary not found on PATH")
+
+    # Flatten messages into a single text body. Single-turn calls pass the user
+    # content as-is; the parse-retry path (user/assistant/user) is rendered with
+    # role labels so the prior reply and the JSON nudge both survive.
+    if len(messages) == 1:
+        body: str = messages[0].get("content", "")
+    else:
+        body = "\n\n".join(
+            f"{m.get('role', 'user').upper()}: {m.get('content', '')}"
+            for m in messages
+        )
+
+    # Fold the system prompt into the stdin payload rather than passing it as
+    # --system-prompt. Bench's stage prompts are multi-line, and when `claude`
+    # resolves to a .cmd/.bat shim a multi-line argv is truncated at the first
+    # newline by cmd.exe, silently gutting the prompt. stdin carries arbitrary
+    # text safely on every platform.
+    prompt: str = f"{system_prompt}\n\n{body}" if system_prompt else body
+
+    timeout: float = _DEFAULT_CLAUDE_CLI_TIMEOUT
+    timeout_raw: str = os.environ.get("BENCH_CLAUDE_TIMEOUT", "")
+    if timeout_raw:
+        try:
+            parsed_timeout: float = float(timeout_raw)
+        except ValueError:
+            print(
+                f"[bench api] invalid BENCH_CLAUDE_TIMEOUT={timeout_raw!r}; "
+                f"using {_DEFAULT_CLAUDE_CLI_TIMEOUT}s",
+                file=sys.stderr,
+            )
+        else:
+            if parsed_timeout > 0:
+                timeout = parsed_timeout
+            else:
+                print(
+                    f"[bench api] BENCH_CLAUDE_TIMEOUT={timeout_raw!r} must be "
+                    f"> 0; using {_DEFAULT_CLAUDE_CLI_TIMEOUT}s",
+                    file=sys.stderr,
+                )
+
+    child_env: dict[str, str] = dict(os.environ)
+    child_env["BENCH_SUBPROCESS"] = "1"
+
+    # --disallowedTools is variadic; keep it last so it does not swallow other
+    # flags. "MultiEdit" is rejected as unknown by some CLI versions, so the
+    # env-var guard above is the load-bearing protection against recursion.
+    cmd: list[str] = [
+        binary,
+        "-p",
+        "--output-format",
+        "json",
+        "--model",
+        model,
+        "--disallowedTools",
+        "Write",
+        "Edit",
+    ]
+
+    try:
+        completed = subprocess.run(
+            cmd,
+            input=prompt,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+            env=child_env,
+            shell=False,
+        )
+    except subprocess.TimeoutExpired as e:
+        raise _ProviderError(
+            f"claude_code: `claude` timed out after {timeout}s"
+        ) from e
+    except (OSError, ValueError) as e:
+        # OSError: spawn failure. ValueError (includes UnicodeError): an encoding
+        # edge the explicit utf-8 setting did not absorb. Both become a
+        # _ProviderError so call_model's never-raises contract holds.
+        raise _ProviderError(
+            f"claude_code: failed to run `claude`: {type(e).__name__}: "
+            f"{_sanitize_error_detail(str(e))}"
+        ) from e
+
+    if completed.returncode != 0:
+        detail: str = _sanitize_error_detail(
+            completed.stderr or completed.stdout or ""
+        )
+        raise _ProviderError(
+            f"claude_code: `claude` exited {completed.returncode}: {detail}"
+        )
+
+    try:
+        envelope: Any = json.loads(completed.stdout)
+    except json.JSONDecodeError as e:
+        raise _ProviderError(
+            "claude_code: response was not valid JSON: "
+            f"{_sanitize_error_detail(completed.stdout)}"
+        ) from e
+
+    if not isinstance(envelope, dict):
+        raise _ProviderError(
+            "claude_code: response envelope was not a JSON object"
+        )
+
+    if envelope.get("is_error") or envelope.get("subtype") != "success":
+        detail = _sanitize_error_detail(str(envelope.get("result", envelope)))
+        raise _ProviderError(f"claude_code: CLI reported error: {detail}")
+
+    text: str = envelope.get("result", "") or ""
+
+    usage = envelope.get("usage")
+    if isinstance(usage, dict):
+        # Claude Code applies prompt caching automatically, so most real input
+        # lands in the cache fields; sum all three so the ledger reflects true
+        # input consumption. Coercion is defensive: a malformed token value must
+        # not break call_model's never-raises contract.
+        input_tokens: int = (
+            _coerce_int(usage.get("input_tokens"))
+            + _coerce_int(usage.get("cache_creation_input_tokens"))
+            + _coerce_int(usage.get("cache_read_input_tokens"))
+        )
+        output_tokens: int = _coerce_int(usage.get("output_tokens"))
+    else:
+        input_tokens = 0
+        output_tokens = 0
 
     return text, input_tokens, output_tokens
