@@ -1,4 +1,5 @@
-"""Implementations of the four Bench CLI commands.
+"""Implementations of the Bench CLI commands (verify, ledger, stats,
+constitution, viewer).
 
 Each command returns an int exit code (0 on success, 1 on failure) and
 prints a human-readable summary to stdout. Error diagnostics go to stderr

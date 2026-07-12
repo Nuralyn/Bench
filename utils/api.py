@@ -9,6 +9,11 @@ Provider is selected via the BENCH_PROVIDER env var:
   * "openrouter"          — openai SDK + OpenRouter base URL,
                             OPENROUTER_API_KEY; model auto-prefixed with
                             "anthropic/"
+  * "claude_code"         — local `claude` CLI in headless mode (`claude -p`),
+                            riding the logged-in Claude Code subscription; no
+                            API key. Child runs with BENCH_SUBPROCESS=1 so the
+                            Bench hook does not recurse. Per-stage timeout via
+                            BENCH_CLAUDE_TIMEOUT seconds (default 120).
 
 Invariants:
   * call_model NEVER raises. Every code path returns a dict.

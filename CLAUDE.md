@@ -30,7 +30,8 @@ PreToolUse Hook -> Challenger (Sonnet 4.6) -> Defender (Sonnet 4.6) -> Oracle (O
 ```
 bench/
   bench.json              # Constitution file. User-editable. Versioned.
-  settings.json           # Claude Code hook config
+  .claude/
+    settings.json         # Claude Code hook config
   hooks/
     pre-tool-use.py       # Hook entry point
   pipeline/
@@ -45,12 +46,14 @@ bench/
     bench-ledger.json     # Append-only ledger
     ledger-meta.json      # Metadata
   cli/
-    __main__.py           # python -m bench
-    commands.py           # verify, ledger, stats, constitution
+    __main__.py           # python -m cli
+    commands.py           # verify, ledger, stats, constitution, viewer
   utils/
     diff.py               # Diff extraction and formatting
     api.py                # Anthropic API client
     formatting.py         # Stdlib diff-info formatting for pipeline display
+    stats.py              # Shared ledger stats helpers (CLI + viewer)
+    viewer.py             # Self-contained HTML ledger viewer
   tests/
 ```
 
@@ -189,8 +192,8 @@ UTILITY_MODEL = "claude-haiku-4-5-20251001"
 ## What Success Looks Like
 
 Bench builds Bench. Every change in this repo was challenged, defended, ruled
-on, and recorded. The ledger is the proof. `python -m bench verify` confirms
-the chain is intact. `python -m bench stats` shows the full governance history.
+on, and recorded. The ledger is the proof. `python -m cli verify` confirms
+the chain is intact. `python -m cli stats` shows the full governance history.
 
 The thesis: governance of AI reasoning is a primitive, not a feature.
 
