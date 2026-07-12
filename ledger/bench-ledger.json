@@ -8429,5 +8429,264 @@
       }
     },
     "entry_hash": "1dcf00fb09ee80d63f2cdab73c3b13ba29509610da3b3fd26179ef4bea323c2f"
+  },
+  {
+    "entry_id": "9fd3ec63-68d5-498d-bbd6-e9e7122c3e85",
+    "timestamp": "2026-07-12T18:22:00.174732+00:00",
+    "previous_hash": "1dcf00fb09ee80d63f2cdab73c3b13ba29509610da3b3fd26179ef4bea323c2f",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "[PATH_TRAVERSAL_BLOCKED]",
+      "tool": "Write",
+      "diff_summary": {
+        "file_path": "[PATH_TRAVERSAL_BLOCKED]",
+        "change_type": "create",
+        "content": "# Bench Audit: Fixes and Tidy-Up Plan\n\n## Context\n\nA three-way parallel audit of the full Bench codebase (pipeline + hooks, ledger + CLI + config, utils + tests) found no critical runtime bugs: the hash chain is sound (91 entries verify clean), the producer/consumer key contract holds end to end, and the hook honors its \"exit 0, JSON permissionDecision\" contract on every path. But there is real accumulation to clean for a public repo: an orphaned near-duplicate package, dead imports, code-vs-docs drift (including a documented CLI command that does not exist), an unguarded parsing path that can violate a documented \"never raises\" invariant, a verifier that ignores its own meta anchor, duplicated stats logic, and zero test coverage on the viewer and CLI.\n\nOne audit finding was dismissed as a false positive: the model IDs (`claude-sonnet-4-6`, `claude-opus-4-7`) were flagged as possibly invalid, but the ledger records 91 successful pipeline runs with real token usage, so they resolve fine. They stay.\n\nUser decisions (confirmed): delete `util/`, remove `openai` from requirements, align hook output code to docs, full tidy including dedupe and new tests.\n\nImplementation notes that govern all edits:\n- Every Write/Edit in this repo passes through the Bench governance hook. One logical change per tool call (repo rule 14). File deletions go through `git rm` (the hook governs Write/Edit/MultiEdit only; deletion has no Write path).\n- Commit format: `[bench] <component>: <what changed>`. Ledger JSON files get committed alongside code per memory note (ledger is source, not artifact).\n- No bench.json changes planned, so no constitution version bump.\n- No em dashes in any docs or content produced.\n\n## A. Dead code removal\n\n1. **Delete the `util/` package** (`util/__init__.py`, `util/logging.py`) **and `tests/test_logging.py`**. Orphaned (only the test imports it), logs to stdout which would corrupt the hook JSON channel if ever adopted, and name-collides with `utils/`. Use `git rm`.\n2. **Remove unused `import atexit`** at `cli/commands.py:12`. Note: a prior removal attempt was VETOed (ledger entry #48) only because the submitted file path was `[PATH_TRAVERSAL_BLOCKED]`; with a clean absolute path this is a legitimate dead-import removal.\n3. **Keep** `UTILITY_MODEL` (`utils/api.py:36`, documented as reserved in CLAUDE.md) and `get_constraint_by_id` (`pipeline/constitution.py:100`, tested public helper). Deliberate non-removals.\n\n## B. Bug fixes and hardening\n\n4. **`utils/api.py`: close the \"call_model NEVER raises\" hole.** In `_anthropic_call` (lines 233-243) and `_openrouter_call` (lines 296-311), the response-extraction blocks run outside the try/except; an unexpected shape or non-standard SDK exception escapes `call_model`. Wrap extraction in try/except that converts to `_ProviderError` (same sanitized-message pattern as the existing guards).\n5. **`utils/diff.py:232-238`: log the silent catches.** `_safe_file_path`'s two bare `except Exception:` fallbacks are the only unlogged swallows in the pipeline (borderline C-001). Add a one-line stderr diagnostic matching the module's existing `[bench diff]` style before returning the fallback.\n6. **`ledger/verify.py`: cross-check `ledger-meta.json`.** The verifier currently never consults the meta anchor, so a full re-chain rewrite would pass. After the chain walk succeeds, load `ledger-meta.json` and check `latest_hash` == last entry hash and `entry_count` == len(entries); mismatch returns a `_failure(...)` with `failure_type=\"META_MISMATCH\"`. Missing/unreadable meta file: report in the result but do not fail the chain itself (chain validity is independent; note it in the returned dict). Update `cli/commands.py` `cmd_verify` output if it surfaces new fields.\n7. **`hooks/pre-tool-use.py` `_validate_hook_payload` (lines 152-181):** empty `tool_name` currently falls through into file_path checks and accrues a spurious warning. Return early after the empty-tool_name warning, consistent with the non-governed-tool early return.\n\n## C. Hook output: align code to documented format\n\n8. **`pipeline/runner.py` + `hooks/pre-tool-use.py`:**\n   - Runner: include the Oracle's violated constraint IDs (from `constraint_citations` entries with `disposition == \"VIOLATED\"`) and `advisories` in the consolidated result (`runner.py:151-164`).\n   - Hook VETO branch (`pre-tool-use.py:194-215`): compose `permissionDecisionReason` as `BENCH VETO [C-XXX]: <reasoning>` (multiple IDs comma-separated inside the bracket; fall back to `[C-???]` or no bracket if citations are absent) and prefix `additionalContext` with `Remediation: `.\n   - Hook PASS branch (`pre-tool-use.py:216-218`): when advisories are present, append them to `additionalContext` after the fixed PASS sentence.\n   - Update `tests/test_hook.py` and `tests/test_runner.py` expectations accordingly.\n\n## D. Dependencies\n\n9. **Remove `openai` from `requirements.txt`.** Honors the documented soft-dependency contract in `utils/api.py:255-256` and README. Tests mock `_openrouter_call` directly and never import openai, so CI is unaffected.\n10. **Pin `anthropic` with a lower bound** (`anthropic>=<installed minor>`, check `pip show anthropic` at implementation time). Light supply-chain hygiene for a public repo.\n\n## E. Documentation fixes\n\n11. **CLAUDE.md:**\n    - `python -m bench` does not work (no `bench` package); replace with `python -m cli` at lines 48, 192, 193.\n    - Structure diagram: `settings.json` lives at `.claude/settings.json`, not repo root; add `utils/viewer.py` and the `viewer` CLI command (currently undocumented); remove nothing else.\n    - Constraint list and hook-format section stay as-is (code now conforms per item 8).\n12. **README.md:**\n    - Quick Start (line 57): `cp settings.json ...` references a non-existent root file; correct to `.claude/settings.json`.\n    - Line 49: the C-007 veto narrative (\"reduced fallback coverage in the hook entry point\") is attributed to ledger entry #8, but matches entry #13; entry #8 is the Oracle-constitution-replacement veto. Re-read both entries and fix the attribution.\n13. **`utils/api.py` module docstring (lines 7-12):** documents only 2 of 3 providers; add the `claude_code` CLI backend summary.\n14. **`.gitignore`:** replace the ~135-line stock Node/JS template with a lean Python ignore set (`__pycache__/`, `*.py[cod]`, virtualenvs, `.env`, IDE and OS files). Behavior-preserving for everything currently ignored that matters.\n\n## F. Dedupe and test coverage\n\n15. **Extract shared stats helpers to `utils/stats.py`.** `_entry_has_pipeline_error` and `_pct` are duplicated verbatim between `utils/viewer.py:136-150` and `cli/commands.py:287-309`, and the citation-counting loop in `viewer.py::_compute_stats` mirrors `commands.py::cmd_stats`. Move the shared pieces into `utils/stats.py`; both call sites import from it. Keep presentation (printing vs HTML data) in the respective modules.\n16. **New tests** (stdlib unittest, matching existing patterns: `sys.path.insert` header, no network, platform-safe paths):\n    - `tests/test_stats.py`: shared helper behavior (pipeline-error detection, percentage math, citation counting) on synthetic entries.\n    - `tests/test_viewer.py`: smoke test `generate_viewer_html` on a small synthetic ledger (returns HTML string containing expected markers, stats embedded correctly, handles empty ledger).\n    - `tests/test_commands.py`: `cmd_verify`, `cmd_ledger`, `cmd_stats`, `cmd_constitution` against temp fixture files (exit codes and key output), `cmd_viewer` writing to a temp path. Use `unittest.mock`/tempfile like existing tests; no `os.chdir`.\n\n## Verification\n\n- Per repo rule 13, run test files individually rather than bulk discover locally: `python -m unittest tests.test_api_extended tests.test_hook tests.test_runner tests.test_verify tests.test_diff tests.test_stats tests.test_viewer tests.test_commands` (plus any other touched suites).\n- `python -m cli verify` passes on the real ledger (including the new meta cross-check).\n- `python -m cli stats` and `python -m cli viewer` run clean after the dedupe.\n- Negative check for item 6: tamper a copy of the ledger meta in a temp dir and confirm META_MISMATCH (in the new test, not against the real ledger).\n- Confirm `git ls-files` shows no `util/` remnants and grep shows no lingering `util.logging` or `atexit` references.\n- CI parity: the suite must still pass under `python -m unittest discover -s tests` (what tests.yml runs) with `openai` NOT installed.\n- Commit in logical units with `[bench] ...` messages; expect each Write/Edit to pass through the governance pipeline, and commit the updated ledger files with the code.\n",
+        "formatted_diff": "+# Bench Audit: Fixes and Tidy-Up Plan\n+\n+## Context\n+\n+A three-way parallel audit of the full Bench codebase (pipeline + hooks, ledger + CLI + config, utils + tests) found no critical runtime bugs: the hash chain is sound (91 entries verify clean), the producer/consumer key contract holds end to end, and the hook honors its \"exit 0, JSON permissionDecision\" contract on every path. But there is real accumulation to clean for a public repo: an orphaned near-duplicate package, dead imports, code-vs-docs drift (including a documented CLI command that does not exist), an unguarded parsing path that can violate a documented \"never raises\" invariant, a verifier that ignores its own meta anchor, duplicated stats logic, and zero test coverage on the viewer and CLI.\n+\n+One audit finding was dismissed as a false positive: the model IDs (`claude-sonnet-4-6`, `claude-opus-4-7`) were flagged as possibly invalid, but the ledger records 91 successful pipeline runs with real token usage, so they resolve fine. They stay.\n+\n+User decisions (confirmed): delete `util/`, remove `openai` from requirements, align hook output code to docs, full tidy including dedupe and new tests.\n+\n+Implementation notes that govern all edits:\n+- Every Write/Edit in this repo passes through the Bench governance hook. One logical change per tool call (repo rule 14). File deletions go through `git rm` (the hook governs Write/Edit/MultiEdit only; deletion has no Write path).\n+- Commit format: `[bench] <component>: <what changed>`. Ledger JSON files get committed alongside code per memory note (ledger is source, not artifact).\n+- No bench.json changes planned, so no constitution version bump.\n+- No em dashes in any docs or content produced.\n+\n+## A. Dead code removal\n+\n+1. **Delete the `util/` package** (`util/__init__.py`, `util/logging.py`) **and `tests/test_logging.py`**. Orphaned (only the test imports it), logs to stdout which would corrupt the hook JSON channel if ever adopted, and name-collides with `utils/`. Use `git rm`.\n+2. **Remove unused `import atexit`** at `cli/commands.py:12`. Note: a prior removal attempt was VETOed (ledger entry #48) only because the submitted file path was `[PATH_TRAVERSAL_BLOCKED]`; with a clean absolute path this is a legitimate dead-import removal.\n+3. **Keep** `UTILITY_MODEL` (`utils/api.py:36`, documented as reserved in CLAUDE.md) and `get_constraint_by_id` (`pipeline/constitution.py:100`, tested public helper). Deliberate non-removals.\n+\n+## B. Bug fixes and hardening\n+\n+4. **`utils/api.py`: close the \"call_model NEVER raises\" hole.** In `_anthropic_call` (lines 233-243) and `_openrouter_call` (lines 296-311), the response-extraction blocks run outside the try/except; an unexpected shape or non-standard SDK exception escapes `call_model`. Wrap extraction in try/except that converts to `_ProviderError` (same sanitized-message pattern as the existing guards).\n+5. **`utils/diff.py:232-238`: log the silent catches.** `_safe_file_path`'s two bare `except Exception:` fallbacks are the only unlogged swallows in the pipeline (borderline C-001). Add a one-line stderr diagnostic matching the module's existing `[bench diff]` style before returning the fallback.\n+6. **`ledger/verify.py`: cross-check `ledger-meta.json`.** The verifier currently never consults the meta anchor, so a full re-chain rewrite would pass. After the chain walk succeeds, load `ledger-meta.json` and check `latest_hash` == last entry hash and `entry_count` == len(entries); mismatch returns a `_failure(...)` with `failure_type=\"META_MISMATCH\"`. Missing/unreadable meta file: report in the result but do not fail the chain itself (chain validity is independent; note it in the returned dict). Update `cli/commands.py` `cmd_verify` output if it surfaces new fields.\n+7. **`hooks/pre-tool-use.py` `_validate_hook_payload` (lines 152-181):** empty `tool_name` currently falls through into file_path checks and accrues a spurious warning. Return early after the empty-tool_name warning, consistent with the non-governed-tool early return.\n+\n+## C. Hook output: align code to documented format\n+\n+8. **`pipeline/runner.py` + `hooks/pre-tool-use.py`:**\n+   - Runner: include the Oracle's violated constraint IDs (from `constraint_citations` entries with `disposition == \"VIOLATED\"`) and `advisories` in the consolidated result (`runner.py:151-164`).\n+   - Hook VETO branch (`pre-tool-use.py:194-215`): compose `permissionDecisionReason` as `BENCH VETO [C-XXX]: <reasoning>` (multiple IDs comma-separated inside the bracket; fall back to `[C-???]` or no bracket if citations are absent) and prefix `additionalContext` with `Remediation: `.\n+   - Hook PASS branch (`pre-tool-use.py:216-218`): when advisories are present, append them to `additionalContext` after the fixed PASS sentence.\n+   - Update `tests/test_hook.py` and `tests/test_runner.py` expectations accordingly.\n+\n+## D. Dependencies\n+\n+9. **Remove `openai` from `requirements.txt`.** Honors the documented soft-dependency contract in `utils/api.py:255-256` and README. Tests mock `_openrouter_call` directly and never import openai, so CI is unaffected.\n+10. **Pin `anthropic` with a lower bound** (`anthropic>=<installed minor>`, check `pip show anthropic` at implementation time). Light supply-chain hygiene for a public repo.\n+\n+## E. Documentation fixes\n+\n+11. **CLAUDE.md:**\n+    - `python -m bench` does not work (no `bench` package); replace with `python -m cli` at lines 48, 192, 193.\n+    - Structure diagram: `settings.json` lives at `.claude/settings.json`, not repo root; add `utils/viewer.py` and the `viewer` CLI command (currently undocumented); remove nothing else.\n+    - Constraint list and hook-format section stay as-is (code now conforms per item 8).\n+12. **README.md:**\n+    - Quick Start (line 57): `cp settings.json ...` references a non-existent root file; correct to `.claude/settings.json`.\n+    - Line 49: the C-007 veto narrative (\"reduced fallback coverage in the hook entry point\") is attributed to ledger entry #8, but matches entry #13; entry #8 is the Oracle-constitution-replacement veto. Re-read both entries and fix the attribution.\n+13. **`utils/api.py` module docstring (lines 7-12):** documents only 2 of 3 providers; add the `claude_code` CLI backend summary.\n+14. **`.gitignore`:** replace the ~135-line stock Node/JS template with a lean Python ignore set (`__pycache__/`, `*.py[cod]`, virtualenvs, `.env`, IDE and OS files). Behavior-preserving for everything currently ignored that matters.\n+\n+## F. Dedupe and test coverage\n+\n+15. **Extract shared stats helpers to `utils/stats.py`.** `_entry_has_pipeline_error` and `_pct` are duplicated verbatim between `utils/viewer.py:136-150` and `cli/commands.py:287-309`, and the citation-counting loop in `viewer.py::_compute_stats` mirrors `commands.py::cmd_stats`. Move the shared pieces into `utils/stats.py`; both call sites import from it. Keep presentation (printing vs HTML data) in the respective modules.\n+16. **New tests** (stdlib unittest, matching existing patterns: `sys.path.insert` header, no network, platform-safe paths):\n+    - `tests/test_stats.py`: shared helper behavior (pipeline-error detection, percentage math, citation counting) on synthetic entries.\n+    - `tests/test_viewer.py`: smoke test `generate_viewer_html` on a small synthetic ledger (returns HTML string containing expected markers, stats embedded correctly, handles empty ledger).\n+    - `tests/test_commands.py`: `cmd_verify`, `cmd_ledger`, `cmd_stats`, `cmd_constitution` against temp fixture files (exit codes and key output), `cmd_viewer` writing to a temp path. Use `unittest.mock`/tempfile like existing tests; no `os.chdir`.\n+\n+## Verification\n+\n+- Per repo rule 13, run test files individually rather than bulk discover locally: `python -m unittest tests.test_api_extended tests.test_hook tests.test_runner tests.test_verify tests.test_diff tests.test_stats tests.test_viewer tests.test_commands` (plus any other touched suites).\n+- `python -m cli verify` passes on the real ledger (including the new meta cross-check).\n+- `python -m cli stats` and `python -m cli viewer` run clean after the dedupe.\n+- Negative check for item 6: tamper a copy of the ledger meta in a temp dir and confirm META_MISMATCH (in the new test, not against the real ledger).\n+- Confirm `git ls-files` shows no `util/` remnants and grep shows no lingering `util.logging` or `atexit` references.\n+- CI parity: the suite must still pass under `python -m unittest discover -s tests` (what tests.yml runs) with `openai` NOT installed.\n+- Commit in logical units with `[bench] ...` messages; expect each Write/Edit to pass through the governance pipeline, and commit the updated ledger files with the code.\n"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-002",
+          "severity": "CONCERN",
+          "location": "file_path field of the proposed change",
+          "evidence": "\"file_path\": \"[PATH_TRAVERSAL_BLOCKED]\"",
+          "reasoning": "The actual destination of this file is unknown. The path traversal block means the pipeline cannot verify that this file is being written within the repository boundary. Without knowing the real path, scope compliance cannot be confirmed. The file content is a planning document, but a planning document written outside the repo (e.g., to a parent directory or system location) would be a scope violation."
+        },
+        {
+          "constraint_id": "C-007",
+          "severity": "OBSERVATION",
+          "location": "Plan items 6, 7, 8 (B and C sections)",
+          "evidence": "Item 6: modify ledger/verify.py; Item 7: modify hooks/pre-tool-use.py; Item 8: modify pipeline/runner.py and hooks/pre-tool-use.py",
+          "reasoning": "The plan describes modifications to three governance pipeline files: ledger/verify.py, hooks/pre-tool-use.py, and pipeline/runner.py. Each of these falls squarely within C-007's protected scope. The described changes appear to strengthen governance (meta cross-check, format alignment) rather than weaken it, but this document creates the blueprint. The Oracle should be aware that each downstream Write/Edit against these files will require independent C-007 scrutiny."
+        },
+        {
+          "constraint_id": "C-007",
+          "severity": "CONCERN",
+          "location": "Plan section A, item 2",
+          "evidence": "\"Note: a prior removal attempt was VETOed (ledger entry #48) only because the submitted file path was [PATH_TRAVERSAL_BLOCKED]; with a clean absolute path this is a legitimate dead-import removal.\"",
+          "reasoning": "This document explicitly proposes re-attempting a change that was recorded as a VETO in the immutable ledger. The justification is that the prior veto was procedural rather than substantive. That may be correct, but this plan document itself is arriving with the same [PATH_TRAVERSAL_BLOCKED] condition that caused entry #48's veto, which raises the question of whether the underlying path issue is systemic. More critically: the governance pipeline exists to make vetoes binding. A planning document that argues a ledger veto should be retried because it was 'only procedural' creates a precedent for selectively re-litigating governance decisions. The Oracle should assess whether the veto was procedural or substantive before this item proceeds."
+        },
+        {
+          "constraint_id": "C-005",
+          "severity": "OBSERVATION",
+          "location": "Plan section F, item 15",
+          "evidence": "\"Extract shared stats helpers to utils/stats.py.\"",
+          "reasoning": "Creating a new utils/stats.py module introduces new importable logic. The plan does include a corresponding test file (tests/test_stats.py in item 16), so this is compliant with C-005. Noting it for completeness: the Oracle should confirm the implementation when it arrives includes the test file in the same commit batch, not deferred."
+        }
+      ],
+      "_tokens": {
+        "input": 10607,
+        "output": 3126
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "MITIGATE",
+          "argument": "The Challenger's concern is procedurally correct: scope compliance cannot be confirmed without a resolved path. However, the risk profile of this specific file type materially limits the danger. The content is a pure markdown planning document. It contains no executable code, no import statements, no dependency declarations, and no modifications to any governed file. A markdown file landing in the wrong directory cannot corrupt the hash chain, cannot weaken the pipeline, and cannot silently swallow errors. The worst-case outcome of a misrouted markdown plan doc is clutter, not a governance failure. The C-002 veto rule is designed to prevent code changes from sprawling into unrelated modules; it was not designed to block documentation that cannot execute. That said, the path block is a real procedural gap and the Oracle should note it. The mitigation is that the practical blast radius of this particular file's destination being wrong is approximately zero.",
+          "evidence": "The entire content of the diff is markdown prose: headers, bullet points, bold labels, and inline code references. There are no Python statements, no JSON mutations, and no file-system operations. Compare to C-002's rationale: 'Scope creep in AI-generated code is the primary trust failure mode.' This is not code."
+        },
+        {
+          "finding_index": 1,
+          "position": "REBUT",
+          "argument": "The Challenger is correct that items 6, 7, and 8 describe modifications to C-007-protected pipeline files, and correct that those downstream changes will each require independent C-007 scrutiny. But the finding is an observation about future write operations, not a finding against this document. The plan document itself does not modify ledger/verify.py, hooks/pre-tool-use.py, or pipeline/runner.py. It describes intent. The described changes all move in the direction of strengthening governance: the verify.py change adds a meta-anchor cross-check (catches re-chain rewrites), the pre-tool-use.py change closes a spurious-warning path in validation, and the runner.py change surfaces violated constraint IDs in output. None weaken enforcement, bypass verification, or disable logging. This finding should be carried forward as a process reminder for the Oracle when those specific writes arrive, not as a finding against this planning document.",
+          "evidence": "Item 6: 'mismatch returns a _failure(...) with failure_type=META_MISMATCH' - strengthens verification. Item 7: 'Return early after the empty-tool_name warning, consistent with the non-governed-tool early return' - tightens validation logic. Item 8: 'compose permissionDecisionReason as BENCH VETO [C-XXX]' - aligns output with documented contract. All three are additive or corrective, not subtractive."
+        },
+        {
+          "finding_index": 2,
+          "position": "MITIGATE",
+          "argument": "The Challenger raises a genuinely important governance principle: vetoes should not be casually re-litigated. I partially concede the concern but rebut the framing. There is a real and meaningful distinction between a substantive veto (the Oracle ruled the change is wrong) and a procedural block (the pipeline could not evaluate the change at all because the path was sanitized before delivery). Entry #48's veto, if caused by PATH_TRAVERSAL_BLOCKED, is in the second category: the governance pipeline returned VETO because it could not assess the change, not because the change itself violated a constraint. Removing an unused import is not inherently a governance violation under any of C-001 through C-008. Re-submitting a change that was blocked by a transport error for proper substantive review is not re-litigation; it is the first litigation. However, the Challenger's observation that this very document is also arriving with PATH_TRAVERSAL_BLOCKED is a legitimate systemic flag. If the path sanitization mechanism is consistently firing, that is a hook configuration issue that should be diagnosed before more changes pile up with the same blocker. I concede that systemic point entirely. The Oracle should note it without treating it as a reason to reject the substance of item A.2.",
+          "evidence": "The plan explicitly states: 'a prior removal attempt was VETOed (ledger entry #48) only because the submitted file path was [PATH_TRAVERSAL_BLOCKED]' - this is a factual claim about the nature of that veto. If the ledger entry for #48 records the path block as the operative failure (not a C-001/C-002/etc. finding), the plan's characterization is accurate. The recurrence of PATH_TRAVERSAL_BLOCKED on this document confirms a systemic path issue, not that the planned changes are wrong."
+        },
+        {
+          "finding_index": 3,
+          "position": "REBUT",
+          "argument": "The Challenger classified this as an OBSERVATION and explicitly noted the plan is compliant. I agree and confirm: item 16 of the plan directly pairs the new utils/stats.py module (item 15) with a corresponding tests/test_stats.py covering helper behavior on synthetic entries. C-005 requires 'corresponding test cases or an explicit justification for why testing is deferred.' The plan satisfies the first branch of that disjunction. The Challenger's only flag is that Oracle should verify the test file arrives in the same commit batch rather than deferred. That is a reasonable implementation-time verification request, not a finding against this planning document.",
+          "evidence": "Plan item 16 explicitly lists 'tests/test_stats.py: shared helper behavior (pipeline-error detection, percentage math, citation counting) on synthetic entries' as a deliverable alongside item 15's utils/stats.py extraction. The verification section also calls out running test_stats as part of the final check."
+        }
+      ],
+      "summary": "The planning document is substantively sound: it describes a coherent set of governance-strengthening changes with appropriate test coverage, accurate constraint awareness, and a credible distinction between the procedural nature of entry #48's veto and the substance of the underlying import removal; the only legitimate concern is the systemic PATH_TRAVERSAL_BLOCKED condition that prevents path verification and should be diagnosed as a hook configuration issue before implementation proceeds.",
+      "_tokens": {
+        "input": 11437,
+        "output": 2712
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The proposed change is a markdown planning document with no executable content. The Challenger raised four items: one C-002 concern about the unresolved file_path ([PATH_TRAVERSAL_BLOCKED]), two C-007 items about downstream implications and a re-litigation concern, and one C-005 observation. The Defender's rebuttals hold: (1) on C-002, the content is pure prose with no imports, no code, and no ability to modify governed files, so the practical scope-creep risk the constraint targets ('scope creep in AI-generated code') does not materialize from a markdown plan, though the path sanitization is a real procedural gap worth flagging as an advisory; (2) on C-007 (items 6/7/8 observation), the Defender is correct that this document does not itself modify pipeline/, ledger/, or hooks/ files; those future writes will each be independently governed, and the described intent (adding meta cross-check, tightening validation, aligning output to documented format) is strengthening, not weakening, per C-007's rule; (3) on C-007 (re-litigation of ledger #48), the Defender's substantive/procedural distinction is legitimate: a veto caused by an unassessable path is not a substantive ruling on the change's merits, and re-submitting the same removal for actual substantive review does not violate C-008 (the ledger entry remains intact) nor C-007 (no enforcement is being weakened); the plan explicitly acknowledges the prior veto rather than concealing it; (4) on C-005, the Challenger conceded compliance because item 16 pairs the new module with tests. No other constitutional constraints are triggered by markdown prose: C-001 (no error handling here), C-003 (no imports), C-004 (no type annotations), C-006 (no secrets in the document), C-008 (no ledger mutation). The change meets constitutional standards.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Markdown document contains no catch blocks or error handling."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Per Defender rebuttal 0: the content is non-executable markdown with zero blast radius. The [PATH_TRAVERSAL_BLOCKED] sanitization is a procedural transport gap, not evidence of a scope violation. Flagged as advisory."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependency declarations in the diff."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No type annotations added or removed."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "SATISFIED",
+          "note": "Per Challenger finding 3 and Defender rebuttal 3: plan item 16 explicitly pairs the new utils/stats.py (item 15) with tests/test_stats.py."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No credentials, keys, or tokens in the document content."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "Per Defender rebuttals 1 and 2: this document does not modify any pipeline/ledger/hook file; it describes intent. Downstream Write/Edits will each face independent C-007 review. The plan's described modifications are strengthening (meta anchor cross-check, tighter validation, output alignment to documented contract). Re-submission of the atexit removal after a transport-layer veto is not a weakening of enforcement."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "SATISFIED",
+          "note": "Plan explicitly states ledger JSON files are committed as source and no ledger entries are modified. Ledger entry #48 remains intact; the plan references it, does not overwrite it."
+        }
+      ],
+      "advisories": [
+        "The [PATH_TRAVERSAL_BLOCKED] file_path prevents the pipeline from verifying repository scope. This is a systemic transport-layer issue (Challenger finding 0, Defender rebuttal 2 concede this point). Recommend diagnosing the path sanitization behavior before further changes accumulate under the same blocker.",
+        "Items 6, 7, and 8 will produce writes to pipeline/runner.py, ledger/verify.py, and hooks/pre-tool-use.py. Each will be independently subject to C-007 scrutiny at write time. This planning document's PASS does not preauthorize those changes.",
+        "Item 10 proposes pinning anthropic with a lower bound; when implemented, ensure requirements.txt changes are minimal and declared per C-003.",
+        "Item 2's re-attempt of the atexit removal should be submitted with a resolvable path so the substantive C-001/C-002 analysis (rather than a transport block) is what appears in the ledger."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 18514,
+        "output": 1770
+      }
+    },
+    "entry_hash": "96066f816740f00706f9fad806c5f47078a988a32326e41841135943acd668d2"
+  },
+  {
+    "entry_id": "f0c17f0c-3f4c-4086-ad6b-483b7ad4ed1a",
+    "timestamp": "2026-07-12T18:29:24.138176+00:00",
+    "previous_hash": "96066f816740f00706f9fad806c5f47078a988a32326e41841135943acd668d2",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "cli\\commands.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "cli\\commands.py",
+        "change_type": "modify",
+        "old_string": "import atexit\nimport os",
+        "new_string": "import os"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-001",
+          "severity": "CONCERN",
+          "location": "cli/commands.py: import section (old_string line 1)",
+          "evidence": "Removal of `import atexit` without any accompanying removal of `atexit` usages visible in the diff",
+          "reasoning": "The diff shows only the import being deleted. In CLI tools, `atexit` is canonically used to register cleanup callbacks that run on process exit \u2014 which in this codebase would likely mean flushing ledger writes, closing handles, or surfacing deferred errors. If `atexit` is still referenced in the body of commands.py (registering a handler), removing the import produces a NameError at registration time, silently disabling the cleanup path rather than surfacing the failure. If the handler registrations were also removed but that removal is not shown in this diff, the net effect may be that previously guaranteed cleanup no longer runs, which can cause silent swallowing of late-stage errors. Without the full file body, neither scenario can be ruled out."
+        },
+        {
+          "constraint_id": "C-007",
+          "severity": "CONCERN",
+          "location": "cli/commands.py: import section (old_string line 1)",
+          "evidence": "Removal of `import atexit` in the CLI command layer of the governance pipeline",
+          "reasoning": "If `atexit` was used in commands.py to guarantee a final ledger flush or chain-integrity check before process exit (a plausible and common pattern in governance tooling), its removal could mean that a partial pipeline run that terminates abnormally no longer triggers that safeguard. This would weaken enforcement guarantees at the boundary of the governance pipeline without an explicit justification. The diff does not include any replacement mechanism. This is a concern, not a confirmed violation, because the full body of commands.py is not provided \u2014 but it is worth the Oracle examining whether the missing context clears it."
+        }
+      ],
+      "_tokens": {
+        "input": 5644,
+        "output": 2600
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "REBUT",
+          "argument": "The Challenger has misapplied C-001. C-001 targets catch blocks that silently discard exceptions. Removing an import is not error handling. There are exactly two possible runtime outcomes of this change: (A) `atexit` is no longer referenced anywhere in the file body, making this a clean removal of a dead import with zero runtime effect. (B) `atexit` is still referenced in the body, producing a loud, immediate `NameError: name 'atexit' is not defined` the moment the registration code runs. Outcome B is the opposite of silent -- it is a hard crash. Neither outcome constitutes 'silent error swallowing' as defined by C-001. The Challenger's framing ('silently disabling the cleanup path') only holds if the NameError were somehow caught and suppressed, but there is zero evidence of that in this diff. The far more probable interpretation is that this is a routine removal of a dead import following an earlier change that removed the actual `atexit` usage.",
+          "evidence": "C-001 text: 'All catch blocks must log, re-throw, or return a typed error.' The constraint is scoped to catch blocks, not import statements. A removed import either has no effect (unused) or fails loudly (NameError). The diff shows: old_string has `import atexit\\nimport os`, new_string has `import os`. No catch block is touched."
+        },
+        {
+          "finding_index": 1,
+          "position": "MITIGATE",
+          "argument": "The Challenger's C-007 concern is explicitly marked as speculative ('a concern, not a confirmed violation') and depends on an assumption that `atexit` was performing governance-critical work such as a final ledger flush or chain integrity check. This assumption is not supported by the architecture. `cli/commands.py` is the user-facing command layer (verify, ledger, stats, constitution). Ledger writes and chain operations are owned by `ledger/chain.py`. Using `atexit` in the CLI command layer to guarantee ledger durability would be an architectural smell -- the pipeline stages already return typed results, and the ledger is written synchronously within those stages. Even if an `atexit` handler existed in commands.py for some minor cleanup (e.g., temp file removal or console reset), its absence does not weaken the core governance pipeline, which lives in pipeline/ and ledger/. The C-007 scope is 'challenger, defender, oracle, ledger, constitution' -- the CLI command module is one abstraction layer above this. The risk is real only in the hypothetical where `atexit` was the sole durability guarantee for a critical operation, and there is no evidence that was the case.",
+          "evidence": "C-007 scope: 'Changes to the governance pipeline itself (challenger, defender, oracle, ledger, constitution) must not weaken enforcement, bypass verification, or disable logging.' cli/commands.py is not listed in that scope. The file sits above the pipeline, orchestrating user commands. Core ledger writes happen in ledger/chain.py, not in the CLI layer."
+        }
+      ],
+      "summary": "Both Challenger findings are speculative and not grounded in the diff: the C-001 claim misapplies the constraint (which targets catch blocks, not imports), and the C-007 claim rests on an unsupported assumption that `atexit` was performing governance-critical work in the CLI layer rather than being a dead import; this change is almost certainly a safe dead-import cleanup.",
+      "_tokens": {
+        "input": 6170,
+        "output": 2150
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The proposed change removes an unused `import atexit` from cli/commands.py while leaving `import os` intact. The Challenger raised two speculative concerns (C-001 and C-007) that hinge on unverified assumptions about `atexit` usages elsewhere in the file. The Defender correctly rebuts both: (1) C-001 is scoped to catch blocks that swallow exceptions, not to import removal. If `atexit` were still referenced, a NameError would be raised loudly, which is the opposite of silent swallowing. If it is not referenced, this is a clean dead-import removal. (2) C-007 applies to the governance pipeline (challenger/defender/oracle/ledger/constitution). cli/commands.py is the CLI orchestration layer, and there is no evidence in the diff that `atexit` was performing a governance-critical durability function; ledger writes are synchronous in ledger/chain.py per the project architecture documented in CLAUDE.md. No other constraint is implicated by removing an unused stdlib import: no new dependency (C-003), no type annotation touched (C-004), no secret (C-006), no ledger modification (C-008), and scope is limited to the single stated file (C-002).",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "C-001 targets catch blocks that swallow exceptions. Import removal either has no effect or produces a loud NameError, per Defender rebuttal 0."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is confined to the single file cli/commands.py as stated."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "SATISFIED",
+          "note": "No new dependency added; an import is being removed."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No type annotations are touched."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "No secrets introduced."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "cli/commands.py is the CLI layer, not the governance pipeline core (challenger/defender/oracle/ledger/constitution). Defender rebuttal 1 correctly locates ledger durability in ledger/chain.py, not the CLI layer."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger entries are touched."
+        }
+      ],
+      "advisories": [
+        "Verify that no remaining references to `atexit` exist in cli/commands.py after this edit. If any usage remains, a NameError will be raised at runtime; this is loud (constitutionally acceptable) but should be caught by the pre-ship lint/type-check per project workflow.",
+        "If an `atexit` handler was previously registered here for cleanup, confirm its removal was intentional and covered by a prior governed change."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 10160,
+        "output": 1106
+      }
+    },
+    "entry_hash": "d78c561b684d92239fdb0543fb0ef0949be9d6581d1291427a3ddabf90c0d9f6"
   }
 ]
