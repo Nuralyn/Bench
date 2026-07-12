@@ -91,6 +91,71 @@ class BuildResponseFromVerdictTests(unittest.TestCase):
             resp["hookSpecificOutput"]["permissionDecision"], "allow"
         )
 
+    def test_veto_reason_carries_constraint_tag(self) -> None:
+        resp: dict = build_response_from_verdict({
+            "verdict": "VETO",
+            "reason": "Silent exception swallowing detected.",
+            "remediation": "Log or re-throw in the catch block.",
+            "violated_constraints": ["C-001", "C-004"],
+        })
+        hook_out: dict = resp["hookSpecificOutput"]
+        self.assertEqual(
+            hook_out["permissionDecisionReason"],
+            "BENCH VETO [C-001, C-004]: Silent exception swallowing detected.",
+        )
+        self.assertEqual(
+            hook_out["additionalContext"],
+            "Remediation: Log or re-throw in the catch block.",
+        )
+
+    def test_veto_reason_without_citations_omits_tag(self) -> None:
+        resp: dict = build_response_from_verdict({
+            "verdict": "VETO",
+            "reason": "Rejected.",
+            "remediation": "Fix it.",
+        })
+        reason: str = resp["hookSpecificOutput"]["permissionDecisionReason"]
+        self.assertEqual(reason, "BENCH VETO: Rejected.")
+
+    def test_veto_default_remediation_is_prefixed(self) -> None:
+        resp: dict = build_response_from_verdict({"verdict": "VETO"})
+        ctx: str = resp["hookSpecificOutput"]["additionalContext"]
+        self.assertTrue(ctx.startswith("Remediation: "))
+
+    def test_pass_appends_advisories(self) -> None:
+        resp: dict = build_response_from_verdict({
+            "verdict": "PASS",
+            "advisories": ["Consider a test for the new branch."],
+        })
+        ctx: str = resp["hookSpecificOutput"]["additionalContext"]
+        self.assertEqual(
+            ctx,
+            "Bench governance: PASS. All constraints satisfied. "
+            "Advisories: Consider a test for the new branch.",
+        )
+
+    def test_pass_without_advisories_keeps_fixed_message(self) -> None:
+        resp: dict = build_response_from_verdict({
+            "verdict": "PASS",
+            "advisories": [],
+        })
+        self.assertEqual(
+            resp["hookSpecificOutput"]["additionalContext"],
+            "Bench governance: PASS. All constraints satisfied.",
+        )
+
+    def test_pass_ignores_non_string_advisories(self) -> None:
+        resp: dict = build_response_from_verdict({
+            "verdict": "PASS",
+            "advisories": [None, 42, "", "Real advisory."],
+        })
+        ctx: str = resp["hookSpecificOutput"]["additionalContext"]
+        self.assertEqual(
+            ctx,
+            "Bench governance: PASS. All constraints satisfied. "
+            "Advisories: Real advisory.",
+        )
+
 
 class MainFlowTests(unittest.TestCase):
     def _run_main_with_stdin(self, stdin_content: str) -> tuple[int, str]:

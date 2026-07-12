@@ -108,6 +108,37 @@ class HappyPathTests(unittest.TestCase):
         self.assertEqual(result["verdict"], "VETO")
         self.assertIsNotNone(result["remediation"])
 
+    def test_violated_constraints_and_advisories_surfaced(
+        self, mock_const: MagicMock, mock_chall: MagicMock,
+        mock_def: MagicMock, mock_oracle: MagicMock, mock_ledger: MagicMock,
+    ) -> None:
+        mock_const.return_value = _MOCK_CONSTITUTION
+        mock_chall.return_value = _findings_challenger()
+        mock_def.return_value = _rebuttal_defender()
+        oracle: dict = _veto_oracle()
+        oracle["constraint_citations"] = [
+            {"constraint_id": "C-001", "disposition": "VIOLATED", "note": "x"},
+            {"constraint_id": "C-002", "disposition": "SATISFIED", "note": "y"},
+            {"constraint_id": "C-004", "disposition": "VIOLATED", "note": "z"},
+            {"constraint_id": "C-001", "disposition": "VIOLATED", "note": "dup"},
+        ]
+        oracle["advisories"] = ["Add a test."]
+        mock_oracle.return_value = oracle
+        result: dict = run_governance_pipeline("Write", _TOOL_INPUT, _DIFF)
+        self.assertEqual(result["violated_constraints"], ["C-001", "C-004"])
+        self.assertEqual(result["advisories"], ["Add a test."])
+
+    def test_missing_citations_yield_empty_violated_list(
+        self, mock_const: MagicMock, mock_chall: MagicMock,
+        mock_def: MagicMock, mock_oracle: MagicMock, mock_ledger: MagicMock,
+    ) -> None:
+        mock_const.return_value = _MOCK_CONSTITUTION
+        mock_chall.return_value = _clear_challenger()
+        mock_oracle.return_value = _pass_oracle()
+        result: dict = run_governance_pipeline("Write", _TOOL_INPUT, _DIFF)
+        self.assertEqual(result["violated_constraints"], [])
+        self.assertEqual(result["advisories"], [])
+
 
 @patch("pipeline.runner.append_entry", return_value={})
 @patch("pipeline.runner.run_oracle")

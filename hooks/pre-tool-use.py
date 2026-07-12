@@ -204,19 +204,41 @@ def build_deny_response(reason: str, remediation: str) -> dict[str, Any]:
 
 
 def build_response_from_verdict(verdict: dict[str, Any]) -> dict[str, Any]:
-    """Translate a governance verdict into the Claude Code hook response shape."""
+    """Translate a governance verdict into the Claude Code hook response shape.
+
+    VETO: reason is 'BENCH VETO [C-XXX]: <reasoning>' (constraint tag
+    omitted when the pipeline surfaced no violated constraints) and
+    additionalContext carries a 'Remediation: ' prefixed message, per the
+    documented hook response format. PASS: fixed sentence plus any Oracle
+    advisories.
+    """
     decision: str = verdict.get("verdict", "PASS")
     if decision == "VETO":
-        reason: str = verdict.get(
-            "reason", "BENCH VETO: change rejected by governance pipeline."
-        )
-        remediation: str = verdict.get(
-            "remediation", "See ledger entry for details."
-        )
+        reasoning: Any = verdict.get("reason")
+        if not isinstance(reasoning, str) or not reasoning:
+            reasoning = "Change rejected by governance pipeline."
+        violated: Any = verdict.get("violated_constraints")
+        if isinstance(violated, list) and violated:
+            tag: str = ", ".join(str(cid) for cid in violated)
+            reason: str = f"BENCH VETO [{tag}]: {reasoning}"
+        else:
+            reason = f"BENCH VETO: {reasoning}"
+        remediation_raw: Any = verdict.get("remediation")
+        if isinstance(remediation_raw, str) and remediation_raw:
+            remediation: str = f"Remediation: {remediation_raw}"
+        else:
+            remediation = "Remediation: see ledger entry for details."
         return build_deny_response(reason, remediation)
-    return build_allow_response(
-        "Bench governance: PASS. All constraints satisfied."
-    )
+
+    message: str = "Bench governance: PASS. All constraints satisfied."
+    advisories: Any = verdict.get("advisories")
+    if isinstance(advisories, list):
+        advisory_texts: list[str] = [
+            a for a in advisories if isinstance(a, str) and a
+        ]
+        if advisory_texts:
+            message = f"{message} Advisories: " + " | ".join(advisory_texts)
+    return build_allow_response(message)
 
 
 def main() -> int:
