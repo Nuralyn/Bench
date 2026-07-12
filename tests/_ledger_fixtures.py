@@ -3,9 +3,10 @@
 Single source of truth for building correctly-linked hash chains so the
 entry shape lives in one place. Named with a leading underscore so
 unittest discovery (pattern ``test*.py``) never collects it as a test
-module; import it as ``from _ledger_fixtures import build_valid_chain``
-(the tests directory is on sys.path both under discovery and when a
-test file runs as a script).
+module; import it as ``from tests._ledger_fixtures import
+build_valid_chain`` (the repo root is on sys.path under discovery,
+module-name, and script-style runs, and ``tests/__init__.py`` makes the
+package resolve here even if another ``tests`` exists on sys.path).
 """
 
 import sys

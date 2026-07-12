@@ -8,7 +8,7 @@ Synthetic chains come from the shared fixture module
 tests/_ledger_fixtures.py (build_valid_chain), which already exists in
 the repository and is the single source of truth for the entry shape.
 
-Run: python -m unittest discover -s tests -p test_verify.py -v
+Run: python -m unittest tests.test_verify -v
 """
 
 import json
@@ -23,7 +23,7 @@ _REPO_ROOT: Path = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from _ledger_fixtures import build_valid_chain as _build_valid_chain  # noqa: E402
+from tests._ledger_fixtures import build_valid_chain as _build_valid_chain  # noqa: E402
 from ledger.chain import compute_entry_hash  # noqa: E402
 from ledger.verify import verify_chain  # noqa: E402
 
