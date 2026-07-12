@@ -12723,5 +12723,521 @@
       }
     },
     "entry_hash": "ac0df6710fa2d5a0e8373ae6c04934dffb337c877aae29c14d09d54c6c6acf64"
+  },
+  {
+    "entry_id": "582d6042-c63e-4219-9351-86114138a4aa",
+    "timestamp": "2026-07-12T19:50:21.139605+00:00",
+    "previous_hash": "ac0df6710fa2d5a0e8373ae6c04934dffb337c877aae29c14d09d54c6c6acf64",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "tests\\test_challenger.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "tests\\test_challenger.py",
+        "change_type": "modify",
+        "old_string": "import unittest\nfrom typing import Any\nfrom unittest.mock import MagicMock, patch",
+        "new_string": "import unittest\nfrom unittest.mock import MagicMock, patch"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-004",
+          "severity": "CONCERN",
+          "location": "tests/test_challenger.py: import section",
+          "evidence": "- from typing import Any",
+          "reasoning": "The diff removes the `from typing import Any` import. C-004 prohibits removing or weakening existing type annotations. If `Any` was actively used in function signatures or variable annotations elsewhere in this test file, removing the import would cause a NameError at runtime, effectively destroying those annotations. The full file body was not provided in context, so it cannot be confirmed that `Any` is unused. If it is provably unused (e.g., by a linter audit), this is a clean dead-import removal and no violation exists. The Oracle should verify usage against the full file before allowing."
+        }
+      ],
+      "_tokens": {
+        "input": 5716,
+        "output": 2198
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "REBUT",
+          "argument": "The Challenger's concern is conditionally framed and ultimately rests on a misreading of what C-004 governs. C-004 states: 'Functions must not remove or weaken existing type annotations. Adding Any type or removing a typed return annotation is a violation.' The operative scope is function-level annotations, not import statements. Removing `from typing import Any` from an import block is not the same as removing a type annotation from a function signature. Even if `Any` were used somewhere in the file, the annotation text would still exist in the source; the import removal would produce a NameError at runtime, which is a correctness bug caught immediately by running the tests, not a governance violation under C-004. More substantively: if `Any` were still in active use, the pre-ship linting requirement in CLAUDE.md ('pre-ship audit must catch unused imports and unused variables that fail CI') would have flagged its removal as breaking. The inverse is also true: if linting passes after this change, it is proof that `Any` is not referenced anywhere in the file. Finally, C-004's rationale is to prevent weakening of type safety. Removing an unused import of `Any` is directionally aligned with that rationale, since `Any` is specifically cited in the constraint as a type addition that constitutes a violation. Cleaning up a dead import of the most type-unsafe type in the stdlib is consistent with, not hostile to, C-004's intent.",
+          "evidence": "C-004 text: 'Functions must not remove or weaken existing type annotations. Adding Any type or removing a typed return annotation is a violation.' The diff removes only an import statement, not a function annotation. CLAUDE.md pre-ship rule: 'pre-ship audit must catch unused imports and unused variables that fail CI', establishing that a passing lint is evidence of safe removal."
+        }
+      ],
+      "summary": "The change is a legitimate dead-import cleanup; C-004 governs function-level annotations, not import statements, and the pre-ship linting requirement provides the verification gate the Challenger correctly identified as needed.",
+      "_tokens": {
+        "input": 5963,
+        "output": 1594
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change removes an unused `from typing import Any` import from a test file. The Challenger raised a conditional C-004 concern, correctly noting it depends on whether `Any` is used elsewhere in the file. The Defender rebuts that C-004's operative scope is function-level annotations, and that CI lint enforcement would catch a broken import removal. I agree with the Defender: C-004 targets removal/weakening of annotations on functions, not import hygiene. Removing a dead import of `Any` is directionally aligned with C-004's rationale (Any is called out as the type-weakening addition to avoid). The change touches only test scaffolding, does not modify the governance pipeline (C-007 not implicated), does not touch the ledger (C-008 N/A), adds no dependency (C-003 N/A), introduces no secrets (C-006 N/A), and does not swallow errors (C-001 N/A). Scope is confined to a single test file's imports (C-002 satisfied). Advisory: if `Any` is in fact still referenced in the file body, the test will NameError on import and CI will catch it; that is a correctness matter, not a governance one.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error handling changed."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is confined to the stated test file."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Removes an import; adds no dependency."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "Defender correctly notes C-004 governs function annotations, not imports. Removing a dead `Any` import does not weaken any function signature."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new logic introduced; this is test-file cleanup."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No secrets involved."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Test file, not pipeline code."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Ledger untouched."
+        }
+      ],
+      "advisories": [
+        "Verify via lint/test run that `Any` is genuinely unused in tests/test_challenger.py before shipping; a NameError would surface at test import time."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 9428,
+        "output": 977
+      }
+    },
+    "entry_hash": "7c8c72775443c2db32016c66b24f11d75a058770a7b5f53ea4fc43c9a04b1b10"
+  },
+  {
+    "entry_id": "fd435c83-2c0d-4bf5-9ed8-01c4280ea6c8",
+    "timestamp": "2026-07-12T19:51:23.589581+00:00",
+    "previous_hash": "7c8c72775443c2db32016c66b24f11d75a058770a7b5f53ea4fc43c9a04b1b10",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "tests\\test_defender.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "tests\\test_defender.py",
+        "change_type": "modify",
+        "old_string": "import unittest\nfrom typing import Any\nfrom unittest.mock import MagicMock, patch",
+        "new_string": "import unittest\nfrom unittest.mock import MagicMock, patch"
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 5716,
+        "output": 2332
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change removes an unused `from typing import Any` import from a test file. Challenger found no issues (CLEAR) and Defender confirmed. Reviewing independently against the full constitution: C-001 (no error handling touched), C-002 (change is scoped to the stated test file), C-003 (removes an import rather than adding one; no new dependencies), C-004 (removes an unused type import from module scope, not a function signature annotation, so no existing type annotations are weakened), C-005 (test file cleanup, no new logic), C-006 (no secrets), C-007 (test file, not pipeline code), C-008 (no ledger interaction). The removal of the `Any` import is a cleanup of an unused import consistent with pre-ship hygiene, not a weakening of type safety per C-004.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error handling in diff."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change confined to tests/test_defender.py."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "SATISFIED",
+          "note": "Import removal, not addition."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "Removes an unused module-level import; no function annotation is weakened or replaced with Any."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new logic introduced."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No secrets."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Test file, not governance pipeline."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger interaction."
+        }
+      ],
+      "advisories": [
+        "Verify no remaining reference to `Any` exists in test_defender.py; otherwise this removal will produce a NameError at import time."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 8484,
+        "output": 759
+      }
+    },
+    "entry_hash": "28a2c792129ca7421dbcc330740d9231a32706e0cb1409950827572c6a4edfe1"
+  },
+  {
+    "entry_id": "22ba2eef-b536-4102-9c6f-135ff70f83a6",
+    "timestamp": "2026-07-12T19:53:23.955527+00:00",
+    "previous_hash": "28a2c792129ca7421dbcc330740d9231a32706e0cb1409950827572c6a4edfe1",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "tests\\test_oracle.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "tests\\test_oracle.py",
+        "change_type": "modify",
+        "old_string": "import unittest\nfrom typing import Any\nfrom unittest.mock import MagicMock, patch",
+        "new_string": "import unittest\nfrom unittest.mock import MagicMock, patch"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-004",
+          "severity": "CONCERN",
+          "location": "tests/test_oracle.py: import block (old line 2)",
+          "evidence": "- from typing import Any",
+          "reasoning": "The diff removes the `from typing import Any` import but no full file context was provided. Without seeing the rest of the file, it is impossible to confirm that `Any` is genuinely unused. Two failure modes exist: (1) if `Any` is still referenced in type annotations elsewhere in the file, the module will raise a NameError at import time, silently disabling all oracle tests; (2) if `Any` annotations were removed from function signatures as part of the same refactoring but outside this diff's view, that would constitute removing typed annotations \u2014 a direct C-004 violation invisible in this change alone. The constraint forbids weakening type annotations; this change may be benign cleanup or may mask a broader annotation removal. File context is needed to rule out the latter."
+        },
+        {
+          "constraint_id": "C-007",
+          "severity": "OBSERVATION",
+          "location": "tests/test_oracle.py (oracle pipeline test file)",
+          "evidence": "Removal of import in the test file covering the oracle pipeline component",
+          "reasoning": "test_oracle.py provides verification coverage for the Oracle, which is a core governance pipeline component. If the missing `Any` import causes the test file to fail at parse/import time, oracle tests stop executing without an explicit error visible to the pipeline operator. C-007 requires that changes to governance pipeline infrastructure not weaken enforcement or bypass verification. A silently broken test suite for the oracle satisfies that condition. This is conditional on whether `Any` is still referenced in the file \u2014 if it is genuinely unused, the concern dissolves."
+        }
+      ],
+      "_tokens": {
+        "input": 5716,
+        "output": 3138
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "MITIGATE",
+          "argument": "The Challenger correctly identifies that full file context is absent, but the concern is conditional and somewhat misdirected. C-004 targets removal of type annotations from *function signatures*, not removal of an import that enables them. Removing `from typing import Any` while `Any` is still referenced in annotations would produce an immediate, loud NameError at import time (not a silent weakening). More importantly: if this diff is the complete change, the absence of any accompanying annotation edits is strong evidence that `Any` was simply unused. Python linters (flake8/ruff) and IDEs flag unused imports as warnings; removing them is canonical hygiene. The failure mode the Challenger describes (removing `Any` usage in signatures alongside removing the import, outside the diff's view) would require a multi-file or multi-hunk edit that is not present here. The risk is real only if there is a second, unshown hunk removing `Any` from signatures - at which point the C-004 violation would be in that hunk, not this one. I concede the Challenger is right to flag missing context, but the practical risk of this specific line removal being a C-004 violation is low.",
+          "evidence": "The diff shows only the removal of `from typing import Any` with no corresponding changes to function signatures or annotation usage. If `Any` were in active use, a NameError would appear on first test run, making it immediately visible, not a silent governance failure."
+        },
+        {
+          "finding_index": 1,
+          "position": "REBUT",
+          "argument": "The Challenger's C-007 observation rests on a factually incorrect premise: that a missing import would *silently* disable oracle tests. It would not. A NameError at module import time causes pytest to emit an explicit `ERROR collecting tests/test_oracle.py` with a full traceback. This is the opposite of silent - it is a loud, unmistakable test-suite failure. C-007 prohibits changes that 'weaken enforcement or bypass verification.' A collection error does not bypass verification; it halts the run with a clear signal. The concern would only hold if the breakage were invisible, which NameError import failures are not. The observation is labeled correctly as OBSERVATION rather than a harder finding, but even as an observation it overstates the risk by characterizing a loud failure mode as a silent one.",
+          "evidence": "pytest behavior on import-time NameError: outputs `ERROR tests/test_oracle.py - NameError: name 'Any' is not defined` and marks the collection as failed with exit code 2, which is immediately visible to any CI or operator running the test suite."
+        }
+      ],
+      "summary": "The change is benign import cleanup with no direct evidence of a C-004 or C-007 violation; the Challenger's concerns are conditional hypotheticals, and the more serious premise (silent test-suite breakage) is factually incorrect since NameError at import time is a loud pytest failure, not a silent one.",
+      "_tokens": {
+        "input": 6201,
+        "output": 2041
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change removes an unused `from typing import Any` import from a test file. The Challenger's C-004 concern is conditional on `Any` still being referenced elsewhere in the file, in which case the Defender correctly notes a NameError would be raised loudly at pytest collection time (not a silent weakening of type annotations). C-004 targets weakening of function signature annotations; removing an import alone does not weaken annotations, and if it did, the failure mode is loud, not silent. The Challenger's C-007 observation similarly presumes silent breakage, which the Defender correctly refutes: pytest surfaces import-time NameErrors as explicit collection errors with non-zero exit codes, satisfying the visibility requirement implicit in C-007. No other constraints are implicated: no dependencies added (C-003), no secrets (C-006), no ledger changes (C-008), no scope creep (C-002 - the change is confined to the stated file), and no error-handling code touched (C-001).",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error handling code modified."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change confined to tests/test_oracle.py, matching the stated file path."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "SATISFIED",
+          "note": "Import removal reduces surface; no new dependencies introduced."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "Removing an unused import is not the removal or weakening of a type annotation. Per Defender rebuttal, any remaining `Any` reference would produce a loud NameError, not a silent annotation weakening."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new logic introduced; this is import hygiene in a test file."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No secrets or credentials involved."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "Defender correctly notes that pytest surfaces import-time NameErrors as loud collection failures, so enforcement is not silently weakened. Test file cleanup does not bypass verification."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger modification."
+        }
+      ],
+      "advisories": [
+        "Recommend running the test suite (or at minimum importing tests/test_oracle.py) after this change to confirm `Any` is genuinely unused and no NameError surfaces. The Challenger correctly flagged that full-file context was unavailable to this pipeline run."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 10059,
+        "output": 1044
+      }
+    },
+    "entry_hash": "628cf28d18f70dce66135709f53880b3c1468e18a67e9e4a9b0912f98ad25195"
+  },
+  {
+    "entry_id": "6e5c80f9-22be-48fc-b0a4-479b32545baf",
+    "timestamp": "2026-07-12T19:55:51.240055+00:00",
+    "previous_hash": "628cf28d18f70dce66135709f53880b3c1468e18a67e9e4a9b0912f98ad25195",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "tests\\test_runner.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "tests\\test_runner.py",
+        "change_type": "modify",
+        "old_string": "import unittest\nfrom typing import Any\nfrom unittest.mock import MagicMock, call, patch",
+        "new_string": "import unittest\nfrom unittest.mock import MagicMock, patch"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-005",
+          "severity": "CONCERN",
+          "location": "tests\\test_runner.py - import statement, line 3",
+          "evidence": "- from unittest.mock import MagicMock, call, patch\n+ from unittest.mock import MagicMock, patch",
+          "reasoning": "`call` is used exclusively in mock call-sequence assertions such as `mock.assert_has_calls([call(arg1), call(arg2)])` and `assert mock.call_args_list == [call(...)]`. Its removal from the import list implies that all `call`-based assertions in the test body were also removed (otherwise the file would raise a NameError at runtime). If those assertions existed, they were almost certainly verifying the sequential orchestration of the pipeline stages \u2014 the order in which Challenger, Defender, and Oracle are invoked and with what arguments. Losing that coverage reduces the verifiable guarantees on runner.py's orchestration contract. This is not necessarily a violation of the literal text of C-005 (which speaks to new logic), but the spirit of C-005 is test coverage as verification; silently discarding existing sequence-verification assertions is a meaningful regression in that coverage."
+        },
+        {
+          "constraint_id": "C-004",
+          "severity": "OBSERVATION",
+          "location": "tests\\test_runner.py - import statement, line 2",
+          "evidence": "- from typing import Any",
+          "reasoning": "If `Any` was actively used in type annotations on test helper function signatures or class-level attributes in this file, its removal implies those annotations were also changed or removed in the broader changeset (not visible in this diff fragment). The C-004 rule prohibits removing or weakening existing type annotations. However, removing the import of `Any` is at least as likely to represent cleanup of a genuinely unused import \u2014 which would be a positive change. Without seeing the full file context, this cannot be elevated to a CONCERN, but the Oracle should confirm that no function signatures in the file previously carried `Any` annotations that have now been silently dropped."
+        }
+      ],
+      "_tokens": {
+        "input": 5718,
+        "output": 4073
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "MITIGATE",
+          "argument": "The Challenger's concern is logically constructed but ultimately speculative given the diff's scope. The change presented is a targeted string replacement of exactly three import lines. If `call` were actively used in the test body, this change would produce a NameError at runtime, making the test file non-functional. That is a self-defeating outcome that a passing CI run would immediately expose. The two plausible interpretations are: (A) `call` was an unused import being cleaned up, which is a net positive, or (B) companion changes to the test body are being made in separate operations not shown in this diff fragment. In case B, the governance pipeline would evaluate those body changes independently. C-005 explicitly addresses 'new functions or branches of logic' requiring test coverage. It does not govern removal of existing tests. The Challenger correctly frames this as a spirit-of-C-005 concern rather than a literal violation. The practical risk is low because a broken import causes immediate, visible test failure rather than silent regression. This is mitigated, not dismissed.",
+          "evidence": "The change type is 'modify' with a targeted old_string/new_string pair covering only the import block. The old_string is three lines; the new_string is two lines. No test body changes appear in this diff. A NameError from a missing `call` reference would be caught by any test run, making silent regression implausible if `call` was in active use."
+        },
+        {
+          "finding_index": 1,
+          "position": "REBUT",
+          "argument": "C-004 states: 'Functions must not remove or weaken existing type annotations. Adding Any type or removing a typed return annotation is a violation.' The constraint governs function signatures, not import statements. Removing `from typing import Any` is not a C-004 violation unless function signatures in the file previously carried `Any` annotations that are simultaneously removed or weakened. The import removal alone is neutral to positive: if `Any` was genuinely unused, this is dead-import cleanup. If `Any` was used in annotations, those annotations would need to change elsewhere in the file, and that change would be the C-004 violation, not this import line. The Challenger correctly self-limits this to an OBSERVATION rather than a CONCERN, and their own reasoning concludes removal is 'at least as likely to represent cleanup of a genuinely unused import.' This does not rise to a constitutional finding.",
+          "evidence": "C-004 rule text: 'Functions must not remove or weaken existing type annotations. Adding Any type or removing a typed return annotation is a violation.' The constraint's examples target function-level type annotations, not the presence or absence of an import statement. The Challenger's own assessment rates this only as OBSERVATION and gives cleanup as the most likely explanation."
+        }
+      ],
+      "summary": "The change is a plausible dead-import cleanup in a test file; neither finding constitutes a clear constitutional violation, as the `call` concern is speculative and self-defeating if wrong (NameError), and the `Any` removal does not itself breach C-004 which governs function signatures rather than import declarations.",
+      "_tokens": {
+        "input": 6275,
+        "output": 2011
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The proposed change is a targeted removal of two unused imports (`Any` from typing and `call` from unittest.mock) in a test file. The Challenger's C-005 finding is explicitly labeled a CONCERN based on speculation about companion changes not visible in this diff; the Defender correctly notes that C-005 governs 'new functions or branches of logic,' not the removal of existing assertions, and that any orphaned `call` reference would produce an immediate NameError (self-defeating silent regression). The Challenger's C-004 finding is explicitly labeled an OBSERVATION, and the Defender's rebuttal is correct that C-004's rule text governs function signatures, not import statements. Removing an unused `typing.Any` import does not weaken any function annotation on its own. The change does not touch pipeline/, ledger/, hooks/, or bench.json, so C-007 and C-008 are not implicated. No secrets, no new dependencies, no error handling changes are present.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error handling changes in this diff."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is confined to the test file's import block."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "SATISFIED",
+          "note": "No new dependencies added; imports are being removed."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "Per Defender rebuttal on finding 1: C-004 governs function signatures, not import statements. No annotation is weakened by the diff shown."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "SATISFIED",
+          "note": "Per Defender mitigation on finding 0: C-005 addresses coverage for new logic, not import cleanup. A stale `call` reference would fail loudly via NameError, so silent regression is implausible."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No secrets involved."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Change is in tests/, not the pipeline itself."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger modifications."
+        }
+      ],
+      "advisories": [
+        "The Challenger's speculation is worth noting: if the wider changeset removes `call`-based sequence assertions from the test body, that should be justified separately. Reviewers should confirm the full file no longer references `call` or `Any` after this edit lands, and that any removed sequence-verification coverage was intentional."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 10195,
+        "output": 1027
+      }
+    },
+    "entry_hash": "b4495d5878650de2927b31e2d5f6e9a8fc4e30f0ae034daf141f2bf57ebbc8a7"
+  },
+  {
+    "entry_id": "0ff22b80-4050-430b-8cd4-62cf0f472d50",
+    "timestamp": "2026-07-12T19:56:50.068355+00:00",
+    "previous_hash": "b4495d5878650de2927b31e2d5f6e9a8fc4e30f0ae034daf141f2bf57ebbc8a7",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "tests\\test_hook.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "tests\\test_hook.py",
+        "change_type": "modify",
+        "old_string": "from typing import Any\nfrom unittest.mock import MagicMock, patch",
+        "new_string": "from unittest.mock import MagicMock, patch"
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 11705,
+        "output": 2015
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change removes an unused import (`from typing import Any`) from a test file. Challenger reported CLEAR and Defender confirmed. Reviewing against all constraints: C-001 (no error handling touched), C-002 (change is confined to tests/test_hook.py, scope-appropriate cleanup), C-003 (removes an import, does not add one), C-004 (removes an unused `Any` import from top-level imports; does not remove or weaken any function annotation, in fact reduces reliance on `Any` which C-004 explicitly discourages), C-005 (test file itself; no new logic), C-006 (no secrets), C-007 (test file, not pipeline internals), C-008 (no ledger interaction). Aligns with pre-ship checklist requirement to catch unused imports.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error handling modified."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change confined to a single test file."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "SATISFIED",
+          "note": "Removes an import; no new dependencies."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "Removes an unused `Any` import; no function annotations weakened."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new logic introduced."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No secrets involved."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Test file, not pipeline code."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Ledger untouched."
+        }
+      ],
+      "advisories": [
+        "Verify no remaining reference to `Any` exists in tests/test_hook.py after this edit; if any usage remains, the import removal would break the module."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 8468,
+        "output": 756
+      }
+    },
+    "entry_hash": "d476b586018fc97905220e4502d2740f969f58b3fdc0267c6661b893ce5f5146"
   }
 ]
