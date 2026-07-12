@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any
 
 _DEFAULT_LEDGER_PATH: str = "ledger/bench-ledger.json"
-_META_FILENAME: str = "ledger-meta.json"
+META_FILENAME: str = "ledger-meta.json"
 _GENESIS_MARKER: str = "GENESIS"
 _MAX_FIELD_CHARS: int = 10_000
 _MAX_STAGE_CHARS: int = 50_000
@@ -174,7 +174,7 @@ def append_entry(
     existing.append(entry)
     _atomic_write_json(file_path, existing)
 
-    meta_path: Path = directory / _META_FILENAME
+    meta_path: Path = directory / META_FILENAME
     _update_meta(meta_path, entry, len(existing))
 
     return entry

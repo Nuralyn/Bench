@@ -1,8 +1,12 @@
-"""Tests for ledger.verify — chain validation and tamper detection.
+"""Tests for ledger.verify: chain validation and tamper detection.
 
 Covers: verify_chain across all 7 failure types (READ_ERROR, PARSE_ERROR,
 SCHEMA_ERROR, HASH_MISMATCH, INVALID_GENESIS, CHAIN_BREAK, META_MISMATCH),
 plus valid chains of varying lengths and the ledger-meta.json anchor.
+
+Synthetic chains come from the shared fixture module
+tests/_ledger_fixtures.py (build_valid_chain), which already exists in
+the repository and is the single source of truth for the entry shape.
 
 Run: python -m unittest tests.test_verify -v
 """
@@ -14,30 +18,14 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from typing import Any
 
 _REPO_ROOT: Path = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from tests._ledger_fixtures import build_valid_chain as _build_valid_chain  # noqa: E402
 from ledger.chain import compute_entry_hash  # noqa: E402
 from ledger.verify import verify_chain  # noqa: E402
-
-
-def _build_valid_chain(n: int) -> list[dict]:
-    """Build a correctly-linked chain of n entries starting from GENESIS."""
-    entries: list[dict] = []
-    for i in range(n):
-        entry: dict[str, Any] = {
-            "entry_id": f"id-{i}",
-            "timestamp": f"2026-01-01T00:00:{i:02d}+00:00",
-            "previous_hash": "GENESIS" if i == 0 else entries[i - 1]["entry_hash"],
-            "constitution_hash": "abc",
-            "change": {"file": "test.py", "tool": "Write"},
-        }
-        entry["entry_hash"] = compute_entry_hash(entry)
-        entries.append(entry)
-    return entries
 
 
 class VerifyChainValidTests(unittest.TestCase):

@@ -9,8 +9,7 @@ Run: python -m unittest tests.test_runner -v
 
 import sys
 import unittest
-from typing import Any
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 from pathlib import Path
 

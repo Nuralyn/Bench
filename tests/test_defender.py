@@ -9,7 +9,6 @@ Run: python -m unittest tests.test_defender -v
 
 import sys
 import unittest
-from typing import Any
 from unittest.mock import MagicMock, patch
 
 from pathlib import Path
