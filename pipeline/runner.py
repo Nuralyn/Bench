@@ -153,6 +153,8 @@ def run_governance_pipeline(
             "verdict": oracle_result["verdict"],
             "reason": oracle_result["reasoning"],
             "remediation": oracle_result["remediation"],
+            "violated_constraints": _violated_constraint_ids(oracle_result),
+            "advisories": oracle_result.get("advisories", []),
             "challenger": challenger_result,
             "defender": defender_result,
             "oracle": oracle_result,
@@ -162,6 +164,29 @@ def run_governance_pipeline(
         tool_name,
         diff_info,
     )
+
+
+def _violated_constraint_ids(oracle_result: dict[str, Any]) -> list[str]:
+    """Constraint IDs the Oracle cited as VIOLATED, in citation order.
+
+    Feeds the hook's documented 'BENCH VETO [C-XXX]: ...' reason format.
+    Defensive against malformed citations: anything that is not a dict
+    with a non-empty string constraint_id is skipped (the Oracle schema
+    validation should prevent that, but the hook must not depend on it).
+    """
+    ids: list[str] = []
+    citations: Any = oracle_result.get("constraint_citations")
+    if not isinstance(citations, list):
+        return ids
+    for citation in citations:
+        if (
+            isinstance(citation, dict)
+            and citation.get("disposition") == "VIOLATED"
+        ):
+            cid: Any = citation.get("constraint_id")
+            if isinstance(cid, str) and cid and cid not in ids:
+                ids.append(cid)
+    return ids
 
 
 def _finalize(
