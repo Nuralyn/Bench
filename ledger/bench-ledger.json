@@ -12237,5 +12237,378 @@
       }
     },
     "entry_hash": "d74910aa69d68d685ce8776fa64854047dd80d831211c90ea35aff930d35f38b"
+  },
+  {
+    "entry_id": "5b254f0b-26a4-4ecc-aefe-a500f24438c3",
+    "timestamp": "2026-07-12T19:36:51.474716+00:00",
+    "previous_hash": "d74910aa69d68d685ce8776fa64854047dd80d831211c90ea35aff930d35f38b",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "tests\\test_stats.py",
+      "tool": "Write",
+      "diff_summary": {
+        "file_path": "tests\\test_stats.py",
+        "change_type": "create",
+        "content": "\"\"\"Tests for utils.stats \u00e2\u20ac\u201d shared ledger statistics helpers.\n\nCovers: entry_has_pipeline_error across stages, pct zero-guard and\nformatting, and compute_ledger_stats aggregation (PASS/VETO counts,\nstring and dict citation shapes, unexpected citation types, most_cited\nselection, pipeline-error tallying).\n\nRun: python -m unittest discover -s tests -p test_stats.py -v\n\"\"\"\n\nimport sys\nimport unittest\nfrom pathlib import Path\n\n_REPO_ROOT: Path = Path(__file__).resolve().parent.parent\nif str(_REPO_ROOT) not in sys.path:\n    sys.path.insert(0, str(_REPO_ROOT))\n\nfrom utils.stats import (  # noqa: E402\n    compute_ledger_stats,\n    entry_has_pipeline_error,\n    pct,\n)\n\n\ndef _pass_entry() -> dict:\n    return {\"oracle\": {\"verdict\": \"PASS\"}}\n\n\ndef _veto_entry(citations: list) -> dict:\n    return {\"oracle\": {\"verdict\": \"VETO\", \"constraint_citations\": citations}}\n\n\nclass EntryHasPipelineErrorTests(unittest.TestCase):\n    def test_clean_entry_is_false(self) -> None:\n        self.assertFalse(entry_has_pipeline_error(_pass_entry()))\n\n    def test_error_in_each_stage_is_detected(self) -> None:\n        for stage in (\"challenger\", \"defender\", \"oracle\"):\n            entry: dict = {stage: {\"status\": \"PIPELINE_ERROR\"}}\n            self.assertTrue(entry_has_pipeline_error(entry), stage)\n\n    def test_non_dict_stage_is_ignored(self) -> None:\n        self.assertFalse(\n            entry_has_pipeline_error({\"challenger\": \"PIPELINE_ERROR\"})\n        )\n\n    def test_empty_entry_is_false(self) -> None:\n        self.assertFalse(entry_has_pipeline_error({}))\n\n\nclass PctTests(unittest.TestCase):\n    def test_zero_total_returns_zero_percent(self) -> None:\n        self.assertEqual(pct(5, 0), \"0.0%\")\n\n    def test_negative_total_returns_zero_percent(self) -> None:\n        self.assertEqual(pct(1, -3), \"0.0%\")\n\n    def test_formats_one_decimal(self) -> None:\n        self.assertEqual(pct(1, 3), \"33.3%\")\n        self.assertEqual(pct(2, 2), \"100.0%\")\n        self.assertEqual(pct(0, 7), \"0.0%\")\n\n\nclass ComputeLedgerStatsTests(unittest.TestCase):\n    def test_empty_ledger(self) -> None:\n        stats: dict = compute_ledger_stats([])\n        self.assertEqual(stats[\"total\"], 0)\n        self.assertEqual(stats[\"passed\"], 0)\n        self.assertEqual(stats[\"vetoed\"], 0)\n        self.assertEqual(stats[\"pipeline_errors\"], 0)\n        self.assertIsNone(stats[\"most_cited\"])\n\n    def test_pass_and_veto_counts(self) -> None:\n        entries: list[dict] = [\n            _pass_entry(),\n            _pass_entry(),\n            _veto_entry([\"C-001\"]),\n        ]\n        stats: dict = compute_ledger_stats(entries)\n        self.assertEqual(stats[\"total\"], 3)\n        self.assertEqual(stats[\"passed\"], 2)\n        self.assertEqual(stats[\"vetoed\"], 1)\n\n    def test_string_citations_counted(self) -> None:\n        entries: list[dict] = [\n            _veto_entry([\"C-001\", \"C-002\"]),\n            _veto_entry([\"C-001\"]),\n        ]\n        stats: dict = compute_ledger_stats(entries)\n        self.assertEqual(stats[\"most_cited\"], (\"C-001\", 2))\n\n    def test_dict_citations_counted(self) -> None:\n        entries: list[dict] = [\n            _veto_entry([\n                {\"constraint_id\": \"C-007\", \"disposition\": \"VIOLATED\"},\n                {\"constraint_id\": \"C-007\", \"disposition\": \"VIOLATED\"},\n            ]),\n        ]\n        stats: dict = compute_ledger_stats(entries)\n        self.assertEqual(stats[\"most_cited\"], (\"C-007\", 2))\n\n    def test_unexpected_citation_types_skipped(self) -> None:\n        entries: list[dict] = [_veto_entry([42, None, [\"nested\"]])]\n        stats: dict = compute_ledger_stats(entries)\n        self.assertEqual(stats[\"vetoed\"], 1)\n        self.assertIsNone(stats[\"most_cited\"])\n\n    def test_dict_citation_without_string_id_skipped(self) -> None:\n        entries: list[dict] = [_veto_entry([{\"constraint_id\": 3}])]\n        stats: dict = compute_ledger_stats(entries)\n        self.assertIsNone(stats[\"most_cited\"])\n\n    def test_pipeline_errors_counted_independently(self) -> None:\n        entries: list[dict] = [\n            {\n                \"oracle\": {\"verdict\": \"PASS\"},\n                \"challenger\": {\"status\": \"PIPELINE_ERROR\"},\n            },\n            _pass_entry(),\n        ]\n        stats: dict = compute_ledger_stats(entries)\n        self.assertEqual(stats[\"pipeline_errors\"], 1)\n        self.assertEqual(stats[\"passed\"], 2)\n\n    def test_non_dict_oracle_ignored(self) -> None:\n        stats: dict = compute_ledger_stats([{\"oracle\": \"corrupt\"}])\n        self.assertEqual(stats[\"total\"], 1)\n        self.assertEqual(stats[\"passed\"], 0)\n        self.assertEqual(stats[\"vetoed\"], 0)\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n",
+        "formatted_diff": "+\"\"\"Tests for utils.stats \u00e2\u20ac\u201d shared ledger statistics helpers.\n+\n+Covers: entry_has_pipeline_error across stages, pct zero-guard and\n+formatting, and compute_ledger_stats aggregation (PASS/VETO counts,\n+string and dict citation shapes, unexpected citation types, most_cited\n+selection, pipeline-error tallying).\n+\n+Run: python -m unittest discover -s tests -p test_stats.py -v\n+\"\"\"\n+\n+import sys\n+import unittest\n+from pathlib import Path\n+\n+_REPO_ROOT: Path = Path(__file__).resolve().parent.parent\n+if str(_REPO_ROOT) not in sys.path:\n+    sys.path.insert(0, str(_REPO_ROOT))\n+\n+from utils.stats import (  # noqa: E402\n+    compute_ledger_stats,\n+    entry_has_pipeline_error,\n+    pct,\n+)\n+\n+\n+def _pass_entry() -> dict:\n+    return {\"oracle\": {\"verdict\": \"PASS\"}}\n+\n+\n+def _veto_entry(citations: list) -> dict:\n+    return {\"oracle\": {\"verdict\": \"VETO\", \"constraint_citations\": citations}}\n+\n+\n+class EntryHasPipelineErrorTests(unittest.TestCase):\n+    def test_clean_entry_is_false(self) -> None:\n+        self.assertFalse(entry_has_pipeline_error(_pass_entry()))\n+\n+    def test_error_in_each_stage_is_detected(self) -> None:\n+        for stage in (\"challenger\", \"defender\", \"oracle\"):\n+            entry: dict = {stage: {\"status\": \"PIPELINE_ERROR\"}}\n+            self.assertTrue(entry_has_pipeline_error(entry), stage)\n+\n+    def test_non_dict_stage_is_ignored(self) -> None:\n+        self.assertFalse(\n+            entry_has_pipeline_error({\"challenger\": \"PIPELINE_ERROR\"})\n+        )\n+\n+    def test_empty_entry_is_false(self) -> None:\n+        self.assertFalse(entry_has_pipeline_error({}))\n+\n+\n+class PctTests(unittest.TestCase):\n+    def test_zero_total_returns_zero_percent(self) -> None:\n+        self.assertEqual(pct(5, 0), \"0.0%\")\n+\n+    def test_negative_total_returns_zero_percent(self) -> None:\n+        self.assertEqual(pct(1, -3), \"0.0%\")\n+\n+    def test_formats_one_decimal(self) -> None:\n+        self.assertEqual(pct(1, 3), \"33.3%\")\n+        self.assertEqual(pct(2, 2), \"100.0%\")\n+        self.assertEqual(pct(0, 7), \"0.0%\")\n+\n+\n+class ComputeLedgerStatsTests(unittest.TestCase):\n+    def test_empty_ledger(self) -> None:\n+        stats: dict = compute_ledger_stats([])\n+        self.assertEqual(stats[\"total\"], 0)\n+        self.assertEqual(stats[\"passed\"], 0)\n+        self.assertEqual(stats[\"vetoed\"], 0)\n+        self.assertEqual(stats[\"pipeline_errors\"], 0)\n+        self.assertIsNone(stats[\"most_cited\"])\n+\n+    def test_pass_and_veto_counts(self) -> None:\n+        entries: list[dict] = [\n+            _pass_entry(),\n+            _pass_entry(),\n+            _veto_entry([\"C-001\"]),\n+        ]\n+        stats: dict = compute_ledger_stats(entries)\n+        self.assertEqual(stats[\"total\"], 3)\n+        self.assertEqual(stats[\"passed\"], 2)\n+        self.assertEqual(stats[\"vetoed\"], 1)\n+\n+    def test_string_citations_counted(self) -> None:\n+        entries: list[dict] = [\n+            _veto_entry([\"C-001\", \"C-002\"]),\n+            _veto_entry([\"C-001\"]),\n+        ]\n+        stats: dict = compute_ledger_stats(entries)\n+        self.assertEqual(stats[\"most_cited\"], (\"C-001\", 2))\n+\n+    def test_dict_citations_counted(self) -> None:\n+        entries: list[dict] = [\n+            _veto_entry([\n+                {\"constraint_id\": \"C-007\", \"disposition\": \"VIOLATED\"},\n+                {\"constraint_id\": \"C-007\", \"disposition\": \"VIOLATED\"},\n+            ]),\n+        ]\n+        stats: dict = compute_ledger_stats(entries)\n+        self.assertEqual(stats[\"most_cited\"], (\"C-007\", 2))\n+\n+    def test_unexpected_citation_types_skipped(self) -> None:\n+        entries: list[dict] = [_veto_entry([42, None, [\"nested\"]])]\n+        stats: dict = compute_ledger_stats(entries)\n+        self.assertEqual(stats[\"vetoed\"], 1)\n+        self.assertIsNone(stats[\"most_cited\"])\n+\n+    def test_dict_citation_without_string_id_skipped(self) -> None:\n+        entries: list[dict] = [_veto_entry([{\"constraint_id\": 3}])]\n+        stats: dict = compute_ledger_stats(entries)\n+        self.assertIsNone(stats[\"most_cited\"])\n+\n+    def test_pipeline_errors_counted_independently(self) -> None:\n+        entries: list[dict] = [\n+            {\n+                \"oracle\": {\"verdict\": \"PASS\"},\n+                \"challenger\": {\"status\": \"PIPELINE_ERROR\"},\n+            },\n+            _pass_entry(),\n+        ]\n+        stats: dict = compute_ledger_stats(entries)\n+        self.assertEqual(stats[\"pipeline_errors\"], 1)\n+        self.assertEqual(stats[\"passed\"], 2)\n+\n+    def test_non_dict_oracle_ignored(self) -> None:\n+        stats: dict = compute_ledger_stats([{\"oracle\": \"corrupt\"}])\n+        self.assertEqual(stats[\"total\"], 1)\n+        self.assertEqual(stats[\"passed\"], 0)\n+        self.assertEqual(stats[\"vetoed\"], 0)\n+\n+\n+if __name__ == \"__main__\":\n+    unittest.main()\n"
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 9174,
+        "output": 1680
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The proposed change creates a new test file tests/test_stats.py that exercises the shared ledger statistics helpers in utils.stats. The Challenger returned CLEAR with no findings, and the Defender confirmed CLEAR. Independent review against the constitution: (C-001) tests contain no catch blocks, no error swallowing. (C-002) scope is a new test file under tests/, aligned with the stated task of covering utils.stats. (C-003) only imports stdlib (sys, unittest, pathlib) and the in-repo utils.stats module; no new dependencies. (C-004) all function signatures carry type hints (-> dict, -> None, list[dict], Path); no annotations weakened. (C-005) this change ADDS test coverage, directly supporting the constraint. (C-006) no secrets or credentials. (C-007) no changes to challenger/defender/oracle/ledger/constitution; adding tests does not weaken enforcement. (C-008) no ledger mutation. The sys.path insertion is a standard test-bootstrap pattern and does not affect governance integrity.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No exception handling introduced."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "New file confined to tests/ directory, matching stated purpose of testing utils.stats."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "SATISFIED",
+          "note": "Only stdlib and in-repo imports; no requirements.txt change needed."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "All new functions/methods carry explicit type annotations."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "SATISFIED",
+          "note": "Change is itself test coverage for existing helper logic."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No credentials present."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No pipeline/ledger/constitution files modified."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger writes or reads that would mutate the chain."
+        }
+      ],
+      "advisories": [
+        "The module docstring contains a mojibake sequence ('\\u00e2\\u20ac\\u201d') where an em dash appears to have been encoded incorrectly. Per user global style rules, em dashes should not be used at all; recommend replacing with a hyphen or colon and ensuring UTF-8 encoding is preserved on write.",
+        "sys.path manipulation at import time works but pytest/unittest discovery from the repo root typically makes this unnecessary; consider a conftest.py if this pattern proliferates."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 13242,
+        "output": 1028
+      }
+    },
+    "entry_hash": "2adf43d098bf35f550b2692127929d87fb9839e7e7526112643acaaf554cce76"
+  },
+  {
+    "entry_id": "e9819d8a-5326-4528-b533-3e75fd3b2c40",
+    "timestamp": "2026-07-12T19:37:25.888033+00:00",
+    "previous_hash": "2adf43d098bf35f550b2692127929d87fb9839e7e7526112643acaaf554cce76",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "tests\\test_stats.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "tests\\test_stats.py",
+        "change_type": "modify",
+        "old_string": "\"\"\"Tests for utils.stats \u00e2\u20ac\u201d shared ledger statistics helpers.",
+        "new_string": "\"\"\"Tests for utils.stats: shared ledger statistics helpers."
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 5715,
+        "output": 533
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change modifies a docstring in tests/test_stats.py, replacing a mojibake sequence (UTF-8 em dash rendered as garbled bytes) with a plain colon. This is a cosmetic docstring fix. Challenger returned CLEAR and Defender confirmed. Reviewing independently against the full constitution: C-001 N/A (no error handling), C-002 satisfied (change is within stated file), C-003 N/A (no imports added), C-004 satisfied (no type annotations touched), C-005 N/A (no new logic), C-006 satisfied (no secrets), C-007 N/A (test file, not pipeline), C-008 satisfied (no ledger modification). Additionally, the replacement removes an em dash and uses a colon instead, aligning with the user's global style rule against em/en dashes (though this is not a constitutional constraint).",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error handling code changed."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change confined to the single stated file."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependencies added."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "No type annotations modified."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new logic introduced; docstring-only edit."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "No secrets present."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Test file, not part of governance pipeline."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "SATISFIED",
+          "note": "Ledger untouched."
+        }
+      ],
+      "advisories": [
+        "Docstring-only cosmetic fix; no functional or behavioral impact."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 8493,
+        "output": 753
+      }
+    },
+    "entry_hash": "e05ee919e86d709c90c72dd176ee954bf2a272806453fab9ac0267fcf7be6481"
+  },
+  {
+    "entry_id": "a341d1e5-3ded-42a7-b0cf-5f05ffb96515",
+    "timestamp": "2026-07-12T19:39:37.723988+00:00",
+    "previous_hash": "e05ee919e86d709c90c72dd176ee954bf2a272806453fab9ac0267fcf7be6481",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "tests\\test_viewer.py",
+      "tool": "Write",
+      "diff_summary": {
+        "file_path": "tests\\test_viewer.py",
+        "change_type": "create",
+        "content": "\"\"\"Tests for utils.viewer: self-contained HTML ledger viewer.\n\nSmoke-level coverage of generate_viewer_html against synthetic ledgers\non disk: document structure, stats banner values, chain status labels,\nJSON embedding safety, and the never-raises error page fallback.\n\nRun: python -m unittest discover -s tests -p test_viewer.py -v\n\"\"\"\n\nimport json\nimport os\nimport shutil\nimport sys\nimport tempfile\nimport unittest\nfrom pathlib import Path\nfrom typing import Any\nfrom unittest.mock import patch\n\n_REPO_ROOT: Path = Path(__file__).resolve().parent.parent\nif str(_REPO_ROOT) not in sys.path:\n    sys.path.insert(0, str(_REPO_ROOT))\n\nfrom ledger.chain import compute_entry_hash  # noqa: E402\nfrom utils.viewer import generate_viewer_html  # noqa: E402\n\n\ndef _build_valid_chain(n: int, verdicts: list[str] | None = None) -> list[dict]:\n    \"\"\"Build a correctly-linked chain of n entries with oracle verdicts.\"\"\"\n    entries: list[dict] = []\n    for i in range(n):\n        verdict: str = verdicts[i] if verdicts else \"PASS\"\n        entry: dict[str, Any] = {\n            \"entry_id\": f\"id-{i}\",\n            \"timestamp\": f\"2026-01-01T00:00:{i:02d}+00:00\",\n            \"previous_hash\": \"GENESIS\" if i == 0 else entries[i - 1][\"entry_hash\"],\n            \"constitution_hash\": \"abc\",\n            \"change\": {\"file\": f\"file_{i}.py\", \"tool\": \"Write\"},\n            \"oracle\": {\n                \"verdict\": verdict,\n                \"constraint_citations\": (\n                    [{\"constraint_id\": \"C-001\", \"disposition\": \"VIOLATED\"}]\n                    if verdict == \"VETO\"\n                    else []\n                ),\n            },\n        }\n        entry[\"entry_hash\"] = compute_entry_hash(entry)\n        entries.append(entry)\n    return entries\n\n\nclass GenerateViewerHtmlTests(unittest.TestCase):\n    def setUp(self) -> None:\n        self._tmp: str = tempfile.mkdtemp()\n        self.addCleanup(shutil.rmtree, self._tmp)\n\n    def _path(self) -> str:\n        return os.path.join(self._tmp, \"ledger.json\")\n\n    def _write_chain(self, chain: list[dict]) -> None:\n        Path(self._path()).write_text(json.dumps(chain), encoding=\"utf-8\")\n\n    def test_missing_ledger_renders_empty_viewer(self) -> None:\n        html_out: str = generate_viewer_html(self._path())\n        self.assertIn(\"<!doctype html>\", html_out)\n        self.assertIn(\"Bench Verdict Viewer\", html_out)\n        self.assertIn(\"EMPTY\", html_out)\n        self.assertIn(\"const LEDGER_DATA = [];\", html_out)\n\n    def test_valid_ledger_renders_stats_and_chain_status(self) -> None:\n        chain: list[dict] = _build_valid_chain(\n            3, verdicts=[\"PASS\", \"VETO\", \"PASS\"]\n        )\n        self._write_chain(chain)\n        html_out: str = generate_viewer_html(self._path())\n        self.assertIn(\">VALID<\", html_out)\n        self.assertIn(\"2 <span class=\\\"pct\\\">(66.7%)</span>\", html_out)\n        self.assertIn(\"1 <span class=\\\"pct\\\">(33.3%)</span>\", html_out)\n        self.assertIn(\"C-001 (1 veto(es))\", html_out)\n        self.assertIn(\"file_1.py\", html_out)\n\n    def test_tampered_ledger_reports_broken_chain(self) -> None:\n        chain: list[dict] = _build_valid_chain(3)\n        chain[1][\"change\"][\"file\"] = \"TAMPERED.py\"\n        self._write_chain(chain)\n        html_out: str = generate_viewer_html(self._path())\n        self.assertIn(\"BROKEN AT ENTRY #2\", html_out)\n\n    def test_script_close_tags_in_data_are_escaped(self) -> None:\n        chain: list[dict] = _build_valid_chain(1)\n        chain[0][\"change\"][\"file\"] = \"evil</script><script>alert(1)\"\n        chain[0][\"entry_hash\"] = compute_entry_hash(chain[0])\n        self._write_chain(chain)\n        html_out: str = generate_viewer_html(self._path())\n        self.assertNotIn(\"evil</script>\", html_out)\n        self.assertIn(\"evil<\\\\/script>\", html_out)\n\n    def test_generation_failure_returns_error_page(self) -> None:\n        with patch(\n            \"utils.viewer.load_ledger\", side_effect=RuntimeError(\"boom\")\n        ):\n            html_out: str = generate_viewer_html(self._path())\n        self.assertIn(\"generation failed\", html_out)\n        self.assertIn(\"RuntimeError: boom\", html_out)\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n",
+        "formatted_diff": "+\"\"\"Tests for utils.viewer: self-contained HTML ledger viewer.\n+\n+Smoke-level coverage of generate_viewer_html against synthetic ledgers\n+on disk: document structure, stats banner values, chain status labels,\n+JSON embedding safety, and the never-raises error page fallback.\n+\n+Run: python -m unittest discover -s tests -p test_viewer.py -v\n+\"\"\"\n+\n+import json\n+import os\n+import shutil\n+import sys\n+import tempfile\n+import unittest\n+from pathlib import Path\n+from typing import Any\n+from unittest.mock import patch\n+\n+_REPO_ROOT: Path = Path(__file__).resolve().parent.parent\n+if str(_REPO_ROOT) not in sys.path:\n+    sys.path.insert(0, str(_REPO_ROOT))\n+\n+from ledger.chain import compute_entry_hash  # noqa: E402\n+from utils.viewer import generate_viewer_html  # noqa: E402\n+\n+\n+def _build_valid_chain(n: int, verdicts: list[str] | None = None) -> list[dict]:\n+    \"\"\"Build a correctly-linked chain of n entries with oracle verdicts.\"\"\"\n+    entries: list[dict] = []\n+    for i in range(n):\n+        verdict: str = verdicts[i] if verdicts else \"PASS\"\n+        entry: dict[str, Any] = {\n+            \"entry_id\": f\"id-{i}\",\n+            \"timestamp\": f\"2026-01-01T00:00:{i:02d}+00:00\",\n+            \"previous_hash\": \"GENESIS\" if i == 0 else entries[i - 1][\"entry_hash\"],\n+            \"constitution_hash\": \"abc\",\n+            \"change\": {\"file\": f\"file_{i}.py\", \"tool\": \"Write\"},\n+            \"oracle\": {\n+                \"verdict\": verdict,\n+                \"constraint_citations\": (\n+                    [{\"constraint_id\": \"C-001\", \"disposition\": \"VIOLATED\"}]\n+                    if verdict == \"VETO\"\n+                    else []\n+                ),\n+            },\n+        }\n+        entry[\"entry_hash\"] = compute_entry_hash(entry)\n+        entries.append(entry)\n+    return entries\n+\n+\n+class GenerateViewerHtmlTests(unittest.TestCase):\n+    def setUp(self) -> None:\n+        self._tmp: str = tempfile.mkdtemp()\n+        self.addCleanup(shutil.rmtree, self._tmp)\n+\n+    def _path(self) -> str:\n+        return os.path.join(self._tmp, \"ledger.json\")\n+\n+    def _write_chain(self, chain: list[dict]) -> None:\n+        Path(self._path()).write_text(json.dumps(chain), encoding=\"utf-8\")\n+\n+    def test_missing_ledger_renders_empty_viewer(self) -> None:\n+        html_out: str = generate_viewer_html(self._path())\n+        self.assertIn(\"<!doctype html>\", html_out)\n+        self.assertIn(\"Bench Verdict Viewer\", html_out)\n+        self.assertIn(\"EMPTY\", html_out)\n+        self.assertIn(\"const LEDGER_DATA = [];\", html_out)\n+\n+    def test_valid_ledger_renders_stats_and_chain_status(self) -> None:\n+        chain: list[dict] = _build_valid_chain(\n+            3, verdicts=[\"PASS\", \"VETO\", \"PASS\"]\n+        )\n+        self._write_chain(chain)\n+        html_out: str = generate_viewer_html(self._path())\n+        self.assertIn(\">VALID<\", html_out)\n+        self.assertIn(\"2 <span class=\\\"pct\\\">(66.7%)</span>\", html_out)\n+        self.assertIn(\"1 <span class=\\\"pct\\\">(33.3%)</span>\", html_out)\n+        self.assertIn(\"C-001 (1 veto(es))\", html_out)\n+        self.assertIn(\"file_1.py\", html_out)\n+\n+    def test_tampered_ledger_reports_broken_chain(self) -> None:\n+        chain: list[dict] = _build_valid_chain(3)\n+        chain[1][\"change\"][\"file\"] = \"TAMPERED.py\"\n+        self._write_chain(chain)\n+        html_out: str = generate_viewer_html(self._path())\n+        self.assertIn(\"BROKEN AT ENTRY #2\", html_out)\n+\n+    def test_script_close_tags_in_data_are_escaped(self) -> None:\n+        chain: list[dict] = _build_valid_chain(1)\n+        chain[0][\"change\"][\"file\"] = \"evil</script><script>alert(1)\"\n+        chain[0][\"entry_hash\"] = compute_entry_hash(chain[0])\n+        self._write_chain(chain)\n+        html_out: str = generate_viewer_html(self._path())\n+        self.assertNotIn(\"evil</script>\", html_out)\n+        self.assertIn(\"evil<\\\\/script>\", html_out)\n+\n+    def test_generation_failure_returns_error_page(self) -> None:\n+        with patch(\n+            \"utils.viewer.load_ledger\", side_effect=RuntimeError(\"boom\")\n+        ):\n+            html_out: str = generate_viewer_html(self._path())\n+        self.assertIn(\"generation failed\", html_out)\n+        self.assertIn(\"RuntimeError: boom\", html_out)\n+\n+\n+if __name__ == \"__main__\":\n+    unittest.main()\n"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-004",
+          "severity": "CONCERN",
+          "location": "tests/test_viewer.py:33 (_build_valid_chain function body)",
+          "evidence": "entry: dict[str, Any] = {",
+          "reasoning": "C-004 states that 'Adding Any type... is a violation.' The helper function _build_valid_chain explicitly imports and uses typing.Any as the value type parameter in the local variable annotation `dict[str, Any]`. While this is new test code rather than a modification of existing annotations, the constraint text does not limit the prohibition to existing code -- it says adding Any is a violation. The counterargument is that heterogeneous fixture dicts have no tighter type available without introducing TypedDicts, and the rule's rationale ('weakening degrades ability to reason about correctness') is minimally implicated in test-only helper code. Oracle should weigh whether the literal 'Adding Any type' language applies to test fixtures where Any is the accurate type."
+        }
+      ],
+      "_tokens": {
+        "input": 8764,
+        "output": 2127
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "REBUT",
+          "argument": "The Challenger's own reasoning undermines the finding. C-004 reads in full: 'Functions must not remove or weaken existing type annotations. Adding Any type or removing a typed return annotation is a violation.' The operative verb is 'weaken existing'. The phrase 'Adding Any type' is syntactically parallel to 'removing a typed return annotation' -- both are examples of *weakening existing annotations*, not a blanket prohibition on Any appearing anywhere in new code. This is a brand-new file. There are no existing annotations to weaken. C-004's rationale makes this explicit: 'Weakening them degrades the ability to reason about correctness.' You cannot degrade what does not yet exist. Second, `dict[str, Any]` is not a lazy annotation here -- it is the accurate one. The entry dict contains a deliberate mix of `str`, `list[dict[str, str]]`, and nested dict values. The tighter alternative would be a deeply nested union or a TypedDict, both of which would be significantly less readable and would provide no governance benefit for a private test helper. Third, the Challenger correctly notes that the concern's rationale ('minimally implicated in test-only helper code') substantially weakens the finding -- the Challenger is effectively conceding that the spirit of C-004 is not at stake. The function signature itself is fully typed: `_build_valid_chain(n: int, verdicts: list[str] | None = None) -> list[dict]`. Type safety is preserved at the interface boundary that matters. The internal local variable annotation using `Any` for a heterogeneous fixture dict is not a governance regression.",
+          "evidence": "C-004 rule: 'Functions must not remove or weaken existing type annotations.' This is a new file creation (change_type: create). The function signature at line 31 is fully annotated: `def _build_valid_chain(n: int, verdicts: list[str] | None = None) -> list[dict]`. The `dict[str, Any]` annotation is on a local variable inside a private test helper, where the heterogeneous value type (strings, lists of dicts, nested dicts) makes Any the technically accurate representation. The Challenger explicitly raised this only as CONCERN severity and flagged the counterargument themselves."
+        }
+      ],
+      "summary": "The single finding is a stretched reading of C-004 that conflates 'weakening existing annotations' with 'using Any in new code where it is the accurate type' -- the change is a clean, well-structured test file with no genuine constitutional violations.",
+      "_tokens": {
+        "input": 9062,
+        "output": 1489
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change creates a new test file (tests/test_viewer.py) that provides smoke coverage for utils.viewer.generate_viewer_html. The Challenger raised a single CONCERN under C-004 regarding the use of `dict[str, Any]` in a local variable annotation inside _build_valid_chain. The Defender correctly notes that C-004's operative language is 'Functions must not remove or weaken existing type annotations,' and the 'Adding Any type' clause is parallel to 'removing a typed return annotation' as an example of weakening *existing* annotations. This is a new file with no prior annotations to weaken, the function signature is fully typed (`(n: int, verdicts: list[str] | None = None) -> list[dict]`), and Any is the accurate type for a heterogeneous fixture dict. The Challenger's own severity (CONCERN, not violation) and hedged reasoning support this. Reviewing the change against the full constitution: C-001 (no try/except blocks introduced except a mock patch), C-002 (change is scoped to a new test file for existing utils/viewer.py), C-003 (all imports are stdlib or existing project modules already in requirements), C-006 (no secrets), C-007 (does not weaken pipeline; adds coverage), C-008 (ledger not modified; only synthetic test fixtures written to a tempdir). C-005 is satisfied positively since this change *adds* test coverage.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No exception-handling blocks introduced; the only try/except-adjacent construct is a unittest.mock.patch context, which is a test tool."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "New file in tests/ providing coverage for existing utils/viewer.py; scope is appropriate for a test-authoring task."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "SATISFIED",
+          "note": "All imports are stdlib (json, os, shutil, sys, tempfile, unittest, pathlib, typing, unittest.mock) or existing project modules (ledger.chain, utils.viewer). No new external dependencies."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "Per Defender's rebuttal: C-004 targets weakening of *existing* annotations. This is a new file; the public helper signature is fully typed; Any is used only on a local variable for a genuinely heterogeneous fixture dict. Challenger raised this as CONCERN and conceded the counterargument."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "SATISFIED",
+          "note": "Change is itself test coverage for utils/viewer.py, positively advancing this warning-level constraint."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "No credentials, keys, or tokens present."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "Adds tests around viewer generation; does not modify or weaken pipeline enforcement, verification, or logging."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "SATISFIED",
+          "note": "Tests write synthetic ledgers to a tempdir cleaned up via addCleanup; no mutation of the real ledger/bench-ledger.json."
+        }
+      ],
+      "advisories": [
+        "Consider whether test_script_close_tags_in_data_are_escaped's exact-string assertion (`evil<\\/script>`) may be brittle to any future change in the viewer's JSON escaping strategy; documenting the specific escaping contract in utils/viewer would harden this test."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 13745,
+        "output": 1362
+      }
+    },
+    "entry_hash": "4a00bfbdd83e0eeaf753d92665aa2d529e70f611ebc6ef5e9ac2738af96ce11d"
+  },
+  {
+    "entry_id": "b5a07413-6e21-4770-bcd3-87288ee60ea3",
+    "timestamp": "2026-07-12T19:40:58.066493+00:00",
+    "previous_hash": "4a00bfbdd83e0eeaf753d92665aa2d529e70f611ebc6ef5e9ac2738af96ce11d",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "tests\\test_commands.py",
+      "tool": "Write",
+      "diff_summary": {
+        "file_path": "tests\\test_commands.py",
+        "change_type": "create",
+        "content": "\"\"\"Tests for cli.commands: exit codes and key output of each command.\n\nThe data loaders (load_ledger, verify_chain, load_constitution_snapshot,\ngenerate_viewer_html) are patched at the cli.commands import site so the\ntests are independent of the working directory and the real ledger.\n\nRun: python -m unittest discover -s tests -p test_commands.py -v\n\"\"\"\n\nimport io\nimport os\nimport sys\nimport unittest\nfrom contextlib import redirect_stderr, redirect_stdout\nfrom pathlib import Path\nfrom unittest.mock import patch\n\n_REPO_ROOT: Path = Path(__file__).resolve().parent.parent\nif str(_REPO_ROOT) not in sys.path:\n    sys.path.insert(0, str(_REPO_ROOT))\n\nfrom cli.commands import (  # noqa: E402\n    cmd_constitution,\n    cmd_ledger,\n    cmd_stats,\n    cmd_verify,\n    cmd_viewer,\n)\nfrom pipeline.constitution import ConstitutionError  # noqa: E402\n\n\ndef _valid_verify() -> dict:\n    return {\n        \"valid\": True,\n        \"entries\": 2,\n        \"first_entry\": \"2026-01-01T00:00:00+00:00\",\n        \"last_entry\": \"2026-01-01T00:00:01+00:00\",\n        \"genesis_hash\": \"aaa\",\n        \"latest_hash\": \"bbb\",\n        \"meta\": \"meta anchor verified\",\n    }\n\n\ndef _entries() -> list[dict]:\n    return [\n        {\n            \"timestamp\": \"2026-01-01T00:00:00+00:00\",\n            \"change\": {\"file\": \"a.py\"},\n            \"oracle\": {\"verdict\": \"PASS\"},\n            \"entry_hash\": \"a\" * 64,\n            \"constitution_hash\": \"c\" * 64,\n        },\n        {\n            \"timestamp\": \"2026-01-01T00:00:01+00:00\",\n            \"change\": {\"file\": \"b.py\"},\n            \"oracle\": {\n                \"verdict\": \"VETO\",\n                \"constraint_citations\": [\n                    {\"constraint_id\": \"C-001\", \"disposition\": \"VIOLATED\"}\n                ],\n            },\n            \"entry_hash\": \"b\" * 64,\n            \"constitution_hash\": \"c\" * 64,\n        },\n    ]\n\n\nclass CmdVerifyTests(unittest.TestCase):\n    def test_valid_chain_exits_zero_and_prints_meta(self) -> None:\n        out = io.StringIO()\n        with patch(\"cli.commands.verify_chain\", return_value=_valid_verify()):\n            with redirect_stdout(out):\n                code: int = cmd_verify()\n        self.assertEqual(code, 0)\n        self.assertIn(\"Ledger: VALID\", out.getvalue())\n        self.assertIn(\"meta anchor verified\", out.getvalue())\n\n    def test_empty_chain_exits_zero(self) -> None:\n        out = io.StringIO()\n        result: dict = {\"valid\": True, \"entries\": 0, \"message\": \"empty\"}\n        with patch(\"cli.commands.verify_chain\", return_value=result):\n            with redirect_stdout(out):\n                code: int = cmd_verify()\n        self.assertEqual(code, 0)\n        self.assertIn(\"EMPTY\", out.getvalue())\n\n    def test_invalid_chain_exits_one_and_reports_failure(self) -> None:\n        err = io.StringIO()\n        result: dict = {\n            \"valid\": False,\n            \"entries_checked\": 1,\n            \"failure_index\": 1,\n            \"failure_type\": \"HASH_MISMATCH\",\n            \"expected\": \"x\",\n            \"found\": \"y\",\n            \"message\": \"tampered\",\n        }\n        with patch(\"cli.commands.verify_chain\", return_value=result):\n            with redirect_stderr(err):\n                code: int = cmd_verify()\n        self.assertEqual(code, 1)\n        self.assertIn(\"HASH_MISMATCH\", err.getvalue())\n\n\nclass CmdLedgerTests(unittest.TestCase):\n    def test_empty_ledger_exits_zero(self) -> None:\n        out = io.StringIO()\n        with patch(\"cli.commands.load_ledger\", return_value=[]):\n            with redirect_stdout(out):\n                code: int = cmd_ledger()\n        self.assertEqual(code, 0)\n        self.assertIn(\"empty\", out.getvalue().lower())\n\n    def test_prints_entries_with_verdicts(self) -> None:\n        out = io.StringIO()\n        with patch(\"cli.commands.load_ledger\", return_value=_entries()):\n            with redirect_stdout(out):\n                code: int = cmd_ledger()\n        self.assertEqual(code, 0)\n        text: str = out.getvalue()\n        self.assertIn(\"a.py\", text)\n        self.assertIn(\"VETO\", text)\n        self.assertIn(\"citations: C-001\", text)\n\n    def test_vetoes_only_filter(self) -> None:\n        out = io.StringIO()\n        with patch(\"cli.commands.load_ledger\", return_value=_entries()):\n            with redirect_stdout(out):\n                code: int = cmd_ledger(vetoes_only=True)\n        self.assertEqual(code, 0)\n        text: str = out.getvalue()\n        self.assertIn(\"b.py\", text)\n        self.assertNotIn(\"a.py\", text)\n\n\nclass CmdStatsTests(unittest.TestCase):\n    def test_stats_summary_and_exit_zero_on_valid_chain(self) -> None:\n        out = io.StringIO()\n        with patch(\"cli.commands.load_ledger\", return_value=_entries()):\n            with patch(\n                \"cli.commands.verify_chain\", return_value=_valid_verify()\n            ):\n                with redirect_stdout(out):\n                    code: int = cmd_stats()\n        self.assertEqual(code, 0)\n        text: str = out.getvalue()\n        self.assertIn(\"Total governed changes : 2\", text)\n        self.assertIn(\"Passed                 : 1 (50.0%)\", text)\n        self.assertIn(\"Vetoed                 : 1 (50.0%)\", text)\n        self.assertIn(\"C-001\", text)\n        self.assertIn(\"Ledger integrity       : VALID\", text)\n\n    def test_exit_one_when_chain_invalid(self) -> None:\n        out = io.StringIO()\n        invalid: dict = {\"valid\": False, \"failure_type\": \"CHAIN_BREAK\"}\n        with patch(\"cli.commands.load_ledger\", return_value=_entries()):\n            with patch(\"cli.commands.verify_chain\", return_value=invalid):\n                with redirect_stdout(out):\n                    code: int = cmd_stats()\n        self.assertEqual(code, 1)\n        self.assertIn(\"INVALID (CHAIN_BREAK)\", out.getvalue())\n\n    def test_empty_ledger_exits_zero(self) -> None:\n        out = io.StringIO()\n        with patch(\"cli.commands.load_ledger\", return_value=[]):\n            with redirect_stdout(out):\n                code: int = cmd_stats()\n        self.assertEqual(code, 0)\n\n\nclass CmdConstitutionTests(unittest.TestCase):\n    def test_prints_constraints_and_exits_zero(self) -> None:\n        out = io.StringIO()\n        constitution: dict = {\n            \"constitution\": \"Bench\",\n            \"version\": \"1.0\",\n            \"constraints\": [\n                {\n                    \"id\": \"C-001\",\n                    \"name\": \"No silent errors\",\n                    \"severity\": \"veto\",\n                    \"rule\": \"Catch blocks must log, re-throw, or return.\",\n                }\n            ],\n        }\n        with patch(\n            \"cli.commands.load_constitution_snapshot\",\n            return_value=(constitution, \"deadbeef\"),\n        ):\n            with redirect_stdout(out):\n                code: int = cmd_constitution()\n        self.assertEqual(code, 0)\n        text: str = out.getvalue()\n        self.assertIn(\"Bench v1.0\", text)\n        self.assertIn(\"deadbeef\", text)\n        self.assertIn(\"C-001\", text)\n        self.assertIn(\"[VETO\", text)\n\n    def test_load_failure_exits_one(self) -> None:\n        err = io.StringIO()\n        with patch(\n            \"cli.commands.load_constitution_snapshot\",\n            side_effect=ConstitutionError(\"missing\"),\n        ):\n            with redirect_stderr(err):\n                code: int = cmd_constitution()\n        self.assertEqual(code, 1)\n        self.assertIn(\"constitution load failed\", err.getvalue())\n\n\nclass CmdViewerTests(unittest.TestCase):\n    def test_writes_html_and_exits_zero(self) -> None:\n        out = io.StringIO()\n        with patch(\n            \"cli.commands.generate_viewer_html\",\n            return_value=\"<!doctype html><title>t</title>\",\n        ):\n            with patch(\"cli.commands.webbrowser.open\", return_value=True):\n                with redirect_stdout(out):\n                    code: int = cmd_viewer()\n        self.assertEqual(code, 0)\n        text: str = out.getvalue()\n        self.assertIn(\"Bench viewer written to:\", text)\n        tmp_path: str = text.split(\"Bench viewer written to:\")[1].strip()\n        self.addCleanup(\n            lambda: os.path.exists(tmp_path) and os.remove(tmp_path)\n        )\n        written: str = Path(tmp_path).read_text(encoding=\"utf-8\")\n        self.assertIn(\"<!doctype html>\", written)\n\n    def test_generation_failure_exits_one(self) -> None:\n        err = io.StringIO()\n        with patch(\n            \"cli.commands.generate_viewer_html\",\n            side_effect=RuntimeError(\"boom\"),\n        ):\n            with redirect_stderr(err):\n                code: int = cmd_viewer()\n        self.assertEqual(code, 1)\n        self.assertIn(\"viewer generation failed\", err.getvalue())\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n",
+        "formatted_diff": "+\"\"\"Tests for cli.commands: exit codes and key output of each command.\n+\n+The data loaders (load_ledger, verify_chain, load_constitution_snapshot,\n+generate_viewer_html) are patched at the cli.commands import site so the\n+tests are independent of the working directory and the real ledger.\n+\n+Run: python -m unittest discover -s tests -p test_commands.py -v\n+\"\"\"\n+\n+import io\n+import os\n+import sys\n+import unittest\n+from contextlib import redirect_stderr, redirect_stdout\n+from pathlib import Path\n+from unittest.mock import patch\n+\n+_REPO_ROOT: Path = Path(__file__).resolve().parent.parent\n+if str(_REPO_ROOT) not in sys.path:\n+    sys.path.insert(0, str(_REPO_ROOT))\n+\n+from cli.commands import (  # noqa: E402\n+    cmd_constitution,\n+    cmd_ledger,\n+    cmd_stats,\n+    cmd_verify,\n+    cmd_viewer,\n+)\n+from pipeline.constitution import ConstitutionError  # noqa: E402\n+\n+\n+def _valid_verify() -> dict:\n+    return {\n+        \"valid\": True,\n+        \"entries\": 2,\n+        \"first_entry\": \"2026-01-01T00:00:00+00:00\",\n+        \"last_entry\": \"2026-01-01T00:00:01+00:00\",\n+        \"genesis_hash\": \"aaa\",\n+        \"latest_hash\": \"bbb\",\n+        \"meta\": \"meta anchor verified\",\n+    }\n+\n+\n+def _entries() -> list[dict]:\n+    return [\n+        {\n+            \"timestamp\": \"2026-01-01T00:00:00+00:00\",\n+            \"change\": {\"file\": \"a.py\"},\n+            \"oracle\": {\"verdict\": \"PASS\"},\n+            \"entry_hash\": \"a\" * 64,\n+            \"constitution_hash\": \"c\" * 64,\n+        },\n+        {\n+            \"timestamp\": \"2026-01-01T00:00:01+00:00\",\n+            \"change\": {\"file\": \"b.py\"},\n+            \"oracle\": {\n+                \"verdict\": \"VETO\",\n+                \"constraint_citations\": [\n+                    {\"constraint_id\": \"C-001\", \"disposition\": \"VIOLATED\"}\n+                ],\n+            },\n+            \"entry_hash\": \"b\" * 64,\n+            \"constitution_hash\": \"c\" * 64,\n+        },\n+    ]\n+\n+\n+class CmdVerifyTests(unittest.TestCase):\n+    def test_valid_chain_exits_zero_and_prints_meta(self) -> None:\n+        out = io.StringIO()\n+        with patch(\"cli.commands.verify_chain\", return_value=_valid_verify()):\n+            with redirect_stdout(out):\n+                code: int = cmd_verify()\n+        self.assertEqual(code, 0)\n+        self.assertIn(\"Ledger: VALID\", out.getvalue())\n+        self.assertIn(\"meta anchor verified\", out.getvalue())\n+\n+    def test_empty_chain_exits_zero(self) -> None:\n+        out = io.StringIO()\n+        result: dict = {\"valid\": True, \"entries\": 0, \"message\": \"empty\"}\n+        with patch(\"cli.commands.verify_chain\", return_value=result):\n+            with redirect_stdout(out):\n+                code: int = cmd_verify()\n+        self.assertEqual(code, 0)\n+        self.assertIn(\"EMPTY\", out.getvalue())\n+\n+    def test_invalid_chain_exits_one_and_reports_failure(self) -> None:\n+        err = io.StringIO()\n+        result: dict = {\n+            \"valid\": False,\n+            \"entries_checked\": 1,\n+            \"failure_index\": 1,\n+            \"failure_type\": \"HASH_MISMATCH\",\n+            \"expected\": \"x\",\n+            \"found\": \"y\",\n+            \"message\": \"tampered\",\n+        }\n+        with patch(\"cli.commands.verify_chain\", return_value=result):\n+            with redirect_stderr(err):\n+                code: int = cmd_verify()\n+        self.assertEqual(code, 1)\n+        self.assertIn(\"HASH_MISMATCH\", err.getvalue())\n+\n+\n+class CmdLedgerTests(unittest.TestCase):\n+    def test_empty_ledger_exits_zero(self) -> None:\n+        out = io.StringIO()\n+        with patch(\"cli.commands.load_ledger\", return_value=[]):\n+            with redirect_stdout(out):\n+                code: int = cmd_ledger()\n+        self.assertEqual(code, 0)\n+        self.assertIn(\"empty\", out.getvalue().lower())\n+\n+    def test_prints_entries_with_verdicts(self) -> None:\n+        out = io.StringIO()\n+        with patch(\"cli.commands.load_ledger\", return_value=_entries()):\n+            with redirect_stdout(out):\n+                code: int = cmd_ledger()\n+        self.assertEqual(code, 0)\n+        text: str = out.getvalue()\n+        self.assertIn(\"a.py\", text)\n+        self.assertIn(\"VETO\", text)\n+        self.assertIn(\"citations: C-001\", text)\n+\n+    def test_vetoes_only_filter(self) -> None:\n+        out = io.StringIO()\n+        with patch(\"cli.commands.load_ledger\", return_value=_entries()):\n+            with redirect_stdout(out):\n+                code: int = cmd_ledger(vetoes_only=True)\n+        self.assertEqual(code, 0)\n+        text: str = out.getvalue()\n+        self.assertIn(\"b.py\", text)\n+        self.assertNotIn(\"a.py\", text)\n+\n+\n+class CmdStatsTests(unittest.TestCase):\n+    def test_stats_summary_and_exit_zero_on_valid_chain(self) -> None:\n+        out = io.StringIO()\n+        with patch(\"cli.commands.load_ledger\", return_value=_entries()):\n+            with patch(\n+                \"cli.commands.verify_chain\", return_value=_valid_verify()\n+            ):\n+                with redirect_stdout(out):\n+                    code: int = cmd_stats()\n+        self.assertEqual(code, 0)\n+        text: str = out.getvalue()\n+        self.assertIn(\"Total governed changes : 2\", text)\n+        self.assertIn(\"Passed                 : 1 (50.0%)\", text)\n+        self.assertIn(\"Vetoed                 : 1 (50.0%)\", text)\n+        self.assertIn(\"C-001\", text)\n+        self.assertIn(\"Ledger integrity       : VALID\", text)\n+\n+    def test_exit_one_when_chain_invalid(self) -> None:\n+        out = io.StringIO()\n+        invalid: dict = {\"valid\": False, \"failure_type\": \"CHAIN_BREAK\"}\n+        with patch(\"cli.commands.load_ledger\", return_value=_entries()):\n+            with patch(\"cli.commands.verify_chain\", return_value=invalid):\n+                with redirect_stdout(out):\n+                    code: int = cmd_stats()\n+        self.assertEqual(code, 1)\n+        self.assertIn(\"INVALID (CHAIN_BREAK)\", out.getvalue())\n+\n+    def test_empty_ledger_exits_zero(self) -> None:\n+        out = io.StringIO()\n+        with patch(\"cli.commands.load_ledger\", return_value=[]):\n+            with redirect_stdout(out):\n+                code: int = cmd_stats()\n+        self.assertEqual(code, 0)\n+\n+\n+class CmdConstitutionTests(unittest.TestCase):\n+    def test_prints_constraints_and_exits_zero(self) -> None:\n+        out = io.StringIO()\n+        constitution: dict = {\n+            \"constitution\": \"Bench\",\n+            \"version\": \"1.0\",\n+            \"constraints\": [\n+                {\n+                    \"id\": \"C-001\",\n+                    \"name\": \"No silent errors\",\n+                    \"severity\": \"veto\",\n+                    \"rule\": \"Catch blocks must log, re-throw, or return.\",\n+                }\n+            ],\n+        }\n+        with patch(\n+            \"cli.commands.load_constitution_snapshot\",\n+            return_value=(constitution, \"deadbeef\"),\n+        ):\n+            with redirect_stdout(out):\n+                code: int = cmd_constitution()\n+        self.assertEqual(code, 0)\n+        text: str = out.getvalue()\n+        self.assertIn(\"Bench v1.0\", text)\n+        self.assertIn(\"deadbeef\", text)\n+        self.assertIn(\"C-001\", text)\n+        self.assertIn(\"[VETO\", text)\n+\n+    def test_load_failure_exits_one(self) -> None:\n+        err = io.StringIO()\n+        with patch(\n+            \"cli.commands.load_constitution_snapshot\",\n+            side_effect=ConstitutionError(\"missing\"),\n+        ):\n+            with redirect_stderr(err):\n+                code: int = cmd_constitution()\n+        self.assertEqual(code, 1)\n+        self.assertIn(\"constitution load failed\", err.getvalue())\n+\n+\n+class CmdViewerTests(unittest.TestCase):\n+    def test_writes_html_and_exits_zero(self) -> None:\n+        out = io.StringIO()\n+        with patch(\n+            \"cli.commands.generate_viewer_html\",\n+            return_value=\"<!doctype html><title>t</title>\",\n+        ):\n+            with patch(\"cli.commands.webbrowser.open\", return_value=True):\n+                with redirect_stdout(out):\n+                    code: int = cmd_viewer()\n+        self.assertEqual(code, 0)\n+        text: str = out.getvalue()\n+        self.assertIn(\"Bench viewer written to:\", text)\n+        tmp_path: str = text.split(\"Bench viewer written to:\")[1].strip()\n+        self.addCleanup(\n+            lambda: os.path.exists(tmp_path) and os.remove(tmp_path)\n+        )\n+        written: str = Path(tmp_path).read_text(encoding=\"utf-8\")\n+        self.assertIn(\"<!doctype html>\", written)\n+\n+    def test_generation_failure_exits_one(self) -> None:\n+        err = io.StringIO()\n+        with patch(\n+            \"cli.commands.generate_viewer_html\",\n+            side_effect=RuntimeError(\"boom\"),\n+        ):\n+            with redirect_stderr(err):\n+                code: int = cmd_viewer()\n+        self.assertEqual(code, 1)\n+        self.assertIn(\"viewer generation failed\", err.getvalue())\n+\n+\n+if __name__ == \"__main__\":\n+    unittest.main()\n"
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 11825,
+        "output": 1099
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The proposed change creates a new test file (tests/test_commands.py) that exercises cli.commands using stdlib unittest and unittest.mock. Challenger found no issues and Defender confirmed clear. Independent review against the constitution: C-001 is satisfied because all patched call sites either return typed dicts or raise, and no bare except clauses exist. C-002 is satisfied; the change is scoped to tests/ and adds a new test module without touching pipeline internals. C-003 is satisfied; all imports (io, os, sys, unittest, contextlib, pathlib, unittest.mock, cli.commands, pipeline.constitution) are stdlib or already-declared project modules. C-004 is satisfied; function signatures include type hints (e.g., -> dict, -> list[dict], -> None) and no existing annotations are weakened. C-005 is satisfied; this change is itself test coverage. C-006 shows no hardcoded secrets. C-007 is not applicable as the pipeline itself is not modified; tests do not weaken enforcement. C-008 is not applicable; no ledger mutation. The tests correctly patch at import site (cli.commands.*) and use redirect_stdout/stderr, which is a sound approach.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "SATISFIED",
+          "note": "No silent error swallowing; no bare except blocks in the added code."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is confined to a new file under tests/."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "SATISFIED",
+          "note": "All imports are stdlib or already-declared internal modules."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "Type annotations present on helpers and no existing annotations weakened."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "SATISFIED",
+          "note": "This change adds tests covering cli.commands entry points."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "No credentials in source; test fixtures use dummy hashes only."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Governance pipeline code is not modified."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger writes or reads of real ledger occur; loaders are patched."
+        }
+      ],
+      "advisories": [
+        "The cmd_viewer test relies on parsing the printed path via split on 'Bench viewer written to:'; if the command's output format changes, this test will need updating. Not a violation, but a brittleness note.",
+        "The addCleanup lambda that returns the result of os.remove is fine, but the file will typically already have been opened by webbrowser.open (mocked here). Confirm test isolation on CI runners."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 16520,
+        "output": 1039
+      }
+    },
+    "entry_hash": "67739ffc166b1400d12ec8febe7baa22f28a3e4ed4afa4bdede781b6082fa818"
   }
 ]
