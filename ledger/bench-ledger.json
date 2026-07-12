@@ -11356,5 +11356,886 @@
       }
     },
     "entry_hash": "721e6d3a020fc96f8ad29b4a5bd06747cf1096726145396f07142e67e9d7499b"
+  },
+  {
+    "entry_id": "0e3faa67-df7a-4c67-b798-d433ddb95e12",
+    "timestamp": "2026-07-12T19:19:51.625778+00:00",
+    "previous_hash": "721e6d3a020fc96f8ad29b4a5bd06747cf1096726145396f07142e67e9d7499b",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "utils\\stats.py",
+      "tool": "Write",
+      "diff_summary": {
+        "file_path": "utils\\stats.py",
+        "change_type": "create",
+        "content": "\"\"\"Shared ledger statistics helpers for the CLI and the HTML viewer.\n\nSingle source of truth for how governance entries are counted, so the\nterminal report (cli/commands.py cmd_stats) and the viewer banner\n(utils/viewer.py) can never drift apart. Pure data transformation:\ncallers own all presentation.\n\"\"\"\n\nimport sys\nfrom typing import Any\n\n\ndef entry_has_pipeline_error(entry: dict) -> bool:\n    \"\"\"True if any stage of the entry recorded a PIPELINE_ERROR status.\"\"\"\n    for stage in (\"challenger\", \"defender\", \"oracle\"):\n        stage_result: Any = entry.get(stage)\n        if (\n            isinstance(stage_result, dict)\n            and stage_result.get(\"status\") == \"PIPELINE_ERROR\"\n        ):\n            return True\n    return False\n\n\ndef pct(part: int, total: int) -> str:\n    \"\"\"Format part/total as a one-decimal percentage string.\"\"\"\n    if total <= 0:\n        return \"0.0%\"\n    return f\"{part / total * 100:.1f}%\"\n\n\ndef compute_ledger_stats(entries: list[dict]) -> dict:\n    \"\"\"Aggregate verdict counts and constraint citations over the ledger.\n\n    Returns {\"total\", \"passed\", \"vetoed\", \"pipeline_errors\", \"most_cited\"}\n    where most_cited is a (constraint_id, count) tuple over VETO citations,\n    or None when no veto cited a constraint. Citation entries may be plain\n    strings or {\"constraint_id\": ...} dicts; anything else is logged to\n    stderr and skipped.\n    \"\"\"\n    total: int = len(entries)\n    passed: int = 0\n    vetoed: int = 0\n    pipeline_errors: int = 0\n    citation_counts: dict[str, int] = {}\n\n    for entry in entries:\n        oracle: Any = entry.get(\"oracle\")\n        oracle_dict: dict = oracle if isinstance(oracle, dict) else {}\n        verdict: Any = oracle_dict.get(\"verdict\")\n\n        if entry_has_pipeline_error(entry):\n            pipeline_errors += 1\n\n        if verdict == \"PASS\":\n            passed += 1\n        elif verdict == \"VETO\":\n            vetoed += 1\n            citations: Any = oracle_dict.get(\"constraint_citations\")\n            if isinstance(citations, list):\n                for cid in citations:\n                    if isinstance(cid, str):\n                        citation_counts[cid] = citation_counts.get(cid, 0) + 1\n                    elif isinstance(cid, dict):\n                        raw: Any = cid.get(\"constraint_id\")\n                        if isinstance(raw, str):\n                            citation_counts[raw] = (\n                                citation_counts.get(raw, 0) + 1\n                            )\n                    else:\n                        print(\n                            f\"[bench stats] unexpected citation type: \"\n                            f\"{type(cid).__name__}\",\n                            file=sys.stderr,\n                        )\n\n    most_cited: tuple[str, int] | None = None\n    if citation_counts:\n        most_cited = max(citation_counts.items(), key=lambda kv: kv[1])\n\n    return {\n        \"total\": total,\n        \"passed\": passed,\n        \"vetoed\": vetoed,\n        \"pipeline_errors\": pipeline_errors,\n        \"most_cited\": most_cited,\n    }\n",
+        "formatted_diff": "+\"\"\"Shared ledger statistics helpers for the CLI and the HTML viewer.\n+\n+Single source of truth for how governance entries are counted, so the\n+terminal report (cli/commands.py cmd_stats) and the viewer banner\n+(utils/viewer.py) can never drift apart. Pure data transformation:\n+callers own all presentation.\n+\"\"\"\n+\n+import sys\n+from typing import Any\n+\n+\n+def entry_has_pipeline_error(entry: dict) -> bool:\n+    \"\"\"True if any stage of the entry recorded a PIPELINE_ERROR status.\"\"\"\n+    for stage in (\"challenger\", \"defender\", \"oracle\"):\n+        stage_result: Any = entry.get(stage)\n+        if (\n+            isinstance(stage_result, dict)\n+            and stage_result.get(\"status\") == \"PIPELINE_ERROR\"\n+        ):\n+            return True\n+    return False\n+\n+\n+def pct(part: int, total: int) -> str:\n+    \"\"\"Format part/total as a one-decimal percentage string.\"\"\"\n+    if total <= 0:\n+        return \"0.0%\"\n+    return f\"{part / total * 100:.1f}%\"\n+\n+\n+def compute_ledger_stats(entries: list[dict]) -> dict:\n+    \"\"\"Aggregate verdict counts and constraint citations over the ledger.\n+\n+    Returns {\"total\", \"passed\", \"vetoed\", \"pipeline_errors\", \"most_cited\"}\n+    where most_cited is a (constraint_id, count) tuple over VETO citations,\n+    or None when no veto cited a constraint. Citation entries may be plain\n+    strings or {\"constraint_id\": ...} dicts; anything else is logged to\n+    stderr and skipped.\n+    \"\"\"\n+    total: int = len(entries)\n+    passed: int = 0\n+    vetoed: int = 0\n+    pipeline_errors: int = 0\n+    citation_counts: dict[str, int] = {}\n+\n+    for entry in entries:\n+        oracle: Any = entry.get(\"oracle\")\n+        oracle_dict: dict = oracle if isinstance(oracle, dict) else {}\n+        verdict: Any = oracle_dict.get(\"verdict\")\n+\n+        if entry_has_pipeline_error(entry):\n+            pipeline_errors += 1\n+\n+        if verdict == \"PASS\":\n+            passed += 1\n+        elif verdict == \"VETO\":\n+            vetoed += 1\n+            citations: Any = oracle_dict.get(\"constraint_citations\")\n+            if isinstance(citations, list):\n+                for cid in citations:\n+                    if isinstance(cid, str):\n+                        citation_counts[cid] = citation_counts.get(cid, 0) + 1\n+                    elif isinstance(cid, dict):\n+                        raw: Any = cid.get(\"constraint_id\")\n+                        if isinstance(raw, str):\n+                            citation_counts[raw] = (\n+                                citation_counts.get(raw, 0) + 1\n+                            )\n+                    else:\n+                        print(\n+                            f\"[bench stats] unexpected citation type: \"\n+                            f\"{type(cid).__name__}\",\n+                            file=sys.stderr,\n+                        )\n+\n+    most_cited: tuple[str, int] | None = None\n+    if citation_counts:\n+        most_cited = max(citation_counts.items(), key=lambda kv: kv[1])\n+\n+    return {\n+        \"total\": total,\n+        \"passed\": passed,\n+        \"vetoed\": vetoed,\n+        \"pipeline_errors\": pipeline_errors,\n+        \"most_cited\": most_cited,\n+    }\n"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-004",
+          "severity": "CONCERN",
+          "location": "utils/stats.py: multiple lines throughout compute_ledger_stats and entry_has_pipeline_error",
+          "evidence": "stage_result: Any = entry.get(stage)\noracle: Any = entry.get(\"oracle\")\nverdict: Any = oracle_dict.get(\"verdict\")\ncitations: Any = oracle_dict.get(\"constraint_citations\")\nraw: Any = cid.get(\"constraint_id\")",
+          "reasoning": "C-004 states 'Adding Any type... is a violation.' Five local-variable annotations in the new module are typed as Any. These are new functions in a new file so no existing annotation is being weakened, but the rule's plain text does not restrict the prohibition to modifications of existing code. The Oracle should rule on whether 'new file' is an exception to the Any prohibition, or whether the intent is limited to preventing regression of already-typed signatures. The function-level signatures themselves (bool, str, dict return types; int and list[dict] parameters) are typed, so the concern is scoped to the internal variable annotations only."
+        },
+        {
+          "constraint_id": "C-005",
+          "severity": "CONCERN",
+          "location": "utils/stats.py: entire file",
+          "evidence": "def entry_has_pipeline_error(entry: dict) -> bool:\ndef pct(part: int, total: int) -> str:\ndef compute_ledger_stats(entries: list[dict]) -> dict:",
+          "reasoning": "Three new public functions introduce non-trivial logic (pipeline-error detection across three stage keys, percentage formatting with a zero-guard, and a full aggregation loop with dual citation-format handling and a max-pick for most_cited). No test file is added alongside this change, and no explicit justification for deferred testing is provided in the diff or the docstring. C-005 is a warning-severity constraint, but the rule requires either tests or explicit justification, neither of which is present."
+        }
+      ],
+      "_tokens": {
+        "input": 7649,
+        "output": 2650
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "REBUT",
+          "argument": "C-004 reads: 'Functions must not remove or weaken existing type annotations. Adding Any type or removing a typed return annotation is a violation.' The operative word is 'existing.' In a brand-new file there are no pre-existing annotations to regress. The rationale confirms this reading: 'Type annotations are governance infrastructure. Weakening them degrades the ability to reason about correctness.' Weakening requires a prior stronger state; no such state exists here. Furthermore, the `Any` annotations appear exclusively on intermediate local variables that hold the result of `dict.get()` on untyped JSON data \u2014 the only honest type for values extracted from a `dict[str, unknown]`. The function signatures themselves carry precise types throughout: `(entry: dict) -> bool`, `(part: int, total: int) -> str`, `(entries: list[dict]) -> dict`. Annotating intermediate bindings as `Any` is the responsible choice when the value's dynamic type is genuinely unknown at that point in the call chain; suppressing the annotation entirely or using an incorrect concrete type would be worse. The Challenger's own reasoning acknowledges the new-file context and frames this as a question for the Oracle rather than a clear violation. It is not a violation.",
+          "evidence": "Function signatures are fully typed: `def entry_has_pipeline_error(entry: dict) -> bool`, `def pct(part: int, total: int) -> str`, `def compute_ledger_stats(entries: list[dict]) -> dict`. The `Any` annotations appear only on local variables: `stage_result: Any = entry.get(stage)`, `oracle: Any = entry.get(\"oracle\")`, etc. \u2014 all results of `.get()` on bare `dict` objects where the value type is unknown. C-004 rationale: 'Weakening them degrades the ability to reason about correctness' \u2014 weakening requires prior stronger state."
+        },
+        {
+          "finding_index": 1,
+          "position": "CONCEDE",
+          "argument": "The Challenger is correct. Three non-trivial public functions are introduced: `entry_has_pipeline_error` (iterates three stage keys), `pct` (zero-guard branch), and `compute_ledger_stats` (aggregation loop with dual-format citation handling and a max-pick for most_cited). The dual-format citation path in particular \u2014 handling both plain strings and `{constraint_id: ...}` dicts with an else branch that logs to stderr \u2014 is exactly the kind of logic that benefits most from parameterized test cases. No test file accompanies this change and no explicit justification for deferred testing appears in the diff or docstrings. C-005 is warning-severity, not veto, but the requirement is real: either tests or explicit justification, and neither is present. This gap should be addressed.",
+          "evidence": "No `tests/test_stats.py` or equivalent is included in the diff. No docstring or comment states a justification for deferring tests. The `compute_ledger_stats` function has at minimum five distinct code paths (PASS verdict, VETO with string citation, VETO with dict citation, VETO with unexpected citation type, and pipeline-error entry) that ought to be covered."
+        }
+      ],
+      "summary": "The change is architecturally sound and C-004 is not violated (Any is used appropriately on intermediate variables in a new file with fully-typed function signatures), but the C-005 warning is legitimate: three non-trivial functions ship without accompanying tests or an explicit deferral justification.",
+      "_tokens": {
+        "input": 8197,
+        "output": 1827
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change creates a new utility module (utils/stats.py) that consolidates ledger statistics logic. Reviewing against the constitution: C-001 is satisfied because the only exception-adjacent path (unexpected citation type) logs to stderr rather than silently swallowing. C-002 is satisfied because the file is a new module in utils/ consistent with the CLAUDE.md project structure (utils/stats.py is explicitly declared). C-003 is satisfied because only stdlib imports (sys, typing.Any) are used, requiring no requirements.txt changes. C-004: the Challenger raised a CONCERN about Any annotations on local variables; the Defender's rebuttal is persuasive. The constraint text explicitly targets removing or weakening 'existing' annotations, and all function signatures are fully typed (dict, bool, int, str, list[dict]). Any is used only on intermediate locals holding results of dict.get() on untyped JSON, which is a defensible use. No prior stronger state is being weakened. C-005 is warning-severity; the Defender concedes tests are absent. Per the rule this is a warning, not a veto trigger, so it becomes an advisory. C-006: no secrets present. C-007: this file is in utils/, not pipeline/ledger/hooks/, and does not weaken enforcement, bypass verification, or disable logging (it is a pure read/aggregation helper). C-008: no ledger mutation; the function only reads entries passed in.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "SATISFIED",
+          "note": "The unexpected-citation-type branch logs to stderr rather than silently discarding."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "utils/stats.py is a declared project location per CLAUDE.md; creation is within scope."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "SATISFIED",
+          "note": "Only stdlib imports (sys, typing.Any); no requirements.txt change needed."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "Defender's rebuttal accepted: the constraint targets weakening 'existing' annotations. Function signatures are fully typed; Any appears only on local bindings for untyped JSON values."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "VIOLATED",
+          "note": "Warning-severity only. Three new non-trivial functions ship without tests or written justification; Defender conceded. Recorded as advisory, does not trigger veto."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No credentials or secrets in the diff."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "File lives in utils/, not in pipeline/ledger/hooks/; it is a read-only aggregation helper and does not alter enforcement."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "SATISFIED",
+          "note": "Function only reads a list of entries; no mutation, deletion, or overwrite of ledger state."
+        }
+      ],
+      "advisories": [
+        "C-005 warning: add tests/test_stats.py covering the five distinct paths in compute_ledger_stats (PASS, VETO+string citation, VETO+dict citation, VETO+unexpected citation type, pipeline_error) plus pct's zero-guard, or record an explicit deferral justification in a follow-up.",
+        "Ensure a follow-up change wires cli/commands.py cmd_stats and utils/viewer.py to consume compute_ledger_stats so the stated 'single source of truth' promise is actually realized; otherwise this module is dead code."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 13021,
+        "output": 1372
+      }
+    },
+    "entry_hash": "bdc2779d6e2e50daee914fcb06209b9fef8c0a478cde84d93912ed8bfd4890a1"
+  },
+  {
+    "entry_id": "1b3b3113-c62a-41d1-a91e-2a00b40b1cfc",
+    "timestamp": "2026-07-12T19:21:41.094849+00:00",
+    "previous_hash": "bdc2779d6e2e50daee914fcb06209b9fef8c0a478cde84d93912ed8bfd4890a1",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "cli\\commands.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "cli\\commands.py",
+        "change_type": "modify",
+        "old_string": "    entries: list[dict] = load_ledger()\n    total: int = len(entries)\n\n    if total == 0:\n        print(\"Ledger is empty. No governance statistics to report.\")\n        return 0\n\n    passed: int = 0\n    vetoed: int = 0\n    pipeline_errors: int = 0\n    citation_counts: dict[str, int] = {}\n\n    for entry in entries:\n        oracle: Any = entry.get(\"oracle\")\n        oracle_dict: dict = oracle if isinstance(oracle, dict) else {}\n        verdict: Any = oracle_dict.get(\"verdict\")\n\n        if _entry_has_pipeline_error(entry):\n            pipeline_errors += 1\n\n        if verdict == \"PASS\":\n            passed += 1\n        elif verdict == \"VETO\":\n            vetoed += 1\n            citations: Any = oracle_dict.get(\"constraint_citations\")\n            if isinstance(citations, list):\n                for cid in citations:\n                    if isinstance(cid, str):\n                        citation_counts[cid] = citation_counts.get(cid, 0) + 1\n                    elif isinstance(cid, dict):\n                        raw = cid.get(\"constraint_id\")\n                        if isinstance(raw, str):\n                            citation_counts[raw] = citation_counts.get(raw, 0) + 1\n                    else:\n                        print(\n                            f\"[bench cli] unexpected citation type: {type(cid).__name__}\",\n                            file=sys.stderr,\n                        )\n\n    most_cited: tuple[str, int] | None = None\n    if citation_counts:\n        most_cited = max(citation_counts.items(), key=lambda kv: kv[1])",
+        "new_string": "    entries: list[dict] = load_ledger()\n    total: int = len(entries)\n\n    if total == 0:\n        print(\"Ledger is empty. No governance statistics to report.\")\n        return 0\n\n    stats: dict = compute_ledger_stats(entries)\n    passed: int = stats[\"passed\"]\n    vetoed: int = stats[\"vetoed\"]\n    pipeline_errors: int = stats[\"pipeline_errors\"]\n    most_cited: tuple[str, int] | None = stats[\"most_cited\"]"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-001",
+          "severity": "CONCERN",
+          "location": "cli/commands.py - removed else branch in citation-type checking loop",
+          "evidence": "Old code contained:\n```python\nelse:\n    print(\n        f\"[bench cli] unexpected citation type: {type(cid).__name__}\",\n        file=sys.stderr,\n    )\n```\nThis branch is entirely removed. The new code delegates to `compute_ledger_stats(entries)` without showing that function's implementation.",
+          "reasoning": "C-001 prohibits silent error swallowing. The removed block was the explicit logging path for unexpected citation types inside vetoed entries. If `compute_ledger_stats` in `utils/stats.py` does not replicate this logging, unexpected citation shapes will be silently ignored rather than surfaced to stderr. The diff provides no evidence that the delegate function preserves this observable error path."
+        },
+        {
+          "constraint_id": "C-004",
+          "severity": "OBSERVATION",
+          "location": "cli/commands.py - new intermediate variable assignment",
+          "evidence": "stats: dict = compute_ledger_stats(entries)",
+          "reasoning": "The original code used fully typed local variables (`passed: int`, `vetoed: int`, `citation_counts: dict[str, int]`, `most_cited: tuple[str, int] | None`). The new intermediate variable uses a bare `dict` annotation with no type parameters, which is weaker than `dict[str, Any]` or a named TypedDict. This is not a removal of an existing annotation, so it is not a clear violation, but it introduces a less-typed surface at the call boundary. Worth confirming whether `compute_ledger_stats` has a typed return annotation that covers this."
+        }
+      ],
+      "_tokens": {
+        "input": 6281,
+        "output": 2214
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "MITIGATE",
+          "argument": "The Challenger raises a real concern, but overstates its severity against C-001. The constitution defines C-001 as covering *catch blocks*: 'All catch blocks must log, re-throw, or return a typed error. Empty catch blocks and catch blocks that only contain comments are violations.' The removed else branch is not a catch block -- it was a defensive log inside a type-checking loop, an observable warning path rather than an error suppression site. So this is not a textbook C-001 violation. That said, the practical risk the Challenger identifies is real: if `compute_ledger_stats` in `utils/stats.py` silently drops unexpected citation shapes, debugging malformed ledger entries becomes harder. The mitigation here is architectural: `compute_ledger_stats` is described in CLAUDE.md as 'Shared ledger stats helpers (CLI + viewer)' -- it exists precisely to consolidate this logic so it can be tested and reviewed in one place rather than duplicated across consumers. A function in a governed codebase that processes the same ledger entries will itself have been scrutinized. The absence of the log in this diff does not prove the log is absent from the delegate -- it means the delegate's implementation is out of scope for this diff. If the utility function omits the logging, that is a problem to catch when *that* function was reviewed, not a reason to veto this refactor.",
+          "evidence": "C-001 rule text: 'All catch blocks must log, re-throw, or return a typed error.' The removed block is an else branch, not a catch block. CLAUDE.md: 'utils/stats.py -- Shared ledger stats helpers (CLI + viewer)' -- confirms the function is a shared extraction, not new logic."
+        },
+        {
+          "finding_index": 1,
+          "position": "REBUT",
+          "argument": "The Challenger concedes this is not a clear C-004 violation, and that assessment is correct -- it should not be escalated further. C-004 states 'Functions must not remove or weaken existing type annotations.' The `stats: dict` annotation is a *new* intermediate variable that did not previously exist; no annotation is being removed or weakened. The downstream variables -- `passed: int`, `vetoed: int`, `pipeline_errors: int`, `most_cited: tuple[str, int] | None` -- retain their original precise type annotations exactly as they appeared in the old code. The type specificity is preserved at the point of use; the intermediate dict is simply an unpacking vehicle. The relevant type annotation is on `compute_ledger_stats`'s return signature in `utils/stats.py`. A bare `dict` hint on a local binding is weak style but is not a constitutional violation under C-004.",
+          "evidence": "Old code: `passed: int`, `vetoed: int`, `pipeline_errors: int`, `most_cited: tuple[str, int] | None`. New code preserves all four of these identical typed bindings. The `stats: dict` line is a new local, not a replacement of any annotated symbol."
+        }
+      ],
+      "summary": "The refactoring is architecturally sound -- it consolidates duplicated ledger-stats logic into a shared utility -- and neither finding constitutes a clean constitutional violation; the C-001 concern is real but contingent on the utility function's implementation (which is outside this diff's scope and subject to its own governance), while the C-004 observation is correctly self-identified by the Challenger as not a violation.",
+      "_tokens": {
+        "input": 6772,
+        "output": 1807
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "This is a refactor that extracts duplicated stats computation into a shared helper (compute_ledger_stats) already declared in CLAUDE.md as 'Shared ledger stats helpers (CLI + viewer)'. Evaluating against the constitution: C-001 governs catch blocks specifically ('All catch blocks must log, re-throw, or return a typed error'); the removed else branch is a defensive stderr warning inside a type-checking loop, not a catch block, so the Defender's textual rebuttal is correct. The Challenger's concern about whether the delegate preserves the warning is contingent on utils/stats.py's implementation, which is out of scope for this diff and subject to its own governance review. C-004 is not violated: all four originally typed bindings (passed: int, vetoed: int, pipeline_errors: int, most_cited: tuple[str, int] | None) are preserved verbatim, and the new 'stats: dict' is a fresh intermediate binding, not a weakening of an existing annotation, as the Challenger themselves conceded. C-007 (governance pipeline integrity) is not triggered because cli/commands.py is a reporting surface, not part of the enforcement path (challenger/defender/oracle/ledger/constitution); reducing duplication does not weaken enforcement. C-002 is satisfied: the change is confined to cli/commands.py consistent with a stats-refactor task. C-003, C-006, C-008 are not implicated. Advisory: the delegate function utils/stats.py should preserve the unexpected-citation-type stderr warning to retain observability, per the Challenger's C-001 concern.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Removed block is an else branch in a type-check loop, not a catch block. C-001 rule text scopes to catch blocks (Defender rebuttal 0)."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is confined to cli/commands.py, consistent with a shared-helper refactor."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new imports introduced in the shown diff; compute_ledger_stats is described in CLAUDE.md as an existing shared helper."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "All four originally typed local bindings retain their precise annotations. The new 'stats: dict' is an added intermediate, not a weakened existing annotation (Challenger acknowledged this is not a clear violation; Defender rebuttal 1)."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No secrets or credentials in diff."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "cli/commands.py is a reporting/CLI surface, not part of enforcement. Delegating identical computation to a shared helper does not weaken enforcement or disable logging in the pipeline itself."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger writes or mutations; stats consumption is read-only."
+        }
+      ],
+      "advisories": [
+        "Ensure utils/stats.compute_ledger_stats preserves the stderr warning for unexpected citation types so observability is not silently lost across the refactor (Challenger finding 0).",
+        "Consider a more precise return type (e.g., TypedDict) for compute_ledger_stats to strengthen the call-site type surface; bare 'dict' is legal under C-004 but weaker style (Challenger finding 1)."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 10997,
+        "output": 1358
+      }
+    },
+    "entry_hash": "52c11f9de5fcc66dc671756ba08d2b253d35b62cd5801398d91bb95ed0d91198"
+  },
+  {
+    "entry_id": "6b3306fd-bb33-4e55-9d2b-ea2b8e4076cc",
+    "timestamp": "2026-07-12T19:24:14.205377+00:00",
+    "previous_hash": "52c11f9de5fcc66dc671756ba08d2b253d35b62cd5801398d91bb95ed0d91198",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "cli\\commands.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "cli\\commands.py",
+        "change_type": "modify",
+        "old_string": "def _entry_has_pipeline_error(entry: dict) -> bool:\n    for stage in (\"challenger\", \"defender\", \"oracle\"):\n        stage_result: Any = entry.get(stage)\n        if (\n            isinstance(stage_result, dict)\n            and stage_result.get(\"status\") == \"PIPELINE_ERROR\"\n        ):\n            return True\n    return False",
+        "new_string": ""
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-007",
+          "severity": "CONCERN",
+          "location": "cli/commands.py: deletion of _entry_has_pipeline_error",
+          "evidence": "def _entry_has_pipeline_error(entry: dict) -> bool:\n    for stage in (\"challenger\", \"defender\", \"oracle\"):\n        stage_result: Any = entry.get(stage)\n        if (\n            isinstance(stage_result, dict)\n            and stage_result.get(\"status\") == \"PIPELINE_ERROR\"\n        ):\n            return True\n    return False",
+          "reasoning": "This function is the CLI's mechanism for detecting PIPELINE_ERROR states in ledger entries across all three governance pipeline stages (challenger, defender, oracle). Removing it without a visible replacement degrades the CLI's ability to surface pipeline failures. C-007 prohibits changes that 'disable logging' or weaken the governance pipeline's self-monitoring capability. The CLI audit tools (stats, ledger viewer) depend on this classification to distinguish genuine verdicts from pipeline malfunctions. If callers of this function are not also removed or replaced in this same diff, those call sites will raise NameError at runtime, silently breaking the tooling used to audit the pipeline."
+        },
+        {
+          "constraint_id": "C-001",
+          "severity": "CONCERN",
+          "location": "cli/commands.py: deletion of _entry_has_pipeline_error",
+          "evidence": "new_string: \"\" (complete removal, no replacement)",
+          "reasoning": "The diff shows only the function deletion with no evidence of call-site cleanup or a replacement implementation. If any existing code in commands.py (or files that import from it, such as utils/stats.py or the viewer) still invokes _entry_has_pipeline_error, those call sites will fail at runtime with a NameError. This creates a silent failure path: PIPELINE_ERROR conditions in the ledger become undetectable without any visible error surfacing to the operator, which violates the spirit of C-001's requirement that failures be visible. This is distinct from a catch block violation but produces the same outcome: errors that compound silently."
+        }
+      ],
+      "_tokens": {
+        "input": 5771,
+        "output": 2783
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "MITIGATE",
+          "argument": "The C-007 framing is overstretched. C-007's explicit scope is 'challenger, defender, oracle, ledger, constitution' \u2014 the core governance pipeline. The CLI commands module is an audit and inspection utility, not a governance enforcement component. Deleting a helper from cli/commands.py does not disable enforcement, bypass verification, or weaken pipeline logging in the C-007 sense. The governing pipeline itself (runner.py, challenger.py, defender.py, oracle.py, chain.py) is untouched. That said, the underlying concern is real: if this function was the sole detection mechanism for PIPELINE_ERROR states in the CLI stats and viewer, removing it without a replacement degrades operator visibility into pipeline health. The most plausible context for this deletion is that the function is being consolidated into utils/stats.py (which the architecture explicitly designates as 'Shared ledger stats helpers \u2014 CLI + viewer'), and call sites are being updated to import from there. If that companion change exists, the detection capability is preserved and the concern dissolves. The risk is low if the refactor is complete; it is a genuine problem if this is a dangling deletion.",
+          "evidence": "CLAUDE.md architecture: 'utils/stats.py \u2014 Shared ledger stats helpers (CLI + viewer)'. C-007 scope: 'challenger, defender, oracle, ledger, constitution'. The CLI module is listed separately as 'cli/commands.py \u2014 verify, ledger, stats, constitution, viewer'. These are architecturally distinct layers."
+        },
+        {
+          "finding_index": 1,
+          "position": "REBUT",
+          "argument": "The C-001 characterization is incorrect. C-001 explicitly targets catch blocks: 'All catch blocks must log, re-throw, or return a typed error.' A missing function definition is not a catch block, and the resulting NameError at a call site is not a silent failure \u2014 it is a loud, explicit runtime exception that immediately surfaces to the caller. The spirit of C-001 is to prevent swallowed exceptions, not to govern function presence. Applying C-001 here conflates 'silent' with 'broken'; broken is the opposite of silent. The practical concern \u2014 that call sites might NameError at runtime \u2014 is a real operational risk, but it is not a C-001 violation. If call sites have been cleaned up in companion changes governed through their own pipeline runs (as the Bench workflow requires), the risk is already addressed. If not, the correct finding is 'incomplete refactor / potential runtime breakage', not a constitutional violation under C-001.",
+          "evidence": "C-001 rule text: 'Empty catch blocks and catch blocks that only contain comments are violations.' No catch block is involved here. NameErrors raise explicitly and propagate up the call stack \u2014 they are by definition not silent."
+        }
+      ],
+      "summary": "The deletion is likely the CLI-side half of a legitimate refactor moving the helper to utils/stats.py; neither C-007 nor C-001 maps cleanly to this change, though the Oracle should confirm whether companion call-site cleanup and a utils/stats.py implementation exist before passing.",
+      "_tokens": {
+        "input": 6345,
+        "output": 2519
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The Challenger raises two concerns but neither maps cleanly to a constitutional violation. On C-007 (Finding 0), the Defender correctly notes that C-007's scope is 'challenger, defender, oracle, ledger, constitution' - the enforcement pipeline itself. cli/commands.py is an audit/inspection layer per CLAUDE.md's architecture listing, and deleting a helper there does not disable enforcement, bypass verification, or disable logging in the runner or ledger. The runner/oracle/chain code that actually records PIPELINE_ERROR states is untouched. On C-001 (Finding 1), the Defender is correct that C-001 explicitly governs catch blocks ('Empty catch blocks and catch blocks that only contain comments are violations'). A NameError from a dangling call site is a loud, propagating exception, which is the opposite of silent error swallowing. The Challenger's reframing of 'silent failure path' does not fit C-001's rule text. No other constraints (C-002 through C-008) are implicated: the change is confined to cli/commands.py, adds no dependencies, removes no type annotations from surviving code, introduces no secrets, and does not touch the ledger. The residual operational risk (dangling call sites) is a code-correctness concern, not a governance violation, and is flagged as an advisory.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No catch block is added, removed, or modified. NameErrors from missing symbols are explicit runtime exceptions, not silent failures. Defender rebuttal accepted."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is confined to cli/commands.py."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependencies added."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "A whole function is deleted; no surviving annotation is weakened."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Deletion of logic, not addition."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No secrets involved."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "cli/commands.py is an audit surface, not a governance-enforcement component. The runner, stage modules, and ledger chain are untouched. Enforcement, verification, and logging are not weakened. Defender's scoping argument accepted."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "SATISFIED",
+          "note": "No ledger entries are modified, deleted, or overwritten."
+        }
+      ],
+      "advisories": [
+        "Neither the diff nor the reviews confirm that PIPELINE_ERROR detection has been relocated (e.g., to utils/stats.py per CLAUDE.md's shared-helpers designation) and that all call sites of _entry_has_pipeline_error have been updated. If this deletion is part of a refactor, the companion changes should be verified to prevent NameError regressions in `cli stats` and the viewer. Not a constitutional violation, but a correctness risk to confirm before shipping.",
+        "If PIPELINE_ERROR classification is dropped entirely (not relocated), operator visibility into pipeline malfunctions is degraded. This does not violate C-007's letter but is worth an explicit product decision."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 10422,
+        "output": 1667
+      }
+    },
+    "entry_hash": "6783a5c79e32414fa4594d0313b9eff1088860d79fa93a9cca336f004b3d5787"
+  },
+  {
+    "entry_id": "f20a650f-a4a1-4f8a-93ce-d7a64e4d3e56",
+    "timestamp": "2026-07-12T19:25:31.013636+00:00",
+    "previous_hash": "6783a5c79e32414fa4594d0313b9eff1088860d79fa93a9cca336f004b3d5787",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "cli\\commands.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "cli\\commands.py",
+        "change_type": "modify",
+        "old_string": "from utils.viewer import generate_viewer_html",
+        "new_string": "from utils.stats import compute_ledger_stats, entry_has_pipeline_error, pct\nfrom utils.viewer import generate_viewer_html"
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 11878,
+        "output": 1852
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change adds a single import line for `compute_ledger_stats`, `entry_has_pipeline_error`, and `pct` from `utils.stats`, alongside the existing `utils.viewer` import. Per project structure documented in CLAUDE.md, `utils/stats.py` is a declared internal module ('Shared ledger stats helpers (CLI + viewer)'), so C-003 (Dependency Declaration) is satisfied without requirements.txt changes since this is a first-party module, not an external dependency. The change is confined to cli/commands.py and does not touch pipeline/, ledger/, or hooks/, so C-007 (Governance Pipeline Integrity) is not implicated. No error handling is introduced or removed (C-001 N/A), no type annotations are weakened (C-004 N/A), no ledger entries are touched (C-008 N/A), no secrets are introduced (C-006 N/A). Scope is a single import line in a single file (C-002 satisfied). Challenger returned CLEAR and Defender confirmed CLEAR.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Import-only change; no error handling code touched."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Single import addition in cli/commands.py, no cross-file changes."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "SATISFIED",
+          "note": "utils.stats is a documented first-party module per CLAUDE.md project structure; not an external dependency requiring requirements.txt entry."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No type annotations added, removed, or weakened."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Import statement introduces no new logic branches requiring tests."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No credentials or secrets present in the diff."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "cli/commands.py is not part of the governance pipeline (challenger, defender, oracle, ledger, constitution). Import does not weaken enforcement."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger read/write code introduced by this diff."
+        }
+      ],
+      "advisories": [
+        "Verify that utils/stats.py actually exports compute_ledger_stats, entry_has_pipeline_error, and pct; an import for symbols that don't exist would fail at runtime. This is a correctness concern, not a constitutional one.",
+        "The imported symbols must be used somewhere in cli/commands.py; unused imports would fail the pre-ship lint per the user's global instructions."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 8491,
+        "output": 1102
+      }
+    },
+    "entry_hash": "e8ffc5556449b9bf53b66d822c5a9fa37659f250a9a37e83dad3742054cfe5ab"
+  },
+  {
+    "entry_id": "fee66667-9c00-4921-aa69-6e6ba2e5dbb7",
+    "timestamp": "2026-07-12T19:27:26.998707+00:00",
+    "previous_hash": "e8ffc5556449b9bf53b66d822c5a9fa37659f250a9a37e83dad3742054cfe5ab",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "cli\\commands.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "cli\\commands.py",
+        "change_type": "modify",
+        "old_string": "    print(f\"Passed                 : {passed} ({_pct(passed, total)})\")\n    print(f\"Vetoed                 : {vetoed} ({_pct(vetoed, total)})\")",
+        "new_string": "    print(f\"Passed                 : {passed} ({pct(passed, total)})\")\n    print(f\"Vetoed                 : {vetoed} ({pct(vetoed, total)})\")"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-001",
+          "severity": "CONCERN",
+          "location": "cli/commands.py: both modified print lines",
+          "evidence": "({pct(passed, total)}) ... ({pct(vetoed, total)})",
+          "reasoning": "The diff renames call sites from `_pct(...)` to `pct(...)` but shows no corresponding change to a function definition or import statement. If `pct` is not defined or imported in this module (and `_pct` was a private local helper or an imported name with an underscore prefix), this produces an unhandled `NameError` at runtime. C-001 targets visible failures: a crashing stats command that emits a traceback instead of a governed error response is a silent-failure pattern in spirit. The concern is not a catch-block issue but rather code that would silently destroy the CLI output path instead of failing with a typed, logged error. This is a CONCERN rather than a VIOLATION because the file context is not shown \u2014 if `pct` was renamed in a prior committed change to `utils/stats.py` or defined earlier in this file, the call is valid. The absence of any import delta in this diff is the evidence that warrants scrutiny."
+        }
+      ],
+      "_tokens": {
+        "input": 5777,
+        "output": 2689
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "MITIGATE",
+          "argument": "The Challenger's concern is legitimate in spirit but misfires on two fronts. First, C-001 is precisely scoped: 'All catch blocks must log, re-throw, or return a typed error. Empty catch blocks and catch blocks that only contain comments are violations.' A NameError from a call site rename is not a catch-block issue. The Challenger acknowledges this directly ('The concern is not a catch-block issue') yet still maps it to C-001. That mapping is a stretch. Second, the most natural reading of this diff is that it is a call-site normalization change: the project's own CLAUDE.md describes `utils/stats.py` as 'Shared ledger stats helpers (CLI + viewer)', and `cli/commands.py` almost certainly already imports `pct` from that module (or this diff is the tail end of a rename where the definition was updated in a prior step). A NameError here would be immediately and loudly visible at first invocation of the CLI stats command, which is the opposite of a silent failure. That said, I do not have full file context to confirm the import exists, so I cannot fully rebut the runtime-correctness concern. If `pct` is not defined or imported in `cli/commands.py`, this is a real bug. It is just not a constitutional violation under any of the eight constraints as written. The correct disposition is: pass the change with a note that reviewers should confirm `pct` is in scope.",
+          "evidence": "C-001 rule text: 'All catch blocks must log, re-throw, or return a typed error.' No catch block is touched by this diff. CLAUDE.md project structure: 'utils/stats.py: Shared ledger stats helpers (CLI + viewer)' \u2014 strongly suggests `pct` is an exported public function from that module, not a private local helper. The underscore convention (`_pct`) in Python signals module-private scope; removing it to `pct` is consistent with promoting or aliasing to a shared public function. No import delta in the diff is consistent with the import already being present in the file."
+        }
+      ],
+      "summary": "The Challenger's runtime-correctness concern about `pct` being undefined is plausible but not provable without full file context, and it does not map to any of the eight constitutional constraints as written \u2014 C-001 governs catch blocks, not call sites; the change is most likely a normalization to an already-imported shared helper from utils/stats.py, and any resulting NameError would be immediately visible, not silent.",
+      "_tokens": {
+        "input": 6132,
+        "output": 2061
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The Challenger raised a single CONCERN mapping a potential NameError from a call-site rename (`_pct` -> `pct`) to C-001. The Defender correctly notes that C-001 is explicitly scoped to catch blocks ('All catch blocks must log, re-throw, or return a typed error'), and no catch block is touched by this diff. The Challenger themselves acknowledged 'The concern is not a catch-block issue.' A runtime NameError, if it occurred, would be loudly visible (traceback on CLI invocation), which is the opposite of silent error swallowing. The change is a small call-site normalization consistent with `pct` being an exported helper from utils/stats.py (per CLAUDE.md's description of that module as 'Shared ledger stats helpers (CLI + viewer)'). No other constraints are implicated: C-002 (scope) is fine since cli/commands.py is a natural target for CLI stat formatting; C-003 (deps) no new imports; C-004 (types) no type annotations touched; C-006 (secrets) none; C-007 (governance pipeline) cli/commands.py is not in pipeline/, ledger/, or hooks/; C-008 (ledger) no ledger writes. Advisory: the Challenger's runtime-correctness concern is worth verifying, but it is not a constitutional violation.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Constraint governs catch blocks; the diff contains no catch block. Challenger conceded this directly."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is confined to cli/commands.py, appropriate for a CLI-level rename."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "SATISFIED",
+          "note": "No new imports or dependencies introduced."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "No type annotations modified or weakened."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new logic branches; purely a name change on existing calls."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "No secrets or credentials introduced."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "cli/commands.py is not part of the governance pipeline (pipeline/, ledger/, hooks/)."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "SATISFIED",
+          "note": "No ledger modification; change is display formatting only."
+        }
+      ],
+      "advisories": [
+        "Verify that `pct` is imported or defined in cli/commands.py (likely from utils/stats.py) before shipping. A NameError here would fail loudly on first CLI invocation, but this is a correctness check reviewers should confirm."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 9765,
+        "output": 1107
+      }
+    },
+    "entry_hash": "bff4f8bdeabf2d6a7c9b26239523fa2d336b0e8ec7234ced972878b96d682698"
+  },
+  {
+    "entry_id": "f73531e4-a79a-45f7-b821-c0e283df4312",
+    "timestamp": "2026-07-12T19:29:25.137400+00:00",
+    "previous_hash": "bff4f8bdeabf2d6a7c9b26239523fa2d336b0e8ec7234ced972878b96d682698",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "cli\\commands.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "cli\\commands.py",
+        "change_type": "modify",
+        "old_string": "    if not verdict:\n        if _entry_has_pipeline_error(entry):\n            verdict = \"FAIL-OPEN\"",
+        "new_string": "    if not verdict:\n        if entry_has_pipeline_error(entry):\n            verdict = \"FAIL-OPEN\""
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-007",
+          "severity": "CONCERN",
+          "location": "cli/commands.py - the call site `if entry_has_pipeline_error(entry):`",
+          "evidence": "if entry_has_pipeline_error(entry):",
+          "reasoning": "The diff only shows the call site being changed from `_entry_has_pipeline_error(entry)` to `entry_has_pipeline_error(entry)`. It does not show: (a) a corresponding rename of the function definition within `commands.py`, or (b) a new import statement bringing in a public `entry_has_pipeline_error` from another module (e.g., `utils/stats.py`). If the private definition `_entry_has_pipeline_error` still exists unchanged and no public version is imported, this call will raise a `NameError` at runtime, breaking the CLI governance tooling. A partially applied rename that leaves the codebase in a broken state between changes undermines governance pipeline integrity."
+        },
+        {
+          "constraint_id": "C-002",
+          "severity": "CONCERN",
+          "location": "cli/commands.py - top-level imports (not shown in diff)",
+          "evidence": "call to `entry_has_pipeline_error(entry)` without a visible import statement in the diff",
+          "reasoning": "If `entry_has_pipeline_error` is being moved from a private function in `commands.py` to a public function in `utils/stats.py` (consistent with CLAUDE.md describing `utils/stats.py` as 'Shared ledger stats helpers (CLI + viewer)'), then a corresponding import change in `commands.py` should be part of this diff. No import change is present. If the definition was changed in a separate file as a prior or sibling operation, that scope of change is not captured here, making the atomicity of the change questionable per Rule 14 ('One change per tool call')."
+        },
+        {
+          "constraint_id": "C-005",
+          "severity": "OBSERVATION",
+          "location": "cli/commands.py - the function being renamed",
+          "evidence": "Rename from `_entry_has_pipeline_error` to `entry_has_pipeline_error`",
+          "reasoning": "Changing a private helper to a public one (removing the underscore convention) implies a deliberate change in interface visibility. If this function is being promoted to a public API (e.g., exported from `utils/stats.py`), new callers of the public symbol may exist without corresponding test coverage. This is a warning-level concern, not a veto, but worth examining whether existing tests reference the old private name and would now fail to cover the new public path."
+        }
+      ],
+      "_tokens": {
+        "input": 5734,
+        "output": 2646
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "CONCEDE",
+          "argument": "The Challenger is correct. This diff shows only the call site changing from `_entry_has_pipeline_error(entry)` to `entry_has_pipeline_error(entry)`, but provides no evidence that a resolvable `entry_has_pipeline_error` symbol exists in scope. Without seeing either (a) a renamed function definition in the same file, or (b) an import statement bringing the public name in from `utils/stats.py`, this change would produce a `NameError` at runtime whenever the CLI attempts to process a pipeline-error ledger entry. A broken CLI governance tool is a direct C-007 violation: it weakens the governance pipeline by making the `verify` and `stats` commands unreliable on the exact entries that represent pipeline failures.",
+          "evidence": "The diff is a single hunk: old=`_entry_has_pipeline_error(entry)`, new=`entry_has_pipeline_error(entry)`. No function definition rename and no import change appear anywhere in the provided diff. Without corroborating context showing the symbol exists, the runtime breakage risk is unmitigated."
+        },
+        {
+          "finding_index": 1,
+          "position": "CONCEDE",
+          "argument": "The Challenger's atomicity concern under C-002 is well-founded. If this change is part of a refactor moving the helper to `utils/stats.py` (consistent with CLAUDE.md's description of that module as 'Shared ledger stats helpers (CLI + viewer)'), then the import declaration change belongs in this same diff per Rule 14 ('One change per tool call'). A call-site rename submitted without its corresponding definition change or import addition is not a self-contained atomic operation. It is an incomplete half of a two-part rename, and that incompleteness is precisely what C-002 guards against.",
+          "evidence": "CLAUDE.md Rule 14: 'One change per tool call. Do not batch unrelated changes into a single Write/Edit operation.' The inverse also applies: do not split a single logical rename across multiple operations that leave the codebase in a broken intermediate state."
+        },
+        {
+          "finding_index": 2,
+          "position": "MITIGATE",
+          "argument": "The Challenger's C-005 observation is worth noting but does not rise to a blocking concern on its own. Removing the leading underscore from a helper name is a naming convention change, not a structural logic change. If the underlying function body is identical whether it lives in `commands.py` or `utils/stats.py`, existing tests that exercise the code path through the CLI commands already cover the logic. The risk of uncovered behavior is low unless the function is being fundamentally repurposed. This is correctly flagged as a warning observation, not a veto-level finding, and is superseded by the more critical concerns in findings 0 and 1.",
+          "evidence": "C-005 severity is 'warning', not 'veto'. The logic being tested (detecting pipeline errors in ledger entries) is unchanged; only the symbol visibility convention changes."
+        }
+      ],
+      "summary": "The change is indefensible as submitted: it is an incomplete rename that removes the private-name call site without providing evidence that a public `entry_has_pipeline_error` symbol is resolvable in scope, creating a guaranteed NameError in CLI governance tooling and violating both C-007 and the atomicity requirement of Rule 14.",
+      "_tokens": {
+        "input": 6433,
+        "output": 2146
+      }
+    },
+    "oracle": {
+      "verdict": "VETO",
+      "reasoning": "The diff renames a call site from `_entry_has_pipeline_error(entry)` to `entry_has_pipeline_error(entry)` without providing any accompanying evidence that the new symbol is resolvable in scope. The Challenger identified this in finding 0 and finding 1, and the Defender conceded both. Per C-007 (Governance Pipeline Integrity), changes to CLI governance tooling (cli/commands.py houses the `verify`, `stats`, and `ledger` commands per CLAUDE.md) must not weaken enforcement. If the referenced symbol does not exist because the function definition rename or the import from utils/stats.py is not part of this diff, the CLI will raise NameError precisely on ledger entries representing pipeline failures \u2014 degrading the auditability tooling that C-007 protects. The Defender explicitly concedes this on finding 0. Additionally, the atomicity concern under Rule 14 (one change per tool call) is conceded by the Defender: a call-site-only edit that depends on an unshown definition or import leaves the codebase in a broken intermediate state. Because neither the definition change nor an import is visible, I cannot certify the change as constitutionally sound.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-007",
+          "disposition": "VIOLATED",
+          "note": "Call site references `entry_has_pipeline_error` with no visible definition or import in the diff; if unresolved, the CLI governance commands break on pipeline-error entries. Defender conceded (finding 0)."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "VIOLATED",
+          "note": "The rename appears to be split across operations; the definition/import half is not present in this atomic change, contrary to Rule 14. Defender conceded (finding 1)."
+        },
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error-handling changes in this diff."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new dependencies added."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "No type annotations altered."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "SATISFIED",
+          "note": "Warning-level observation; logic unchanged, existing coverage still applies as Defender argued."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No secrets involved."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger entries modified."
+        }
+      ],
+      "advisories": [
+        "If `entry_has_pipeline_error` genuinely exists as a public helper in `utils/stats.py`, the resubmission must include the import statement in the same atomic diff so the pipeline can verify symbol resolution.",
+        "Consider adding or updating a test that exercises the `verify`/`stats` code path on a ledger entry with a PIPELINE_ERROR to prevent regression of this call site."
+      ],
+      "remediation": "Resubmit as a single atomic change that includes BOTH (a) the call-site rename shown here AND (b) the corresponding symbol availability: either the function definition rename in cli/commands.py, or an explicit `from utils.stats import entry_has_pipeline_error` import at the top of cli/commands.py. The diff must make it possible to confirm by inspection that the new symbol resolves without runtime NameError. If the helper is being promoted from private to public in utils/stats.py, include the definition move in the same operation per Rule 14.",
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 10506,
+        "output": 1317
+      }
+    },
+    "entry_hash": "c9fb3aaccdc318575e48a5c45c0308cf129f76f32b10823b783ca763a6fb399e"
+  },
+  {
+    "entry_id": "5685ea64-156d-4fee-80fa-a72a1eb734cb",
+    "timestamp": "2026-07-12T19:32:28.173616+00:00",
+    "previous_hash": "c9fb3aaccdc318575e48a5c45c0308cf129f76f32b10823b783ca763a6fb399e",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "cli\\commands.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "cli\\commands.py",
+        "change_type": "modify",
+        "old_string": "from utils.stats import compute_ledger_stats, entry_has_pipeline_error, pct\nfrom utils.viewer import generate_viewer_html\n\n_HASH_PREFIX_LEN: int = 12\n_DEFAULT_LEDGER_TAIL: int = 10\n_RULE_PREVIEW_LEN: int = 100\n\n\ndef cmd_verify() -> int:\n    \"\"\"Validate the ledger hash chain and print a pass/fail summary.\"\"\"\n    result: dict[str, Any] = verify_chain()\n\n    if result.get(\"valid\"):\n        entries: int = int(result.get(\"entries\", 0))\n        if entries == 0:\n            print(\"Ledger: EMPTY (nothing to verify)\")\n            return 0\n        print(\"Ledger: VALID\")\n        print(f\"  entries      : {entries}\")\n        print(f\"  first entry  : {result.get('first_entry', '-')}\")\n        print(f\"  last entry   : {result.get('last_entry', '-')}\")\n        print(f\"  genesis hash : {result.get('genesis_hash', '-')}\")\n        print(f\"  latest hash  : {result.get('latest_hash', '-')}\")\n        print(f\"  meta anchor  : {result.get('meta', '-')}\")\n        return 0\n\n    print(\"Ledger: INVALID\", file=sys.stderr)\n    print(\n        f\"  failure type    : {result.get('failure_type', '-')}\",\n        file=sys.stderr,\n    )\n    print(\n        f\"  failure index   : {result.get('failure_index', '-')}\",\n        file=sys.stderr,\n    )\n    print(\n        f\"  entries checked : {result.get('entries_checked', 0)}\",\n        file=sys.stderr,\n    )\n    print(f\"  expected        : {result.get('expected', '-')}\", file=sys.stderr)\n    print(f\"  found           : {result.get('found', '-')}\", file=sys.stderr)\n    print(f\"  message         : {result.get('message', '-')}\", file=sys.stderr)\n    return 1\n\n\ndef cmd_ledger(show_all: bool = False, vetoes_only: bool = False) -> int:\n    \"\"\"Print ledger entries (default: last 10).\"\"\"\n    entries: list[dict] = load_ledger()\n\n    if not entries:\n        print(\"Ledger is empty.\")\n        return 0\n\n    filtered: list[dict] = entries\n    if vetoes_only:\n        filtered = [\n            e for e in filtered\n            if isinstance(e.get(\"oracle\"), dict)\n            and e[\"oracle\"].get(\"verdict\") == \"VETO\"\n        ]\n\n    if not filtered:\n        print(\"No entries match the filter.\")\n        return 0\n\n    if not show_all:\n        filtered = filtered[-_DEFAULT_LEDGER_TAIL:]\n\n    shown: int = len(filtered)\n    total: int = len(entries)\n    scope: str = \"all\" if show_all else f\"last {shown}\"\n    if vetoes_only:\n        scope = f\"{scope}, vetoes only\"\n    print(f\"Ledger entries ({scope} of {total} total):\")\n    print()\n\n    for entry in filtered:\n        _print_entry_line(entry)\n\n    return 0\n\n\ndef cmd_stats() -> int:\n    \"\"\"Print a governance summary: counts, top citation, integrity.\"\"\"\n    entries: list[dict] = load_ledger()\n    total: int = len(entries)\n\n    if total == 0:\n        print(\"Ledger is empty. No governance statistics to report.\")\n        return 0\n\n    stats: dict = compute_ledger_stats(entries)\n    passed: int = stats[\"passed\"]\n    vetoed: int = stats[\"vetoed\"]\n    pipeline_errors: int = stats[\"pipeline_errors\"]\n    most_cited: tuple[str, int] | None = stats[\"most_cited\"]\n\n    latest_cons_hash: str = str(entries[-1].get(\"constitution_hash\", \"-\"))\n    verify: dict = verify_chain()\n    if verify.get(\"valid\"):\n        integrity: str = \"VALID\"\n    else:\n        integrity = f\"INVALID ({verify.get('failure_type', 'unknown')})\"\n\n    print(\"Bench Governance Statistics\")\n    print(\"=\" * 40)\n    print(f\"Total governed changes : {total}\")\n    print(f\"Passed                 : {passed} ({pct(passed, total)})\")\n    print(f\"Vetoed                 : {vetoed} ({pct(vetoed, total)})\")\n    print(f\"Pipeline errors        : {pipeline_errors}\")\n    if most_cited is not None:\n        print(\n            f\"Most cited constraint  : {most_cited[0]} \"\n            f\"({most_cited[1]} veto(es))\"\n        )\n    else:\n        print(\"Most cited constraint  : n/a\")\n    print(f\"Constitution hash      : {_short_hash(latest_cons_hash, 16)}\")\n    print(f\"Ledger integrity       : {integrity}\")\n\n    return 0 if verify.get(\"valid\") else 1\n\n\ndef cmd_constitution() -> int:\n    \"\"\"Print the current constitution: hash, constraint list, rules.\"\"\"\n    try:\n        constitution, constitution_hash = load_constitution_snapshot()\n    except ConstitutionError as e:\n        print(f\"[bench cli] constitution load failed: {e}\", file=sys.stderr)\n        return 1\n\n    name: str = str(constitution.get(\"constitution\", \"-\"))\n    version: Any = constitution.get(\"version\", \"-\")\n    constraints: Any = constitution.get(\"constraints\", [])\n    constraint_list: list[dict] = (\n        constraints if isinstance(constraints, list) else []\n    )\n\n    print(f\"Constitution : {name} v{version}\")\n    print(f\"Hash         : {constitution_hash}\")\n    print(f\"Constraints  : {len(constraint_list)}\")\n    print(\"=\" * 40)\n\n    for constraint in constraint_list:\n        if not isinstance(constraint, dict):\n            continue\n        cid: str = str(constraint.get(\"id\", \"-\"))\n        cname: str = str(constraint.get(\"name\", \"-\"))\n        severity: str = str(constraint.get(\"severity\", \"-\")).upper()\n        rule: str = str(constraint.get(\"rule\", \"\"))\n        if len(rule) > _RULE_PREVIEW_LEN:\n            rule = rule[: _RULE_PREVIEW_LEN - 3] + \"...\"\n        print()\n        print(f\"  {cid}  [{severity:7}]  {cname}\")\n        print(f\"           {rule}\")\n\n    return 0\n\n\ndef cmd_viewer() -> int:\n    \"\"\"Generate the HTML ledger viewer, write it to a tempfile, open browser.\"\"\"\n    try:\n        html_content: str = generate_viewer_html()\n    except Exception as e:\n        print(\n            f\"[bench cli] viewer generation failed: {type(e).__name__}: {e}\",\n            file=sys.stderr,\n        )\n        return 1\n\n    try:\n        with tempfile.NamedTemporaryFile(\n            mode=\"w\",\n            suffix=\".html\",\n            prefix=\"bench-viewer-\",\n            delete=False,\n            encoding=\"utf-8\",\n        ) as fh:\n            fh.write(html_content)\n            tmp_path: str = fh.name\n    except OSError as e:\n        print(f\"[bench cli] viewer write failed: {e}\", file=sys.stderr)\n        return 1\n\n    try:\n        os.chmod(tmp_path, stat.S_IRUSR | stat.S_IWUSR)\n    except OSError as e:\n        print(\n            f\"[bench cli] could not restrict temp file permissions: {e}\",\n            file=sys.stderr,\n        )\n\n    print(f\"Bench viewer written to: {tmp_path}\")\n    if not webbrowser.open(f\"file://{tmp_path}\"):\n        print(\n            \"[bench cli] could not auto-open browser; open the path above manually.\",\n            file=sys.stderr,\n        )\n    return 0\n\n\ndef _print_entry_line(entry: dict) -> None:\n    timestamp: str = str(entry.get(\"timestamp\", \"-\"))\n    change: Any = entry.get(\"change\")\n    file: str = \"-\"\n    if isinstance(change, dict):\n        file = str(change.get(\"file\", \"-\"))\n\n    oracle: Any = entry.get(\"oracle\")\n    oracle_dict: dict = oracle if isinstance(oracle, dict) else {}\n    verdict: str = str(oracle_dict.get(\"verdict\") or \"\").strip()\n    if not verdict:\n        if _entry_has_pipeline_error(entry):\n            verdict = \"FAIL-OPEN\"\n        else:\n            verdict = \"-\"\n\n    entry_hash: str = str(entry.get(\"entry_hash\", \"-\"))\n    short: str = _short_hash(entry_hash, _HASH_PREFIX_LEN)\n\n    print(f\"  {timestamp}  {verdict:10}  {file}  [{short}]\")\n\n    if verdict == \"VETO\":\n        citations: Any = oracle_dict.get(\"constraint_citations\")\n        if isinstance(citations, list) and citations:\n            cite_str: str = \", \".join(\n                c.get(\"constraint_id\", str(c)) if isinstance(c, dict) else str(c)\n                for c in citations if c\n            )\n            if cite_str:\n                print(f\"      citations: {cite_str}\")\n\n\n\n\ndef _short_hash(value: str, length: int) -> str:\n    if not value or value == \"-\":\n        return \"-\"\n    if len(value) <= length:\n        return value\n    return value[:length] + \"...\"\n\n\ndef _pct(part: int, total: int) -> str:\n    if total <= 0:\n        return \"0.0%\"\n    return f\"{part / total * 100:.1f}%\"",
+        "new_string": "from utils.stats import compute_ledger_stats, entry_has_pipeline_error, pct\nfrom utils.viewer import generate_viewer_html\n\n_HASH_PREFIX_LEN: int = 12\n_DEFAULT_LEDGER_TAIL: int = 10\n_RULE_PREVIEW_LEN: int = 100\n\n\ndef cmd_verify() -> int:\n    \"\"\"Validate the ledger hash chain and print a pass/fail summary.\"\"\"\n    result: dict[str, Any] = verify_chain()\n\n    if result.get(\"valid\"):\n        entries: int = int(result.get(\"entries\", 0))\n        if entries == 0:\n            print(\"Ledger: EMPTY (nothing to verify)\")\n            return 0\n        print(\"Ledger: VALID\")\n        print(f\"  entries      : {entries}\")\n        print(f\"  first entry  : {result.get('first_entry', '-')}\")\n        print(f\"  last entry   : {result.get('last_entry', '-')}\")\n        print(f\"  genesis hash : {result.get('genesis_hash', '-')}\")\n        print(f\"  latest hash  : {result.get('latest_hash', '-')}\")\n        print(f\"  meta anchor  : {result.get('meta', '-')}\")\n        return 0\n\n    print(\"Ledger: INVALID\", file=sys.stderr)\n    print(\n        f\"  failure type    : {result.get('failure_type', '-')}\",\n        file=sys.stderr,\n    )\n    print(\n        f\"  failure index   : {result.get('failure_index', '-')}\",\n        file=sys.stderr,\n    )\n    print(\n        f\"  entries checked : {result.get('entries_checked', 0)}\",\n        file=sys.stderr,\n    )\n    print(f\"  expected        : {result.get('expected', '-')}\", file=sys.stderr)\n    print(f\"  found           : {result.get('found', '-')}\", file=sys.stderr)\n    print(f\"  message         : {result.get('message', '-')}\", file=sys.stderr)\n    return 1\n\n\ndef cmd_ledger(show_all: bool = False, vetoes_only: bool = False) -> int:\n    \"\"\"Print ledger entries (default: last 10).\"\"\"\n    entries: list[dict] = load_ledger()\n\n    if not entries:\n        print(\"Ledger is empty.\")\n        return 0\n\n    filtered: list[dict] = entries\n    if vetoes_only:\n        filtered = [\n            e for e in filtered\n            if isinstance(e.get(\"oracle\"), dict)\n            and e[\"oracle\"].get(\"verdict\") == \"VETO\"\n        ]\n\n    if not filtered:\n        print(\"No entries match the filter.\")\n        return 0\n\n    if not show_all:\n        filtered = filtered[-_DEFAULT_LEDGER_TAIL:]\n\n    shown: int = len(filtered)\n    total: int = len(entries)\n    scope: str = \"all\" if show_all else f\"last {shown}\"\n    if vetoes_only:\n        scope = f\"{scope}, vetoes only\"\n    print(f\"Ledger entries ({scope} of {total} total):\")\n    print()\n\n    for entry in filtered:\n        _print_entry_line(entry)\n\n    return 0\n\n\ndef cmd_stats() -> int:\n    \"\"\"Print a governance summary: counts, top citation, integrity.\"\"\"\n    entries: list[dict] = load_ledger()\n    total: int = len(entries)\n\n    if total == 0:\n        print(\"Ledger is empty. No governance statistics to report.\")\n        return 0\n\n    stats: dict = compute_ledger_stats(entries)\n    passed: int = stats[\"passed\"]\n    vetoed: int = stats[\"vetoed\"]\n    pipeline_errors: int = stats[\"pipeline_errors\"]\n    most_cited: tuple[str, int] | None = stats[\"most_cited\"]\n\n    latest_cons_hash: str = str(entries[-1].get(\"constitution_hash\", \"-\"))\n    verify: dict = verify_chain()\n    if verify.get(\"valid\"):\n        integrity: str = \"VALID\"\n    else:\n        integrity = f\"INVALID ({verify.get('failure_type', 'unknown')})\"\n\n    print(\"Bench Governance Statistics\")\n    print(\"=\" * 40)\n    print(f\"Total governed changes : {total}\")\n    print(f\"Passed                 : {passed} ({pct(passed, total)})\")\n    print(f\"Vetoed                 : {vetoed} ({pct(vetoed, total)})\")\n    print(f\"Pipeline errors        : {pipeline_errors}\")\n    if most_cited is not None:\n        print(\n            f\"Most cited constraint  : {most_cited[0]} \"\n            f\"({most_cited[1]} veto(es))\"\n        )\n    else:\n        print(\"Most cited constraint  : n/a\")\n    print(f\"Constitution hash      : {_short_hash(latest_cons_hash, 16)}\")\n    print(f\"Ledger integrity       : {integrity}\")\n\n    return 0 if verify.get(\"valid\") else 1\n\n\ndef cmd_constitution() -> int:\n    \"\"\"Print the current constitution: hash, constraint list, rules.\"\"\"\n    try:\n        constitution, constitution_hash = load_constitution_snapshot()\n    except ConstitutionError as e:\n        print(f\"[bench cli] constitution load failed: {e}\", file=sys.stderr)\n        return 1\n\n    name: str = str(constitution.get(\"constitution\", \"-\"))\n    version: Any = constitution.get(\"version\", \"-\")\n    constraints: Any = constitution.get(\"constraints\", [])\n    constraint_list: list[dict] = (\n        constraints if isinstance(constraints, list) else []\n    )\n\n    print(f\"Constitution : {name} v{version}\")\n    print(f\"Hash         : {constitution_hash}\")\n    print(f\"Constraints  : {len(constraint_list)}\")\n    print(\"=\" * 40)\n\n    for constraint in constraint_list:\n        if not isinstance(constraint, dict):\n            continue\n        cid: str = str(constraint.get(\"id\", \"-\"))\n        cname: str = str(constraint.get(\"name\", \"-\"))\n        severity: str = str(constraint.get(\"severity\", \"-\")).upper()\n        rule: str = str(constraint.get(\"rule\", \"\"))\n        if len(rule) > _RULE_PREVIEW_LEN:\n            rule = rule[: _RULE_PREVIEW_LEN - 3] + \"...\"\n        print()\n        print(f\"  {cid}  [{severity:7}]  {cname}\")\n        print(f\"           {rule}\")\n\n    return 0\n\n\ndef cmd_viewer() -> int:\n    \"\"\"Generate the HTML ledger viewer, write it to a tempfile, open browser.\"\"\"\n    try:\n        html_content: str = generate_viewer_html()\n    except Exception as e:\n        print(\n            f\"[bench cli] viewer generation failed: {type(e).__name__}: {e}\",\n            file=sys.stderr,\n        )\n        return 1\n\n    try:\n        with tempfile.NamedTemporaryFile(\n            mode=\"w\",\n            suffix=\".html\",\n            prefix=\"bench-viewer-\",\n            delete=False,\n            encoding=\"utf-8\",\n        ) as fh:\n            fh.write(html_content)\n            tmp_path: str = fh.name\n    except OSError as e:\n        print(f\"[bench cli] viewer write failed: {e}\", file=sys.stderr)\n        return 1\n\n    try:\n        os.chmod(tmp_path, stat.S_IRUSR | stat.S_IWUSR)\n    except OSError as e:\n        print(\n            f\"[bench cli] could not restrict temp file permissions: {e}\",\n            file=sys.stderr,\n        )\n\n    print(f\"Bench viewer written to: {tmp_path}\")\n    if not webbrowser.open(f\"file://{tmp_path}\"):\n        print(\n            \"[bench cli] could not auto-open browser; open the path above manually.\",\n            file=sys.stderr,\n        )\n    return 0\n\n\ndef _print_entry_line(entry: dict) -> None:\n    timestamp: str = str(entry.get(\"timestamp\", \"-\"))\n    change: Any = entry.get(\"change\")\n    file: str = \"-\"\n    if isinstance(change, dict):\n        file = str(change.get(\"file\", \"-\"))\n\n    oracle: Any = entry.get(\"oracle\")\n    oracle_dict: dict = oracle if isinstance(oracle, dict) else {}\n    verdict: str = str(oracle_dict.get(\"verdict\") or \"\").strip()\n    if not verdict:\n        if entry_has_pipeline_error(entry):\n            verdict = \"FAIL-OPEN\"\n        else:\n            verdict = \"-\"\n\n    entry_hash: str = str(entry.get(\"entry_hash\", \"-\"))\n    short: str = _short_hash(entry_hash, _HASH_PREFIX_LEN)\n\n    print(f\"  {timestamp}  {verdict:10}  {file}  [{short}]\")\n\n    if verdict == \"VETO\":\n        citations: Any = oracle_dict.get(\"constraint_citations\")\n        if isinstance(citations, list) and citations:\n            cite_str: str = \", \".join(\n                c.get(\"constraint_id\", str(c)) if isinstance(c, dict) else str(c)\n                for c in citations if c\n            )\n            if cite_str:\n                print(f\"      citations: {cite_str}\")\n\n\ndef _short_hash(value: str, length: int) -> str:\n    if not value or value == \"-\":\n        return \"-\"\n    if len(value) <= length:\n        return value\n    return value[:length] + \"...\""
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 22972,
+        "output": 3292
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change is a small cleanup in cli/commands.py: it replaces a call to the undefined/private `_entry_has_pipeline_error(entry)` with the already-imported `entry_has_pipeline_error(entry)` from utils.stats, removes an unused private `_pct` helper (utils.stats.pct is used instead), and tightens whitespace between two helpers. Challenger returned CLEAR and Defender confirmed. Reviewing independently against the constitution: no imports added (C-003 satisfied), no type annotations removed or weakened (C-004 satisfied), no error handling weakened (C-001 satisfied), scope is confined to cli/commands.py which is the stated target (C-002 satisfied), no secrets introduced (C-006 satisfied), no changes to pipeline, ledger, or constitution logic (C-007, C-008 satisfied), and no new logic branches introduced that would need tests (C-005 not applicable, this is a rename/dead-code removal). The swap from `_entry_has_pipeline_error` to `entry_has_pipeline_error` actually fixes a latent NameError (the private symbol is not defined in this file after prior refactor), which strengthens rather than weakens governance-adjacent behavior.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "SATISFIED",
+          "note": "No catch blocks altered; error paths preserved."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is confined to cli/commands.py as stated."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "SATISFIED",
+          "note": "No new imports; entry_has_pipeline_error and pct were already imported."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "Type annotations on remaining functions unchanged; removed _pct was fully unused."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new logic branches; rename plus dead-code removal."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "No secrets present."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "CLI display command only; no pipeline enforcement, verification, or logging weakened."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "SATISFIED",
+          "note": "No ledger read/write semantics changed; still append-only elsewhere."
+        }
+      ],
+      "advisories": [
+        "Confirm no other module still references cli.commands._pct or cli.commands._entry_has_pipeline_error; if any test or import touched them, it will now fail. A quick grep before shipping is advised."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 15940,
+        "output": 979
+      }
+    },
+    "entry_hash": "9c0e8fad8efc6f60711c5700159c36cccb59ea8f17fa3655bd1dc5876190c675"
+  },
+  {
+    "entry_id": "be0c5173-b8e0-4167-b521-7366f0b12bf3",
+    "timestamp": "2026-07-12T19:35:01.701113+00:00",
+    "previous_hash": "9c0e8fad8efc6f60711c5700159c36cccb59ea8f17fa3655bd1dc5876190c675",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "utils\\viewer.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "utils\\viewer.py",
+        "change_type": "modify",
+        "old_string": "import html\nimport json\nimport sys\nimport traceback\nfrom typing import Any\n\nfrom ledger.chain import load_ledger\nfrom ledger.verify import verify_chain\n\n_DEFAULT_LEDGER_PATH: str = \"ledger/bench-ledger.json\"\n_HASH_SHORT_LEN: int = 12\n\n\ndef generate_viewer_html(ledger_path: str = _DEFAULT_LEDGER_PATH) -> str:\n    \"\"\"Return a complete self-contained HTML string rendering the ledger.\n\n    On any unexpected error, logs to stderr with a full traceback and\n    returns a minimal error HTML page \u00e2\u20ac\u201d never raises.\n    \"\"\"\n    try:\n        entries: list[dict] = load_ledger(ledger_path)\n        chain_status: dict = _compute_chain_status(ledger_path)\n        stats: dict = _compute_stats(entries)\n        return _build_html(stats, chain_status, entries)\n    except Exception as e:\n        print(\n            f\"[bench viewer] generate_viewer_html failed: \"\n            f\"{type(e).__name__}: {e}\",\n            file=sys.stderr,\n        )\n        traceback.print_exc(file=sys.stderr)\n        return _build_error_html(f\"{type(e).__name__}: {e}\")\n\n\ndef _compute_chain_status(ledger_path: str) -> dict:\n    \"\"\"Distill ``verify_chain`` output into a viewer-friendly status dict.\"\"\"\n    result: dict = verify_chain(ledger_path)\n\n    if result.get(\"valid\"):\n        if int(result.get(\"entries\", 0)) == 0:\n            return {\n                \"status\": \"EMPTY\",\n                \"failure_index\": None,\n                \"message\": \"No entries yet.\",\n            }\n        return {\n            \"status\": \"VALID\",\n            \"failure_index\": None,\n            \"message\": \"Chain intact.\",\n        }\n\n    failure_index: Any = result.get(\"failure_index\")\n    try:\n        idx: int | None = (\n            int(failure_index) if failure_index is not None else None\n        )\n    except (TypeError, ValueError):\n        idx = None\n\n    return {\n        \"status\": \"BROKEN\",\n        \"failure_index\": idx,\n        \"message\": str(result.get(\"message\", \"Chain broken.\")),\n    }\n\n\ndef _compute_stats(entries: list[dict]) -> dict:\n    \"\"\"Replicate ``cmd_stats`` logic so the banner matches terminal output.\"\"\"\n    total: int = len(entries)\n    passed: int = 0\n    vetoed: int = 0\n    pipeline_errors: int = 0\n    citation_counts: dict[str, int] = {}\n\n    for entry in entries:\n        oracle: Any = entry.get(\"oracle\")\n        oracle_dict: dict = oracle if isinstance(oracle, dict) else {}\n        verdict: Any = oracle_dict.get(\"verdict\")\n\n        if _entry_has_pipeline_error(entry):\n            pipeline_errors += 1\n\n        if verdict == \"PASS\":\n            passed += 1\n        elif verdict == \"VETO\":\n            vetoed += 1\n            citations: Any = oracle_dict.get(\"constraint_citations\")\n            if isinstance(citations, list):\n                for cid in citations:\n                    if isinstance(cid, str):\n                        citation_counts[cid] = citation_counts.get(cid, 0) + 1\n                    elif isinstance(cid, dict):\n                        raw = cid.get(\"constraint_id\")\n                        if isinstance(raw, str):\n                            citation_counts[raw] = citation_counts.get(raw, 0) + 1\n                    else:\n                        print(\n                            f\"[bench viewer] unexpected citation type: {type(cid).__name__}\",\n                            file=sys.stderr,\n                        )\n\n    most_cited: tuple[str, int] | None = None\n    if citation_counts:\n        most_cited = max(citation_counts.items(), key=lambda kv: kv[1])\n\n    return {\n        \"total\": total,\n        \"passed\": passed,\n        \"vetoed\": vetoed,\n        \"pipeline_errors\": pipeline_errors,\n        \"most_cited\": most_cited,\n    }\n\n\ndef _entry_has_pipeline_error(entry: dict) -> bool:\n    for stage in (\"challenger\", \"defender\", \"oracle\"):\n        stage_result: Any = entry.get(stage)\n        if (\n            isinstance(stage_result, dict)\n            and stage_result.get(\"status\") == \"PIPELINE_ERROR\"\n        ):\n            return True\n    return False\n\n\ndef _pct(part: int, total: int) -> str:\n    if total <= 0:\n        return \"0.0%\"\n    return f\"{part / total * 100:.1f}%\"\n\n\ndef _build_html(\n    stats: dict,\n    chain_status: dict,\n    entries: list[dict],\n) -> str:\n    \"\"\"Assemble the full HTML document as a single string.\"\"\"\n    entries_json: str = json.dumps(entries, default=str).replace(\"</\", \"<\\\\/\")\n    chain_json: str = json.dumps(chain_status).replace(\"</\", \"<\\\\/\")\n\n    total: int = int(stats.get(\"total\", 0))\n    passed: int = int(stats.get(\"passed\", 0))\n    vetoed: int = int(stats.get(\"vetoed\", 0))\n    passed_pct: str = _pct(passed, total)\n    vetoed_pct: str = _pct(vetoed, total)",
+        "new_string": "import html\nimport json\nimport sys\nimport traceback\nfrom typing import Any\n\nfrom ledger.chain import load_ledger\nfrom ledger.verify import verify_chain\nfrom utils.stats import compute_ledger_stats, pct\n\n_DEFAULT_LEDGER_PATH: str = \"ledger/bench-ledger.json\"\n_HASH_SHORT_LEN: int = 12\n\n\ndef generate_viewer_html(ledger_path: str = _DEFAULT_LEDGER_PATH) -> str:\n    \"\"\"Return a complete self-contained HTML string rendering the ledger.\n\n    On any unexpected error, logs to stderr with a full traceback and\n    returns a minimal error HTML page \u00e2\u20ac\u201d never raises.\n    \"\"\"\n    try:\n        entries: list[dict] = load_ledger(ledger_path)\n        chain_status: dict = _compute_chain_status(ledger_path)\n        stats: dict = compute_ledger_stats(entries)\n        return _build_html(stats, chain_status, entries)\n    except Exception as e:\n        print(\n            f\"[bench viewer] generate_viewer_html failed: \"\n            f\"{type(e).__name__}: {e}\",\n            file=sys.stderr,\n        )\n        traceback.print_exc(file=sys.stderr)\n        return _build_error_html(f\"{type(e).__name__}: {e}\")\n\n\ndef _compute_chain_status(ledger_path: str) -> dict:\n    \"\"\"Distill ``verify_chain`` output into a viewer-friendly status dict.\"\"\"\n    result: dict = verify_chain(ledger_path)\n\n    if result.get(\"valid\"):\n        if int(result.get(\"entries\", 0)) == 0:\n            return {\n                \"status\": \"EMPTY\",\n                \"failure_index\": None,\n                \"message\": \"No entries yet.\",\n            }\n        return {\n            \"status\": \"VALID\",\n            \"failure_index\": None,\n            \"message\": \"Chain intact.\",\n        }\n\n    failure_index: Any = result.get(\"failure_index\")\n    try:\n        idx: int | None = (\n            int(failure_index) if failure_index is not None else None\n        )\n    except (TypeError, ValueError):\n        idx = None\n\n    return {\n        \"status\": \"BROKEN\",\n        \"failure_index\": idx,\n        \"message\": str(result.get(\"message\", \"Chain broken.\")),\n    }\n\n\ndef _build_html(\n    stats: dict,\n    chain_status: dict,\n    entries: list[dict],\n) -> str:\n    \"\"\"Assemble the full HTML document as a single string.\"\"\"\n    entries_json: str = json.dumps(entries, default=str).replace(\"</\", \"<\\\\/\")\n    chain_json: str = json.dumps(chain_status).replace(\"</\", \"<\\\\/\")\n\n    total: int = int(stats.get(\"total\", 0))\n    passed: int = int(stats.get(\"passed\", 0))\n    vetoed: int = int(stats.get(\"vetoed\", 0))\n    passed_pct: str = pct(passed, total)\n    vetoed_pct: str = pct(vetoed, total)"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-005",
+          "severity": "CONCERN",
+          "location": "utils/viewer.py - removal of _compute_stats, _entry_has_pipeline_error, _pct",
+          "evidence": "- def _compute_stats(entries: list[dict]) -> dict:\n- def _entry_has_pipeline_error(entry: dict) -> bool:\n- def _pct(part: int, total: int) -> str:\n+ from utils.stats import compute_ledger_stats, pct",
+          "reasoning": "Three functions containing non-trivial logic are removed from viewer.py and replaced by imports from utils/stats.py. C-005 requires new functions or branches of logic to have corresponding test cases. The refactored logic now lives in the shared module. If utils/stats.py is a new or recently-introduced file and the moved logic (citation counting, pipeline error detection, percentage formatting) lacks dedicated test coverage there, this diff widens the gap. The concern is not about viewer.py losing tests it never had, but about whether the shared module that now owns this logic has been tested. The diff provides no evidence either way."
+        },
+        {
+          "constraint_id": "C-004",
+          "severity": "OBSERVATION",
+          "location": "utils/viewer.py - _build_html consumption of stats dict",
+          "evidence": "passed_pct: str = pct(passed, total)\nvetoed_pct: str = pct(vetoed, total)",
+          "reasoning": "The local _pct function had an explicit return annotation of str. The imported pct from utils.stats is assumed to match. This diff does not show the type signature of utils.stats.pct, so we cannot confirm that the return type is equivalent. This is an observation only \u2014 not a clear violation \u2014 but the Oracle should confirm that pct's signature carries the same str return annotation as the function it replaced."
+        }
+      ],
+      "_tokens": {
+        "input": 8166,
+        "output": 2802
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "REBUT",
+          "argument": "C-005 applies to 'New functions or branches of logic.' This change relocates existing logic, not creates it. The three removed functions (_compute_stats, _entry_has_pipeline_error, _pct) were private helpers that existed in viewer.py before this diff. They are not new. The project architecture in CLAUDE.md explicitly lists utils/stats.py as 'Shared ledger stats helpers (CLI + viewer)' - this module was purpose-built for this consolidation. The change is a deduplication refactor: viewer.py is being brought in line with how cli/commands.py already consumes the same stats logic. C-005 would be relevant if compute_ledger_stats or pct were net-new business logic with no prior test surface; the Challenger acknowledges it cannot confirm this from the diff alone. Given that utils/stats.py is an established module per the architecture docs and the logic predates this change, C-005's 'new logic' trigger does not fire. The concern would warrant a CONCEDE only if the diff introduced a new code path inside compute_ledger_stats that didn't exist in the original _compute_stats - nothing in the diff suggests that.",
+          "evidence": "CLAUDE.md project structure: 'utils/stats.py # Shared ledger stats helpers (CLI + viewer)'. The removed functions are all private (underscore-prefixed) helpers that were always internal to viewer.py. The old_string shows they performed the same stats aggregation that utils/stats.py was architecturally designated to own."
+        },
+        {
+          "finding_index": 1,
+          "position": "MITIGATE",
+          "argument": "This is correctly flagged as an OBSERVATION, not a violation. C-004 prohibits removing or weakening existing type annotations. The calling code in _build_html retains explicit str annotations on the assigned variables: 'passed_pct: str = pct(passed, total)' and 'vetoed_pct: str = pct(vetoed, total)'. If utils.stats.pct returned anything other than str, a type checker would surface a mismatch at these assignment sites. Additionally, CLAUDE.md Rule 7 mandates 'Type hints on all function signatures' - any function in utils/stats.py that lacks a return annotation would itself be a constitutional violation. The practical risk is low: the function named 'pct' in a stats helper module returns a formatted percentage string by design. The Challenger's caution is appropriate due diligence, but the evidence for a C-004 violation is absent.",
+          "evidence": "Diff lines: 'passed_pct: str = pct(passed, total)' and 'vetoed_pct: str = pct(vetoed, total)' - both retain the str annotation at the call site. CLAUDE.md: 'Python 3.11+. Type hints on all function signatures.' - the project rule itself enforces that utils/stats.pct must be typed."
+        }
+      ],
+      "summary": "The change is a sound architectural consolidation that eliminates duplication by routing viewer.py through the purpose-built stats utility module; neither Challenger finding constitutes a constitutional violation.",
+      "_tokens": {
+        "input": 8685,
+        "output": 2094
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "This change is a deduplication refactor that routes viewer.py through the utils/stats module, which per CLAUDE.md is architecturally designated as 'Shared ledger stats helpers (CLI + viewer).' The Challenger raised two concerns, both of which the Defender adequately addressed. On C-005, the removed helpers (_compute_stats, _entry_has_pipeline_error, _pct) are pre-existing logic being relocated, not new logic; C-005's 'new functions or branches of logic' trigger does not fire on a pure move. On C-004, the call sites retain explicit 'str' annotations ('passed_pct: str = pct(...)', 'vetoed_pct: str = pct(...)'), so any type mismatch in utils.stats.pct would surface at those assignments; no annotation is removed or weakened in this diff. On C-007 (governance pipeline integrity), utils/viewer.py is a display artifact, not part of the challenger/defender/oracle/ledger/constitution enforcement path, and the change preserves the existing try/except with stderr logging and traceback, so C-001 is also satisfied. C-003 is not triggered because utils.stats is an internal module, not an external dependency. No new secrets (C-006) and no ledger writes (C-008) are introduced.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "SATISFIED",
+          "note": "The outer try/except in generate_viewer_html still logs to stderr with traceback and returns an error HTML page; no error swallowing introduced."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is confined to utils/viewer.py, matching the stated refactor scope."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "SATISFIED",
+          "note": "utils.stats is an internal module already listed in CLAUDE.md project structure; no external dependency added."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "Defender rebuttal is correct: local str annotations at call sites are preserved; no existing annotation weakened in this diff."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Logic is being relocated, not introduced. Defender's rebuttal that C-005 targets new logic, not moves, is accepted."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No secrets or credentials present in diff."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "utils/viewer.py is a display artifact, not part of the enforcement path (challenger/defender/oracle/ledger/constitution). No enforcement or logging is weakened."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger writes or mutations; viewer only reads via load_ledger and verify_chain."
+        }
+      ],
+      "advisories": [
+        "Oracle cannot inspect utils/stats.py from this diff. If compute_ledger_stats or pct in that module lack type annotations or deviate in behavior from the removed helpers (particularly citation counting semantics for dict vs string citation entries), a follow-up change should reconcile. The Challenger's C-004 observation and C-005 concern are noted as due-diligence items for reviewers of utils/stats.py itself.",
+        "Recommend confirming utils/stats.py has direct unit tests covering citation-count aggregation (both str and dict citation shapes) and the pct edge case where total <= 0, since that logic no longer has a test surface via viewer.py."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 13404,
+        "output": 1354
+      }
+    },
+    "entry_hash": "d74910aa69d68d685ce8776fa64854047dd80d831211c90ea35aff930d35f38b"
   }
 ]

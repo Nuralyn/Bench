@@ -23,6 +23,7 @@ from pipeline.constitution import (
     ConstitutionError,
     load_constitution_snapshot,
 )
+from utils.stats import compute_ledger_stats, entry_has_pipeline_error, pct
 from utils.viewer import generate_viewer_html
 
 _HASH_PREFIX_LEN: int = 12
@@ -113,41 +114,11 @@ def cmd_stats() -> int:
         print("Ledger is empty. No governance statistics to report.")
         return 0
 
-    passed: int = 0
-    vetoed: int = 0
-    pipeline_errors: int = 0
-    citation_counts: dict[str, int] = {}
-
-    for entry in entries:
-        oracle: Any = entry.get("oracle")
-        oracle_dict: dict = oracle if isinstance(oracle, dict) else {}
-        verdict: Any = oracle_dict.get("verdict")
-
-        if _entry_has_pipeline_error(entry):
-            pipeline_errors += 1
-
-        if verdict == "PASS":
-            passed += 1
-        elif verdict == "VETO":
-            vetoed += 1
-            citations: Any = oracle_dict.get("constraint_citations")
-            if isinstance(citations, list):
-                for cid in citations:
-                    if isinstance(cid, str):
-                        citation_counts[cid] = citation_counts.get(cid, 0) + 1
-                    elif isinstance(cid, dict):
-                        raw = cid.get("constraint_id")
-                        if isinstance(raw, str):
-                            citation_counts[raw] = citation_counts.get(raw, 0) + 1
-                    else:
-                        print(
-                            f"[bench cli] unexpected citation type: {type(cid).__name__}",
-                            file=sys.stderr,
-                        )
-
-    most_cited: tuple[str, int] | None = None
-    if citation_counts:
-        most_cited = max(citation_counts.items(), key=lambda kv: kv[1])
+    stats: dict = compute_ledger_stats(entries)
+    passed: int = stats["passed"]
+    vetoed: int = stats["vetoed"]
+    pipeline_errors: int = stats["pipeline_errors"]
+    most_cited: tuple[str, int] | None = stats["most_cited"]
 
     latest_cons_hash: str = str(entries[-1].get("constitution_hash", "-"))
     verify: dict = verify_chain()
@@ -159,8 +130,8 @@ def cmd_stats() -> int:
     print("Bench Governance Statistics")
     print("=" * 40)
     print(f"Total governed changes : {total}")
-    print(f"Passed                 : {passed} ({_pct(passed, total)})")
-    print(f"Vetoed                 : {vetoed} ({_pct(vetoed, total)})")
+    print(f"Passed                 : {passed} ({pct(passed, total)})")
+    print(f"Vetoed                 : {vetoed} ({pct(vetoed, total)})")
     print(f"Pipeline errors        : {pipeline_errors}")
     if most_cited is not None:
         print(
@@ -264,7 +235,7 @@ def _print_entry_line(entry: dict) -> None:
     oracle_dict: dict = oracle if isinstance(oracle, dict) else {}
     verdict: str = str(oracle_dict.get("verdict") or "").strip()
     if not verdict:
-        if _entry_has_pipeline_error(entry):
+        if entry_has_pipeline_error(entry):
             verdict = "FAIL-OPEN"
         else:
             verdict = "-"
@@ -285,26 +256,9 @@ def _print_entry_line(entry: dict) -> None:
                 print(f"      citations: {cite_str}")
 
 
-def _entry_has_pipeline_error(entry: dict) -> bool:
-    for stage in ("challenger", "defender", "oracle"):
-        stage_result: Any = entry.get(stage)
-        if (
-            isinstance(stage_result, dict)
-            and stage_result.get("status") == "PIPELINE_ERROR"
-        ):
-            return True
-    return False
-
-
 def _short_hash(value: str, length: int) -> str:
     if not value or value == "-":
         return "-"
     if len(value) <= length:
         return value
     return value[:length] + "..."
-
-
-def _pct(part: int, total: int) -> str:
-    if total <= 0:
-        return "0.0%"
-    return f"{part / total * 100:.1f}%"
