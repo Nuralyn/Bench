@@ -14133,5 +14133,535 @@
       }
     },
     "entry_hash": "b8c777e6bcaef9dd2a9fb34423a948f0d2057ce1d8a932121f22439d5356713a"
+  },
+  {
+    "entry_id": "6f42a96c-eebc-4587-b531-ca25dc22b1ef",
+    "timestamp": "2026-07-12T21:22:37.144075+00:00",
+    "previous_hash": "b8c777e6bcaef9dd2a9fb34423a948f0d2057ce1d8a932121f22439d5356713a",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "tests\\__init__.py",
+      "tool": "Write",
+      "diff_summary": {
+        "file_path": "tests\\__init__.py",
+        "change_type": "create",
+        "content": "\"\"\"Mark the test suite as a regular package.\n\nA regular package (rather than an implicit namespace package) keeps\n``python -m unittest tests.test_x`` and ``from tests._ledger_fixtures\nimport ...`` resolving to this directory even when an unrelated\n``tests`` package exists elsewhere on sys.path, because a regular\npackage anywhere on the path outranks every namespace portion.\n\"\"\"\n",
+        "formatted_diff": "+\"\"\"Mark the test suite as a regular package.\n+\n+A regular package (rather than an implicit namespace package) keeps\n+``python -m unittest tests.test_x`` and ``from tests._ledger_fixtures\n+import ...`` resolving to this directory even when an unrelated\n+``tests`` package exists elsewhere on sys.path, because a regular\n+package anywhere on the path outranks every namespace portion.\n+\"\"\"\n"
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 5880,
+        "output": 533
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The proposed change creates tests/__init__.py containing only a module docstring explaining why the test suite is a regular package rather than a namespace package. No executable code, imports, dependencies, type annotations, secrets, or pipeline logic are introduced. Challenger found no issues and Defender confirmed CLEAR. Reviewing against the full constitution: C-001 is not applicable (no error handling); C-002 is satisfied (change is confined to tests/ package initialization, a coherent scope); C-003 is satisfied (no new imports); C-004 is satisfied (no type annotations altered); C-005 is not applicable (docstring-only file has no logic to test); C-006 is satisfied (no secrets); C-007 is not applicable (tests/__init__.py is not part of the pipeline, ledger, hooks, or constitution); C-008 is satisfied (no ledger interaction).",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error-handling code introduced."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is a single new file within tests/ establishing package semantics."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "SATISFIED",
+          "note": "Docstring-only file, no imports or dependencies added."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "No function signatures or type annotations modified."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new logic; the file contains only a module docstring."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "No credentials or secrets present."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "tests/__init__.py is not part of the governance pipeline surface (pipeline/, ledger/, hooks/, constitution)."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "SATISFIED",
+          "note": "No ledger entries touched."
+        }
+      ],
+      "advisories": [],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 8736,
+        "output": 846
+      }
+    },
+    "entry_hash": "3f0026f9d9a7617d124170cdcf2ff27aad04be77f8d3d888302519a9b679a15c"
+  },
+  {
+    "entry_id": "75527ca5-807a-422b-8fd3-d91ef01046bd",
+    "timestamp": "2026-07-12T21:23:32.667573+00:00",
+    "previous_hash": "3f0026f9d9a7617d124170cdcf2ff27aad04be77f8d3d888302519a9b679a15c",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "tests\\test_verify.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "tests\\test_verify.py",
+        "change_type": "modify",
+        "old_string": "Run: python -m unittest discover -s tests -p test_verify.py -v\n\"\"\"",
+        "new_string": "Run: python -m unittest tests.test_verify -v\n\"\"\""
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 11561,
+        "output": 872
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change modifies a docstring comment in tests/test_verify.py, updating the documented command from 'python -m unittest discover -s tests -p test_verify.py -v' to 'python -m unittest tests.test_verify -v'. This is a documentation-only change to a comment string. Challenger returned CLEAR with no findings; Defender confirmed CLEAR. Independent review against all eight constraints confirms no violations: no error handling is touched (C-001), the change is within the stated file boundary tests/test_verify.py (C-002), no imports or dependencies are added (C-003), no type annotations are affected (C-004), no new logic is introduced so C-005 is not applicable, no secrets appear (C-006), the governance pipeline files (challenger/defender/oracle/ledger/constitution) are untouched (C-007), and no ledger entries are modified (C-008).",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error-handling code is modified; only a docstring string literal changed."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is confined to tests/test_verify.py, matching the stated file boundary."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependencies added or removed."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No function signatures or type annotations touched."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new logic introduced; this is a docstring edit in a test file."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "New string contains only a unittest invocation command; no credentials."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Change is in tests/, not pipeline/, ledger/, hooks/, or constitution. No governance enforcement affected."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger files touched."
+        }
+      ],
+      "advisories": [],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 8483,
+        "output": 877
+      }
+    },
+    "entry_hash": "506d68e2863da752211210d467535362b0ea4109579d766784c56b55647d94bf"
+  },
+  {
+    "entry_id": "3166f417-f6a6-4017-a177-4048c13d6ec7",
+    "timestamp": "2026-07-12T21:24:16.226929+00:00",
+    "previous_hash": "506d68e2863da752211210d467535362b0ea4109579d766784c56b55647d94bf",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "tests\\test_verify.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "tests\\test_verify.py",
+        "change_type": "modify",
+        "old_string": "from _ledger_fixtures import build_valid_chain as _build_valid_chain  # noqa: E402",
+        "new_string": "from tests._ledger_fixtures import build_valid_chain as _build_valid_chain  # noqa: E402"
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 11618,
+        "output": 910
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change modifies a single import in tests/test_verify.py from a bare `_ledger_fixtures` import to `tests._ledger_fixtures`. This is a scoped, minimal change confined to a test file. Challenger found no issues (CLEAR) and Defender confirmed. Reviewing the change independently against the full constitution: C-001 not applicable (no error handling changed); C-002 satisfied (single test file modified, scope-consistent); C-003 satisfied (no new external dependency, `tests` is an in-repo package); C-004 not applicable (no type annotations touched); C-006 satisfied (no secrets); C-007 not applicable (test file, not pipeline internals); C-008 not applicable (no ledger modification). The noqa: E402 marker is preserved. Advisory: the change assumes `tests/` is importable as a package (i.e. contains `__init__.py` or is on sys.path as a namespace package); if not, the test will fail at collection time, but that is a correctness concern, not a constitutional violation.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error-handling code touched."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is confined to tests/test_verify.py, a single import line."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "SATISFIED",
+          "note": "No new external dependency; `tests` is an internal package path."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No type annotations added, removed, or weakened."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Change is inside a test file and does not introduce new production logic."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "No credentials or secrets present in the diff."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Modifies a test file, not the governance pipeline itself."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger entries touched."
+        }
+      ],
+      "advisories": [
+        "The qualified import `tests._ledger_fixtures` requires `tests/` to be importable as a package (via __init__.py or as a namespace package on sys.path). Verify collection succeeds before relying on this test."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 8497,
+        "output": 962
+      }
+    },
+    "entry_hash": "00063f068e52a89fffdaea21c05c2e6feabc0f693b797e8646911b4519bc210b"
+  },
+  {
+    "entry_id": "58100bd6-8b46-415a-bb24-b9608b711016",
+    "timestamp": "2026-07-12T21:24:48.680592+00:00",
+    "previous_hash": "00063f068e52a89fffdaea21c05c2e6feabc0f693b797e8646911b4519bc210b",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "tests\\test_viewer.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "tests\\test_viewer.py",
+        "change_type": "modify",
+        "old_string": "Run: python -m unittest discover -s tests -p test_viewer.py -v\n\"\"\"",
+        "new_string": "Run: python -m unittest tests.test_viewer -v\n\"\"\""
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 5717,
+        "output": 572
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The proposed change modifies a docstring comment in tests/test_viewer.py, updating the documented command for running the test from 'python -m unittest discover -s tests -p test_viewer.py -v' to 'python -m unittest tests.test_viewer -v'. This is a pure documentation change to a test file's module docstring. It does not touch any pipeline, ledger, or hook code (C-007, C-008 not applicable). It introduces no imports (C-003), no error handling changes (C-001), no type annotations (C-004), no secrets (C-006). The scope is limited to a single file's docstring (C-002 satisfied). No new logic is introduced, so C-005 does not apply. Both Challenger (CLEAR) and Defender (CONFIRM_CLEAR) agree there are no findings.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error handling code touched; docstring-only change."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is confined to the stated file tests/test_viewer.py."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports added or modified."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No function signatures or type annotations affected."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new logic introduced; docstring update only."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "No secrets or credentials present in the diff."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Change is in tests/, not in the governance pipeline itself."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger files modified."
+        }
+      ],
+      "advisories": [
+        "Verify that 'python -m unittest tests.test_viewer' actually resolves (i.e., tests/ has an __init__.py or is discoverable as a package). If not, the new documented command will fail to run."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 8486,
+        "output": 878
+      }
+    },
+    "entry_hash": "6ee07cb94b9b13429b7fb62b2f79849f2275c6f706e085c90e3d2c5339954c9a"
+  },
+  {
+    "entry_id": "deb858d4-b8f4-4c71-9175-b5c12ae38c94",
+    "timestamp": "2026-07-12T21:25:32.327433+00:00",
+    "previous_hash": "6ee07cb94b9b13429b7fb62b2f79849f2275c6f706e085c90e3d2c5339954c9a",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "tests\\test_viewer.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "tests\\test_viewer.py",
+        "change_type": "modify",
+        "old_string": "from _ledger_fixtures import build_valid_chain as _build_valid_chain  # noqa: E402",
+        "new_string": "from tests._ledger_fixtures import build_valid_chain as _build_valid_chain  # noqa: E402"
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 11739,
+        "output": 1117
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change is a minimal one-line modification to a test file, converting a bare module import (`from _ledger_fixtures import ...`) to a package-qualified import (`from tests._ledger_fixtures import ...`). Challenger returned CLEAR with no findings, and Defender confirmed. Reviewing against the constitution independently: C-001 does not apply (no error handling changed). C-002 is satisfied (change is confined to the stated test file). C-003 is satisfied (`tests._ledger_fixtures` is an existing in-repo module, not a new external dependency). C-004 does not apply (no type annotations touched). C-005 does not apply (test file modification, not new logic). C-006 is satisfied (no secrets). C-007 does not apply (tests/ is not part of the governance pipeline itself). C-008 is satisfied (no ledger modification). The change is a safe import path normalization.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error handling touched."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change confined to tests/test_viewer.py."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "SATISFIED",
+          "note": "tests._ledger_fixtures is an in-repo module; no new external dependency introduced."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No type annotations modified."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Import path fix in a test file, no new logic."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "No credentials in the diff."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "tests/ is not part of the governance pipeline."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "SATISFIED",
+          "note": "No ledger writes or modifications."
+        }
+      ],
+      "advisories": [
+        "Ensure the tests/ directory contains an __init__.py so that `from tests._ledger_fixtures import ...` resolves; otherwise the test will fail to import. This is a correctness concern, not a governance one."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 8499,
+        "output": 900
+      }
+    },
+    "entry_hash": "cb2e4addee79ba3fd704bb572c36f060f47e42d84723bc9d0268cf3aa793303d"
+  },
+  {
+    "entry_id": "6adb2ff1-6430-4dba-84aa-55266da4afbd",
+    "timestamp": "2026-07-12T21:26:15.915181+00:00",
+    "previous_hash": "cb2e4addee79ba3fd704bb572c36f060f47e42d84723bc9d0268cf3aa793303d",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "tests\\_ledger_fixtures.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "tests\\_ledger_fixtures.py",
+        "change_type": "modify",
+        "old_string": "Single source of truth for building correctly-linked hash chains so the\nentry shape lives in one place. Named with a leading underscore so\nunittest discovery (pattern ``test*.py``) never collects it as a test\nmodule; import it as ``from _ledger_fixtures import build_valid_chain``\n(the tests directory is on sys.path both under discovery and when a\ntest file runs as a script).\n\"\"\"",
+        "new_string": "Single source of truth for building correctly-linked hash chains so the\nentry shape lives in one place. Named with a leading underscore so\nunittest discovery (pattern ``test*.py``) never collects it as a test\nmodule; import it as ``from tests._ledger_fixtures import\nbuild_valid_chain`` (the repo root is on sys.path under discovery,\nmodule-name, and script-style runs, and ``tests/__init__.py`` makes the\npackage resolve here even if another ``tests`` exists on sys.path).\n\"\"\""
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 5909,
+        "output": 1024
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change is a docstring-only modification to tests/_ledger_fixtures.py that updates the documented import path guidance. It introduces no code, no imports, no dependencies, no type changes, no error-handling logic, and no interaction with the ledger or governance pipeline. Challenger returned CLEAR and Defender confirmed. Reviewing the constitution independently: C-001 (no catch blocks touched), C-002 (change is confined to the stated file), C-003 (no imports added), C-004 (no type annotations touched), C-005 (no new logic requires tests; this is documentation), C-006 (no secrets), C-007 (test fixture docstring is not part of the enforcement pipeline), C-008 (ledger untouched). No violations detected.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error-handling code modified."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change confined to tests/_ledger_fixtures.py docstring."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependencies added."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No type annotations affected."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Docstring update; no new logic to test."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "No credentials present."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Test fixture docstring does not affect pipeline enforcement."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Ledger not touched."
+        }
+      ],
+      "advisories": [
+        "Verify the documented import path 'from tests._ledger_fixtures import build_valid_chain' matches the actual sys.path configuration used by test runners in this repo; if a tests/__init__.py is required for this pattern, ensure it exists."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 8756,
+        "output": 795
+      }
+    },
+    "entry_hash": "111e118ea91ff3a369abbd390dabe36995af6f2a1270b2e529a9598733e9c114"
   }
 ]
