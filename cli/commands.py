@@ -9,7 +9,6 @@ nothing here mutates state, so there is no risk of collision with the
 governance pipeline running in parallel.
 """
 
-import atexit
 import os
 import stat
 import sys
