@@ -1,2 +1,3 @@
-anthropic
-openai
+anthropic>=0.84
+# openai is a soft dependency: install it only if you set
+# BENCH_PROVIDER=openrouter (see utils/api.py).
