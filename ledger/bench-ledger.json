@@ -11251,5 +11251,110 @@
       }
     },
     "entry_hash": "247675ad596c33c1bcee67c4fb0eef0df521f66c73cbb8b8463402d1f8a3408c"
+  },
+  {
+    "entry_id": "001690df-d057-44f5-884b-2f0b189b7ff9",
+    "timestamp": "2026-07-12T19:17:14.819440+00:00",
+    "previous_hash": "247675ad596c33c1bcee67c4fb0eef0df521f66c73cbb8b8463402d1f8a3408c",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": ".gitignore",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": ".gitignore",
+        "change_type": "modify",
+        "old_string": "# IDE / editor",
+        "new_string": "# Claude Code machine-local settings (never commit; use .claude/settings.json\n# for the shared hook config)\n.claude/settings.local.json\n\n# IDE / editor"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-007",
+          "severity": "OBSERVATION",
+          "location": ".gitignore: new entry '.claude/settings.local.json'",
+          "evidence": ".claude/settings.local.json",
+          "reasoning": "Claude Code's settings.local.json can override or supplement settings.json, which is where the PreToolUse governance hook is registered. By canonically gitignoring this file, the diff acknowledges and formalizes a machine-local override path that could, if populated with conflicting hook config, disable or weaken the Bench PreToolUse hook on a developer's machine without leaving any trace in version control. The diff itself does not introduce this capability (the file could always be created locally regardless), and not committing machine-local settings is correct hygiene. However, it is worth the Oracle confirming that settings.local.json cannot silently override or nullify the hook definition in settings.json, since if it can, an untracked file becomes an unauditable governance bypass vector. This is an observation, not a violation \u2014 the change is directionally correct, but the governance implication of the underlying Claude Code override mechanism is worth explicit acknowledgment."
+        }
+      ],
+      "_tokens": {
+        "input": 5719,
+        "output": 1510
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "REBUT",
+          "argument": "The Challenger's observation is technically accurate but does not constitute a violation of C-007 or any other constraint. Three points: First, the .gitignore entry does not create the override capability. settings.local.json could always be created locally and could always potentially override settings.json, entirely independent of this diff. The gitignore entry merely prevents accidental commits of machine-local config, which is correct hygiene. Second, C-007's explicit scope is changes to the governance pipeline itself (challenger, defender, oracle, ledger, constitution) that weaken enforcement, bypass verification, or disable logging. A .gitignore entry is not a change to any of those components and does not modify any enforcement behavior. Third, the comment added by this diff actively reinforces governance intent: 'never commit; use .claude/settings.json for the shared hook config' is a normative statement directing developers toward the shared, versioned, auditable hook definition. This is governance documentation, not a bypass invitation. The Challenger themselves concede this is 'directionally correct' and 'not a violation.' The underlying concern about whether settings.local.json can override hook registration is a valid platform-level question about Claude Code's merge semantics, but that concern predates and is orthogonal to this diff. Blocking this change on that basis would be holding correct hygiene hostage to a pre-existing platform behavior outside the scope of this change.",
+          "evidence": "The diff comment reads: '# Claude Code machine-local settings (never commit; use .claude/settings.json\\n# for the shared hook config)'. The Challenger states: 'The diff itself does not introduce this capability (the file could always be created locally regardless)' and 'This is an observation, not a violation \u2014 the change is directionally correct.'"
+        }
+      ],
+      "summary": "The change is sound: it adds correct gitignore hygiene for machine-local Claude Code settings with an explicit normative comment reinforcing use of the shared hook config, and the Challenger's single finding is self-characterized as a pre-existing platform concern that this diff neither introduces nor worsens.",
+      "_tokens": {
+        "input": 6053,
+        "output": 1161
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change adds a single .gitignore entry for .claude/settings.local.json with an explanatory comment steering developers to the shared, versioned .claude/settings.json for hook config. The Challenger's sole finding is explicitly labeled an OBSERVATION and self-characterizes the change as 'directionally correct' and 'not a violation.' The Defender correctly notes that C-007's scope covers changes to the governance pipeline components (challenger, defender, oracle, ledger, constitution) that weaken enforcement, and a .gitignore entry does not modify any of those components or alter any enforcement behavior. The override capability of settings.local.json is a pre-existing Claude Code platform behavior that this diff neither introduces nor worsens; if anything, the added comment reinforces governance intent by directing developers to the shared config. No other constitutional constraints are implicated: no code, no imports, no type annotations, no error handling, no secrets, and no ledger modifications are touched.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error handling code changed."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is confined to .gitignore, matching the stated hygiene task."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependencies added."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No type annotations affected."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new logic introduced; .gitignore has no testable behavior."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "No secrets present; the entry actually helps prevent accidental commit of machine-local config."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "Per Defender rebuttal, .gitignore is not a pipeline component and this change does not weaken enforcement. The added comment reinforces use of the shared hook config."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger entries modified."
+        }
+      ],
+      "advisories": [
+        "The Challenger raises a legitimate platform-level question worth tracking separately: verify that Claude Code's settings.local.json cannot silently override or nullify the PreToolUse hook registered in settings.json. If it can, consider adding a startup integrity check that validates the effective hook config matches the versioned one. This is orthogonal to the current diff but should not be forgotten.",
+        "Consider adding a brief note to CLAUDE.md documenting that settings.local.json is intentionally gitignored and must never be used to modify hook registration."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 9567,
+        "output": 1085
+      }
+    },
+    "entry_hash": "721e6d3a020fc96f8ad29b4a5bd06747cf1096726145396f07142e67e9d7499b"
   }
 ]

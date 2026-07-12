@@ -16,6 +16,10 @@ htmlcov/
 # Logs
 *.log
 
+# Claude Code machine-local settings (never commit; use .claude/settings.json
+# for the shared hook config)
+.claude/settings.local.json
+
 # IDE / editor
 .idea/
 .vscode/
