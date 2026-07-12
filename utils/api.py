@@ -211,7 +211,8 @@ def _anthropic_call(
     """One Anthropic call. Returns (text, input_tokens, output_tokens).
 
     Raises _ProviderError on any anthropic.AnthropicError (covers SDK
-    construction failures and all API-call exceptions).
+    construction failures and all API-call exceptions) and on any
+    unexpected response shape, so callers never see a raw exception.
     """
     try:
         client = anthropic.Anthropic()
@@ -230,15 +231,25 @@ def _anthropic_call(
             f"anthropic config: {type(e).__name__}: {_sanitize_error_detail(str(e))}"
         ) from e
 
-    text: str = ""
-    content = getattr(response, "content", None)
-    if content:
-        first = content[0]
-        text = getattr(first, "text", "") or ""
+    try:
+        text: str = ""
+        content = getattr(response, "content", None)
+        if content:
+            first = content[0]
+            text = getattr(first, "text", "") or ""
 
-    usage = getattr(response, "usage", None)
-    input_tokens: int = getattr(usage, "input_tokens", 0) if usage is not None else 0
-    output_tokens: int = getattr(usage, "output_tokens", 0) if usage is not None else 0
+        usage = getattr(response, "usage", None)
+        input_tokens: int = (
+            getattr(usage, "input_tokens", 0) if usage is not None else 0
+        )
+        output_tokens: int = (
+            getattr(usage, "output_tokens", 0) if usage is not None else 0
+        )
+    except Exception as e:
+        raise _ProviderError(
+            f"anthropic response: {type(e).__name__}: "
+            f"{_sanitize_error_detail(str(e))}"
+        ) from e
 
     return text, input_tokens, output_tokens
 
@@ -293,20 +304,26 @@ def _openrouter_call(
             f"openrouter config: {type(e).__name__}: {_sanitize_error_detail(str(e))}"
         ) from e
 
-    text: str = ""
-    choices = getattr(response, "choices", None)
-    if choices:
-        message = getattr(choices[0], "message", None)
-        if message is not None:
-            text = getattr(message, "content", "") or ""
+    try:
+        text: str = ""
+        choices = getattr(response, "choices", None)
+        if choices:
+            message = getattr(choices[0], "message", None)
+            if message is not None:
+                text = getattr(message, "content", "") or ""
 
-    usage = getattr(response, "usage", None)
-    input_tokens: int = (
-        getattr(usage, "prompt_tokens", 0) if usage is not None else 0
-    )
-    output_tokens: int = (
-        getattr(usage, "completion_tokens", 0) if usage is not None else 0
-    )
+        usage = getattr(response, "usage", None)
+        input_tokens: int = (
+            getattr(usage, "prompt_tokens", 0) if usage is not None else 0
+        )
+        output_tokens: int = (
+            getattr(usage, "completion_tokens", 0) if usage is not None else 0
+        )
+    except Exception as e:
+        raise _ProviderError(
+            f"openrouter response: {type(e).__name__}: "
+            f"{_sanitize_error_detail(str(e))}"
+        ) from e
 
     return text, input_tokens, output_tokens
 

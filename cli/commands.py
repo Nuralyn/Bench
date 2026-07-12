@@ -44,6 +44,7 @@ def cmd_verify() -> int:
         print(f"  last entry   : {result.get('last_entry', '-')}")
         print(f"  genesis hash : {result.get('genesis_hash', '-')}")
         print(f"  latest hash  : {result.get('latest_hash', '-')}")
+        print(f"  meta anchor  : {result.get('meta', '-')}")
         return 0
 
     print("Ledger: INVALID", file=sys.stderr)
