@@ -46,7 +46,7 @@ was challenged, defended, ruled on, and recorded by Bench itself.
 During the build, Bench vetoed a change to its own governance pipeline code
 under constraint C-007 (governance pipeline integrity). The change would have
 reduced fallback coverage in the hook entry point. It was corrected and
-re-submitted. Ledger entry #8 is the receipt.
+re-submitted. Ledger entry #13 is the receipt.
 
 Run `python -m cli verify` to confirm the ledger's integrity.
 Run `python -m cli stats` to see the full governance history.
@@ -68,7 +68,7 @@ export ANTHROPIC_API_KEY=your-key-here
 # export BENCH_PROVIDER=claude_code
 
 # Add Bench hooks to your Claude Code project
-cp settings.json /your-project/.claude/settings.json
+cp .claude/settings.json /your-project/.claude/settings.json
 
 # Add your constitution
 cp bench.json /your-project/bench.json
