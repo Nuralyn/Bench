@@ -1,8 +1,8 @@
 """Tests for ledger.verify — chain validation and tamper detection.
 
-Covers: verify_chain across all 6 failure types (READ_ERROR, PARSE_ERROR,
-SCHEMA_ERROR, HASH_MISMATCH, INVALID_GENESIS, CHAIN_BREAK), plus valid
-chains of varying lengths.
+Covers: verify_chain across all 7 failure types (READ_ERROR, PARSE_ERROR,
+SCHEMA_ERROR, HASH_MISMATCH, INVALID_GENESIS, CHAIN_BREAK, META_MISMATCH),
+plus valid chains of varying lengths and the ledger-meta.json anchor.
 
 Run: python -m unittest tests.test_verify -v
 """
@@ -176,6 +176,97 @@ class VerifyChainFailureTests(unittest.TestCase):
         result: dict = verify_chain(self._path())
         self.assertEqual(result["failure_index"], 1)
         self.assertEqual(result["entries_checked"], 1)
+
+
+class MetaAnchorTests(unittest.TestCase):
+    """Cross-checking ledger-meta.json against the verified chain."""
+
+    def setUp(self) -> None:
+        self._tmp: str = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self._tmp)
+
+    def _path(self) -> str:
+        return os.path.join(self._tmp, "ledger.json")
+
+    def _write_chain(self, chain: list[dict]) -> None:
+        Path(self._path()).write_text(json.dumps(chain), encoding="utf-8")
+
+    def _write_meta(self, content: str) -> None:
+        meta_path: str = os.path.join(self._tmp, "ledger-meta.json")
+        Path(meta_path).write_text(content, encoding="utf-8")
+
+    def _meta_for(self, chain: list[dict]) -> dict:
+        return {
+            "entry_count": len(chain),
+            "latest_hash": chain[-1]["entry_hash"],
+            "created": chain[0]["timestamp"],
+            "last_updated": chain[-1]["timestamp"],
+        }
+
+    def test_missing_meta_is_valid_with_skip_note(self) -> None:
+        self._write_chain(_build_valid_chain(2))
+        result: dict = verify_chain(self._path())
+        self.assertTrue(result["valid"])
+        self.assertIn("not found", result["meta"])
+
+    def test_malformed_meta_is_valid_with_skip_note(self) -> None:
+        self._write_chain(_build_valid_chain(2))
+        self._write_meta("{{{not json")
+        result: dict = verify_chain(self._path())
+        self.assertTrue(result["valid"])
+        self.assertIn("unreadable", result["meta"])
+
+    def test_non_object_meta_is_valid_with_skip_note(self) -> None:
+        self._write_chain(_build_valid_chain(2))
+        self._write_meta('["a", "list"]')
+        result: dict = verify_chain(self._path())
+        self.assertTrue(result["valid"])
+        self.assertIn("not a JSON object", result["meta"])
+
+    def test_matching_meta_is_verified(self) -> None:
+        chain: list[dict] = _build_valid_chain(3)
+        self._write_chain(chain)
+        self._write_meta(json.dumps(self._meta_for(chain)))
+        result: dict = verify_chain(self._path())
+        self.assertTrue(result["valid"])
+        self.assertEqual(result["meta"], "meta anchor verified")
+
+    def test_latest_hash_mismatch_fails(self) -> None:
+        chain: list[dict] = _build_valid_chain(3)
+        self._write_chain(chain)
+        meta: dict = self._meta_for(chain)
+        meta["latest_hash"] = "0" * 64
+        self._write_meta(json.dumps(meta))
+        result: dict = verify_chain(self._path())
+        self.assertFalse(result["valid"])
+        self.assertEqual(result["failure_type"], "META_MISMATCH")
+
+    def test_entry_count_mismatch_fails(self) -> None:
+        chain: list[dict] = _build_valid_chain(3)
+        self._write_chain(chain)
+        meta: dict = self._meta_for(chain)
+        meta["entry_count"] = 2
+        self._write_meta(json.dumps(meta))
+        result: dict = verify_chain(self._path())
+        self.assertFalse(result["valid"])
+        self.assertEqual(result["failure_type"], "META_MISMATCH")
+        self.assertEqual(result["expected"], 2)
+        self.assertEqual(result["found"], 3)
+
+    def test_rewritten_chain_detected_by_meta_anchor(self) -> None:
+        original: list[dict] = _build_valid_chain(3)
+        meta: dict = self._meta_for(original)
+        self._write_meta(json.dumps(meta))
+        rewritten: list[dict] = _build_valid_chain(3)
+        rewritten[1]["change"]["file"] = "REWRITTEN.py"
+        for i in range(1, 3):
+            rewritten[i]["previous_hash"] = rewritten[i - 1]["entry_hash"]
+            rewritten[i].pop("entry_hash", None)
+            rewritten[i]["entry_hash"] = compute_entry_hash(rewritten[i])
+        self._write_chain(rewritten)
+        result: dict = verify_chain(self._path())
+        self.assertFalse(result["valid"])
+        self.assertEqual(result["failure_type"], "META_MISMATCH")
 
 
 if __name__ == "__main__":

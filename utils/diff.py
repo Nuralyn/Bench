@@ -231,10 +231,19 @@ def _safe_file_path(tool_input: Any) -> str:
         return ""
     try:
         return str(raw)
-    except Exception:
+    except Exception as e:
+        print(
+            f"[bench diff] _safe_file_path: str() failed: {type(e).__name__}",
+            file=sys.stderr,
+        )
         try:
             return repr(raw)
-        except Exception:
+        except Exception as e2:
+            print(
+                f"[bench diff] _safe_file_path: repr() also failed: "
+                f"{type(e2).__name__}",
+                file=sys.stderr,
+            )
             return "<unrepresentable>"
 
 

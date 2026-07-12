@@ -21,6 +21,7 @@ from ledger.chain import compute_entry_hash
 
 _DEFAULT_LEDGER_PATH: str = "ledger/bench-ledger.json"
 _GENESIS_MARKER: str = "GENESIS"
+_META_FILENAME: str = "ledger-meta.json"
 
 
 def verify_chain(path: str = _DEFAULT_LEDGER_PATH) -> dict:
@@ -166,6 +167,12 @@ def verify_chain(path: str = _DEFAULT_LEDGER_PATH) -> dict:
 
         previous_entry_hash = stored_hash
 
+    meta_failure, meta_note = _check_meta_anchor(
+        file_path.parent / _META_FILENAME, entries
+    )
+    if meta_failure is not None:
+        return meta_failure
+
     first_entry: dict = entries[0]
     last_entry: dict = entries[-1]
     return {
@@ -175,7 +182,75 @@ def verify_chain(path: str = _DEFAULT_LEDGER_PATH) -> dict:
         "last_entry": last_entry.get("timestamp", ""),
         "genesis_hash": first_entry.get("entry_hash", ""),
         "latest_hash": last_entry.get("entry_hash", ""),
+        "meta": meta_note,
     }
+
+
+def _check_meta_anchor(
+    meta_path: Path, entries: list[dict]
+) -> tuple[dict | None, str]:
+    """Cross-check ledger-meta.json against the verified chain.
+
+    Returns ``(failure, note)``. ``failure`` is a ``_failure(...)`` dict
+    when the meta anchor contradicts the chain (a rewritten but internally
+    consistent chain would otherwise pass), else None. ``note`` records the
+    anchor status for the summary. A missing or unreadable meta file does
+    not invalidate the chain, which is self-contained; the skip is
+    surfaced in the note rather than silently ignored.
+
+    Relies on ``json``, ``sys``, ``Path``, and ``_META_FILENAME`` already
+    imported/defined at module scope. Called only after the chain walk has
+    validated every entry, so ``entries`` is non-empty and each entry_hash
+    is a string.
+    """
+    if not meta_path.exists():
+        return None, "meta anchor skipped: ledger-meta.json not found"
+
+    try:
+        parsed: object = json.loads(meta_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as e:
+        print(
+            f"[bench verify] meta anchor unreadable: "
+            f"{type(e).__name__}: {e}",
+            file=sys.stderr,
+        )
+        return None, f"meta anchor skipped: unreadable ({type(e).__name__})"
+
+    if not isinstance(parsed, dict):
+        return None, (
+            "meta anchor skipped: ledger-meta.json is not a JSON object"
+        )
+
+    last_hash: str = entries[-1]["entry_hash"]
+    meta_hash: object = parsed.get("latest_hash")
+    if meta_hash != last_hash:
+        return _failure(
+            entries_checked=len(entries),
+            failure_index=len(entries) - 1,
+            failure_type="META_MISMATCH",
+            expected=meta_hash,
+            found=last_hash,
+            message=(
+                "ledger-meta.json latest_hash does not match the final "
+                "entry's hash: the chain may have been rewritten."
+            ),
+        ), ""
+
+    meta_count: object = parsed.get("entry_count")
+    if meta_count != len(entries):
+        return _failure(
+            entries_checked=len(entries),
+            failure_index=len(entries) - 1,
+            failure_type="META_MISMATCH",
+            expected=meta_count,
+            found=len(entries),
+            message=(
+                "ledger-meta.json entry_count does not match the number "
+                "of chain entries: entries may have been added or removed."
+            ),
+        ), ""
+
+    return None, "meta anchor verified"
 
 
 def _failure(

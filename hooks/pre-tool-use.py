@@ -152,7 +152,8 @@ def _validate_hook_payload(
     warnings: list[str] = []
     if not tool_name:
         warnings.append("tool_name is empty")
-    elif tool_name not in _GOVERNED_TOOLS:
+        return warnings
+    if tool_name not in _GOVERNED_TOOLS:
         return warnings
 
     fp: Any = tool_input.get("file_path")
