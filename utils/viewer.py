@@ -27,6 +27,7 @@ from typing import Any
 
 from ledger.chain import load_ledger
 from ledger.verify import verify_chain
+from utils.stats import compute_ledger_stats, pct
 
 _DEFAULT_LEDGER_PATH: str = "ledger/bench-ledger.json"
 _HASH_SHORT_LEN: int = 12
@@ -41,7 +42,7 @@ def generate_viewer_html(ledger_path: str = _DEFAULT_LEDGER_PATH) -> str:
     try:
         entries: list[dict] = load_ledger(ledger_path)
         chain_status: dict = _compute_chain_status(ledger_path)
-        stats: dict = _compute_stats(entries)
+        stats: dict = compute_ledger_stats(entries)
         return _build_html(stats, chain_status, entries)
     except Exception as e:
         print(
@@ -85,71 +86,6 @@ def _compute_chain_status(ledger_path: str) -> dict:
     }
 
 
-def _compute_stats(entries: list[dict]) -> dict:
-    """Replicate ``cmd_stats`` logic so the banner matches terminal output."""
-    total: int = len(entries)
-    passed: int = 0
-    vetoed: int = 0
-    pipeline_errors: int = 0
-    citation_counts: dict[str, int] = {}
-
-    for entry in entries:
-        oracle: Any = entry.get("oracle")
-        oracle_dict: dict = oracle if isinstance(oracle, dict) else {}
-        verdict: Any = oracle_dict.get("verdict")
-
-        if _entry_has_pipeline_error(entry):
-            pipeline_errors += 1
-
-        if verdict == "PASS":
-            passed += 1
-        elif verdict == "VETO":
-            vetoed += 1
-            citations: Any = oracle_dict.get("constraint_citations")
-            if isinstance(citations, list):
-                for cid in citations:
-                    if isinstance(cid, str):
-                        citation_counts[cid] = citation_counts.get(cid, 0) + 1
-                    elif isinstance(cid, dict):
-                        raw = cid.get("constraint_id")
-                        if isinstance(raw, str):
-                            citation_counts[raw] = citation_counts.get(raw, 0) + 1
-                    else:
-                        print(
-                            f"[bench viewer] unexpected citation type: {type(cid).__name__}",
-                            file=sys.stderr,
-                        )
-
-    most_cited: tuple[str, int] | None = None
-    if citation_counts:
-        most_cited = max(citation_counts.items(), key=lambda kv: kv[1])
-
-    return {
-        "total": total,
-        "passed": passed,
-        "vetoed": vetoed,
-        "pipeline_errors": pipeline_errors,
-        "most_cited": most_cited,
-    }
-
-
-def _entry_has_pipeline_error(entry: dict) -> bool:
-    for stage in ("challenger", "defender", "oracle"):
-        stage_result: Any = entry.get(stage)
-        if (
-            isinstance(stage_result, dict)
-            and stage_result.get("status") == "PIPELINE_ERROR"
-        ):
-            return True
-    return False
-
-
-def _pct(part: int, total: int) -> str:
-    if total <= 0:
-        return "0.0%"
-    return f"{part / total * 100:.1f}%"
-
-
 def _build_html(
     stats: dict,
     chain_status: dict,
@@ -162,8 +98,8 @@ def _build_html(
     total: int = int(stats.get("total", 0))
     passed: int = int(stats.get("passed", 0))
     vetoed: int = int(stats.get("vetoed", 0))
-    passed_pct: str = _pct(passed, total)
-    vetoed_pct: str = _pct(vetoed, total)
+    passed_pct: str = pct(passed, total)
+    vetoed_pct: str = pct(vetoed, total)
 
     most_cited: Any = stats.get("most_cited")
     if isinstance(most_cited, (list, tuple)) and len(most_cited) == 2:
