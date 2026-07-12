@@ -13,7 +13,6 @@ import json
 import sys
 import unittest
 from pathlib import Path
-from typing import Any
 from unittest.mock import MagicMock, patch
 
 _REPO_ROOT: Path = Path(__file__).resolve().parent.parent

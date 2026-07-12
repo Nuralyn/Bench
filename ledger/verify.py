@@ -5,7 +5,8 @@ recomputing each hash and confirming the ``previous_hash`` link holds
 from the GENESIS entry through to the latest. This module deliberately
 does not call ``load_ledger`` from ``chain.py`` — independence from the
 write path is the whole point of an auditor. Only ``compute_entry_hash``
-is shared, because the hashing algorithm must match by construction.
+and ``META_FILENAME`` are shared, because the hashing algorithm and the
+meta-anchor filename must match the writer by construction.
 
 The validator reports the first failure it encounters (one bad entry is
 enough to invalidate the chain) along with enough context to pinpoint
@@ -17,11 +18,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from ledger.chain import META_FILENAME as _META_FILENAME
 from ledger.chain import compute_entry_hash
 
 _DEFAULT_LEDGER_PATH: str = "ledger/bench-ledger.json"
 _GENESIS_MARKER: str = "GENESIS"
-_META_FILENAME: str = "ledger-meta.json"
 
 
 def verify_chain(path: str = _DEFAULT_LEDGER_PATH) -> dict:

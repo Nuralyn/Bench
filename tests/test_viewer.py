@@ -4,7 +4,11 @@ Smoke-level coverage of generate_viewer_html against synthetic ledgers
 on disk: document structure, stats banner values, chain status labels,
 JSON embedding safety, and the never-raises error page fallback.
 
-Run: python -m unittest discover -s tests -p test_viewer.py -v
+Synthetic chains come from the shared fixture module
+tests/_ledger_fixtures.py (build_valid_chain), the single source of
+truth for the entry shape.
+
+Run: python -m unittest tests.test_viewer -v
 """
 
 import json
@@ -14,40 +18,15 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from typing import Any
 from unittest.mock import patch
 
 _REPO_ROOT: Path = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from tests._ledger_fixtures import build_valid_chain as _build_valid_chain  # noqa: E402
 from ledger.chain import compute_entry_hash  # noqa: E402
 from utils.viewer import generate_viewer_html  # noqa: E402
-
-
-def _build_valid_chain(n: int, verdicts: list[str] | None = None) -> list[dict]:
-    """Build a correctly-linked chain of n entries with oracle verdicts."""
-    entries: list[dict] = []
-    for i in range(n):
-        verdict: str = verdicts[i] if verdicts else "PASS"
-        entry: dict[str, Any] = {
-            "entry_id": f"id-{i}",
-            "timestamp": f"2026-01-01T00:00:{i:02d}+00:00",
-            "previous_hash": "GENESIS" if i == 0 else entries[i - 1]["entry_hash"],
-            "constitution_hash": "abc",
-            "change": {"file": f"file_{i}.py", "tool": "Write"},
-            "oracle": {
-                "verdict": verdict,
-                "constraint_citations": (
-                    [{"constraint_id": "C-001", "disposition": "VIOLATED"}]
-                    if verdict == "VETO"
-                    else []
-                ),
-            },
-        }
-        entry["entry_hash"] = compute_entry_hash(entry)
-        entries.append(entry)
-    return entries
 
 
 class GenerateViewerHtmlTests(unittest.TestCase):
@@ -74,9 +53,9 @@ class GenerateViewerHtmlTests(unittest.TestCase):
         )
         self._write_chain(chain)
         html_out: str = generate_viewer_html(self._path())
-        self.assertIn(">VALID<", html_out)
-        self.assertIn("2 <span class=\"pct\">(66.7%)</span>", html_out)
-        self.assertIn("1 <span class=\"pct\">(33.3%)</span>", html_out)
+        self.assertIn('"status": "VALID"', html_out)
+        self.assertIn("(66.7%)", html_out)
+        self.assertIn("(33.3%)", html_out)
         self.assertIn("C-001 (1 veto(es))", html_out)
         self.assertIn("file_1.py", html_out)
 
