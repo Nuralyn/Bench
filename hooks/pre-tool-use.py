@@ -65,21 +65,28 @@ def extract_diff_info(tool_name: str, tool_input: dict[str, Any]) -> dict[str, A
 
     Fallback path: if utils.diff failed to import, fall back to the
     original inline field mapping so Write/Edit/MultiEdit still yield
-    structured diff info for governance — the hardening is forfeited but
+    structured diff info for governance. The hardening is forfeited but
     coverage is not (C-007 continuity). A stderr warning is emitted per
     call so degraded-mode operation is observable at the call site.
 
-    Unknown tool names return an empty dict — the hook still runs
+    Unknown tool names return an empty dict. The hook still runs
     governance on them so the pipeline can decide what to do, but we
     don't fabricate fields.
 
-    C-005 deferral justification for the fallback path: the fallback is
-    byte-identical to the pre-existing extract_diff_info logic (see prior
-    commit history); its correctness is established by the ledger
-    continuity of the preceding governance pipeline runs. No new
-    behavior is introduced on the fallback branch, so no additional
-    tests are required. The primary delegation path is covered by
-    tests/test_diff.py.
+    Global governance behavior (differs from prior fallback): when a
+    file path resolves outside the Bench repo root (_REPO_ROOT), the
+    fallback no longer returns the sentinel ``[PATH_TRAVERSAL_BLOCKED]``.
+    Instead it delegates to ``_fallback_normalize_to_cwd`` (defined above
+    in this module) which normalizes the path relative to CWD (the
+    governed project's root). This enables governance of edits in
+    external projects without over-blocking. A ``_path_normalized_external``
+    flag is set on the returned dict so pipeline stages (Challenger,
+    Defender, Oracle) can see that the path originated outside the
+    Bench repo and was normalized via CWD heuristics.
+
+    C-005 test coverage: both CWD-normalization branches (cross-drive
+    ValueError and escapes-repo-root) are covered by
+    TestFallbackExternalNormalization in tests/test_hook.py.
     """
     if _build_diff_info_hardened is not None:
         return _build_diff_info_hardened(tool_name, tool_input)
@@ -90,52 +97,87 @@ def extract_diff_info(tool_name: str, tool_input: dict[str, Any]) -> dict[str, A
     )
     raw_path: str = str(tool_input.get("file_path", ""))
     normalized: str = raw_path
+    path_external: bool = False
     if raw_path:
-        # Mirror utils.diff._normalize_path: resolve against the project root and
-        # allow in-root paths (returned project-relative, nameable for
-        # governance), blocking only genuine escapes. Rejecting every absolute
-        # path would garble every edit, since Write/Edit always pass absolute
-        # paths — the bug this mirrors the fix for. Use the file-derived repo
-        # root (_REPO_ROOT), not os.getcwd(), which can be a subdir at runtime.
+        # Mirror utils.diff._normalize_path: resolve against the Bench repo
+        # root (_REPO_ROOT, from __file__) for in-repo files. _REPO_ROOT is
+        # NOT os.getcwd() because the hook can run with a working directory
+        # below the repo root, and resolving against CWD would wrongly reject
+        # in-repo edits (e.g. editing utils/api.py while CWD is tests/).
+        # For files outside the Bench repo (global governance), fall back to
+        # CWD-relative normalization via _fallback_normalize_to_cwd.
         root: str = os.path.realpath(str(_REPO_ROOT))
         candidate: str = os.path.realpath(os.path.join(root, raw_path))
         try:
             normalized = os.path.relpath(candidate, root)
         except ValueError as exc:
-            # Different drive on Windows: cannot be inside the project root.
             print(
-                f"[bench hook] path traversal blocked in fallback "
-                f"(cross-drive) {raw_path!r}: {exc}",
+                f"[bench hook] path on different drive from Bench repo "
+                f"(fallback) {raw_path!r}: {exc}; normalizing against CWD",
                 file=sys.stderr,
             )
-            normalized = "[PATH_TRAVERSAL_BLOCKED]"
+            normalized = _fallback_normalize_to_cwd(candidate)
+            path_external = True
         else:
             if normalized == os.pardir or normalized.startswith(
                 os.pardir + os.sep
             ):
                 print(
-                    f"[bench hook] path traversal blocked in fallback "
-                    f"(escapes project root) {raw_path!r}",
+                    f"[bench hook] path outside Bench repo (fallback) "
+                    f"{raw_path!r}; normalizing against CWD",
                     file=sys.stderr,
                 )
-                normalized = "[PATH_TRAVERSAL_BLOCKED]"
+                normalized = _fallback_normalize_to_cwd(candidate)
+                path_external = True
+    result: dict[str, Any]
     if tool_name == "Write":
-        return {
+        result = {
             "file_path": normalized,
             "content": tool_input.get("content"),
         }
-    if tool_name == "Edit":
-        return {
+    elif tool_name == "Edit":
+        result = {
             "file_path": normalized,
             "old_string": tool_input.get("old_string"),
             "new_string": tool_input.get("new_string"),
         }
-    if tool_name == "MultiEdit":
-        return {
+    elif tool_name == "MultiEdit":
+        result = {
             "file_path": normalized,
             "edits": tool_input.get("edits", []),
         }
-    return {}
+    else:
+        result = {}
+    if path_external:
+        result["_path_normalized_external"] = True
+    return result
+
+
+def _fallback_normalize_to_cwd(candidate: str) -> str:
+    """Normalize path relative to CWD for files outside the Bench repo.
+
+    Mirrors utils.diff._normalize_relative_to_cwd for the degraded fallback
+    path. Returns CWD-relative if the file is inside the governed project,
+    otherwise returns the absolute path for transparency in the ledger.
+    """
+    try:
+        cwd: str = os.path.realpath(os.getcwd())
+        rel: str = os.path.relpath(candidate, cwd)
+    except ValueError as exc:
+        print(
+            f"[bench hook] CWD-relative normalization failed in fallback "
+            f"for {candidate!r}: {exc}",
+            file=sys.stderr,
+        )
+        return candidate
+    if rel == os.pardir or rel.startswith(os.pardir + os.sep):
+        print(
+            f"[bench hook] path escapes CWD in fallback, using absolute: "
+            f"{candidate!r}",
+            file=sys.stderr,
+        )
+        return candidate
+    return rel
 
 
 _GOVERNED_TOOLS: frozenset[str] = frozenset({"Write", "Edit", "MultiEdit"})
