@@ -211,24 +211,37 @@ class BinaryDetectionTests(unittest.TestCase):
         self.assertNotIn("binary", result)
 
 
-class PathTraversalTests(unittest.TestCase):
-    def test_relative_traversal_blocked(self) -> None:
-        self.assertEqual(_normalize_path("../../../etc/passwd"), "[PATH_TRAVERSAL_BLOCKED]")
+class PathNormalizationTests(unittest.TestCase):
+    """Path normalization for governance.
 
-    def test_dotdot_single_level_blocked(self) -> None:
-        self.assertEqual(_normalize_path("../sibling.py"), "[PATH_TRAVERSAL_BLOCKED]")
+    In-repo paths resolve project-relative (against _PROJECT_ROOT from
+    __file__). Out-of-repo paths fall through to CWD-relative normalization
+    via _normalize_relative_to_cwd for global governance support. Paths that
+    escape both roots produce an absolute path for ledger transparency.
+    """
 
-    def test_absolute_path_blocked(self) -> None:
+    def test_relative_escape_produces_absolute(self) -> None:
+        result = _normalize_path("../../../etc/passwd")
+        self.assertNotEqual(result, "[PATH_TRAVERSAL_BLOCKED]")
+        self.assertTrue(os.path.isabs(result))
+
+    def test_dotdot_single_level_produces_absolute(self) -> None:
+        result = _normalize_path("../sibling.py")
+        self.assertNotEqual(result, "[PATH_TRAVERSAL_BLOCKED]")
+        self.assertTrue(os.path.isabs(result))
+
+    def test_absolute_outside_repo_produces_absolute(self) -> None:
         result = _normalize_path("/etc/passwd")
-        self.assertEqual(result, "[PATH_TRAVERSAL_BLOCKED]")
+        self.assertNotEqual(result, "[PATH_TRAVERSAL_BLOCKED]")
+        self.assertTrue(os.path.isabs(result))
 
     @unittest.skipUnless(os.name == "nt", "Windows absolute paths only detected on Windows")
-    def test_windows_absolute_path_blocked(self) -> None:
+    def test_windows_absolute_outside_repo_produces_absolute(self) -> None:
         result = _normalize_path("C:\\Windows\\System32\\config")
-        self.assertEqual(result, "[PATH_TRAVERSAL_BLOCKED]")
+        self.assertNotEqual(result, "[PATH_TRAVERSAL_BLOCKED]")
+        self.assertTrue(os.path.isabs(result))
 
     def test_normal_relative_path_passes(self) -> None:
-        import os
         expected: str = "src\\main.py" if os.sep == "\\" else "src/main.py"
         self.assertEqual(_normalize_path("src/main.py"), expected)
 
@@ -240,14 +253,15 @@ class PathTraversalTests(unittest.TestCase):
     def test_empty_path_passes_through(self) -> None:
         self.assertEqual(_normalize_path(""), "")
 
-    def test_build_diff_info_normalizes_traversal(self) -> None:
+    def test_build_diff_info_normalizes_escape(self) -> None:
         result = build_diff_info(
             "Write",
             {"file_path": "../../../etc/passwd", "content": "pwned"},
         )
-        self.assertEqual(result["file_path"], "[PATH_TRAVERSAL_BLOCKED]")
+        self.assertNotEqual(result["file_path"], "[PATH_TRAVERSAL_BLOCKED]")
+        self.assertTrue(os.path.isabs(result["file_path"]))
 
-    def test_build_diff_info_normalizes_absolute(self) -> None:
+    def test_build_diff_info_normalizes_absolute_outside(self) -> None:
         result = build_diff_info(
             "Edit",
             {
@@ -256,20 +270,16 @@ class PathTraversalTests(unittest.TestCase):
                 "new_string": "new",
             },
         )
-        self.assertEqual(result["file_path"], "[PATH_TRAVERSAL_BLOCKED]")
+        self.assertNotEqual(result["file_path"], "[PATH_TRAVERSAL_BLOCKED]")
+        self.assertTrue(os.path.isabs(result["file_path"]))
 
     def test_in_root_absolute_path_allowed(self) -> None:
-        # Write/Edit always pass ABSOLUTE paths, so an in-root absolute path must
-        # resolve to its project-relative form, not be blocked. Regression guard:
-        # the old code blocked every absolute path, which garbled every edit.
         abs_in_root: str = os.path.join(_PROJECT_ROOT, "utils", "diff.py")
         result = _normalize_path(abs_in_root)
         self.assertNotEqual(result, "[PATH_TRAVERSAL_BLOCKED]")
         self.assertEqual(result, os.path.join("utils", "diff.py"))
 
     def test_build_diff_info_allows_in_root_absolute(self) -> None:
-        # The real-world input shape: build_diff_info given an absolute in-root
-        # file_path must return the nameable project-relative path.
         abs_in_root: str = os.path.join(_PROJECT_ROOT, "utils", "api.py")
         result = build_diff_info(
             "Write", {"file_path": abs_in_root, "content": "x = 1"}
@@ -277,9 +287,6 @@ class PathTraversalTests(unittest.TestCase):
         self.assertEqual(result["file_path"], os.path.join("utils", "api.py"))
 
     def test_in_root_absolute_allowed_when_cwd_is_subdir(self) -> None:
-        # Regression for the os.getcwd() root bug (Codex P2 on #8): the hook can
-        # run with a CWD below the repo root, but an in-repo absolute path must
-        # still resolve — the root is derived from the module location, not CWD.
         target: str = os.path.join(_PROJECT_ROOT, "utils", "diff.py")
         original_cwd: str = os.getcwd()
         try:
@@ -288,6 +295,18 @@ class PathTraversalTests(unittest.TestCase):
         finally:
             os.chdir(original_cwd)
         self.assertEqual(result, os.path.join("utils", "diff.py"))
+
+    def test_external_path_normalizes_relative_to_cwd(self) -> None:
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            external_file: str = os.path.join(tmpdir, "app", "main.py")
+            original_cwd: str = os.getcwd()
+            try:
+                os.chdir(tmpdir)
+                result = _normalize_path(external_file)
+            finally:
+                os.chdir(original_cwd)
+            self.assertEqual(result, os.path.join("app", "main.py"))
 
 
 class MalformedInputTests(unittest.TestCase):
