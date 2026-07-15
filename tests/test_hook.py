@@ -296,8 +296,11 @@ class ExtractDiffInfoFallbackTests(unittest.TestCase):
             _hook_module._build_diff_info_hardened = original
         self.assertNotEqual(info["file_path"], "[PATH_TRAVERSAL_BLOCKED]")
         self.assertEqual(info["file_path"], os.path.join("utils", "api.py"))
+        self.assertNotIn("_path_normalized_external", info)
 
-    def test_fallback_blocks_escape(self) -> None:
+    def test_fallback_escape_produces_absolute_with_external_flag(self) -> None:
+        import os
+
         original = _hook_module._build_diff_info_hardened
         try:
             _hook_module._build_diff_info_hardened = None
@@ -311,7 +314,81 @@ class ExtractDiffInfoFallbackTests(unittest.TestCase):
             )
         finally:
             _hook_module._build_diff_info_hardened = original
-        self.assertEqual(info["file_path"], "[PATH_TRAVERSAL_BLOCKED]")
+        self.assertNotEqual(info["file_path"], "[PATH_TRAVERSAL_BLOCKED]")
+        self.assertTrue(os.path.isabs(info["file_path"]))
+        self.assertTrue(info.get("_path_normalized_external"))
+
+
+class TestFallbackExternalNormalization(unittest.TestCase):
+    """Exercises both CWD-normalization branches in extract_diff_info's
+    fallback path: the escapes-repo-root branch and a simulated cross-drive
+    ValueError branch. Covers C-005 requirement cited in the docstring."""
+
+    def test_escape_repo_root_normalizes_relative_to_cwd(self) -> None:
+        import os
+        import tempfile
+
+        original = _hook_module._build_diff_info_hardened
+        original_cwd: str = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            external_file: str = os.path.join(tmpdir, "src", "app.py")
+            try:
+                _hook_module._build_diff_info_hardened = None
+                os.chdir(tmpdir)
+                info: dict = _hook_module.extract_diff_info(
+                    "Write",
+                    {"file_path": external_file, "content": "x = 1"},
+                )
+            finally:
+                os.chdir(original_cwd)
+                _hook_module._build_diff_info_hardened = original
+        self.assertEqual(info["file_path"], os.path.join("src", "app.py"))
+        self.assertTrue(info.get("_path_normalized_external"))
+
+    def test_cross_drive_valueerror_normalizes_to_cwd(self) -> None:
+        import os
+
+        original = _hook_module._build_diff_info_hardened
+        original_cwd: str = os.getcwd()
+        try:
+            _hook_module._build_diff_info_hardened = None
+            original_relpath = os.path.relpath
+            call_count: list[int] = [0]
+
+            def mock_relpath(path: str, start: str) -> str:
+                call_count[0] += 1
+                if call_count[0] == 1:
+                    raise ValueError("path is on mount 'D:', start on mount 'C:'")
+                return original_relpath(path, start)
+
+            with patch("os.path.relpath", side_effect=mock_relpath):
+                info: dict = _hook_module.extract_diff_info(
+                    "Edit",
+                    {
+                        "file_path": os.path.join(os.getcwd(), "utils", "api.py"),
+                        "old_string": "a",
+                        "new_string": "b",
+                    },
+                )
+        finally:
+            _hook_module._build_diff_info_hardened = original
+        self.assertTrue(info.get("_path_normalized_external"))
+        self.assertNotEqual(info["file_path"], "[PATH_TRAVERSAL_BLOCKED]")
+
+    def test_escape_both_roots_returns_absolute(self) -> None:
+        import os
+
+        original = _hook_module._build_diff_info_hardened
+        try:
+            _hook_module._build_diff_info_hardened = None
+            info: dict = _hook_module.extract_diff_info(
+                "Write",
+                {"file_path": "../../../etc/passwd", "content": "x"},
+            )
+        finally:
+            _hook_module._build_diff_info_hardened = original
+        self.assertTrue(os.path.isabs(info["file_path"]))
+        self.assertTrue(info.get("_path_normalized_external"))
 
 
 if __name__ == "__main__":

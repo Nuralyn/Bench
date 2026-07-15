@@ -28,6 +28,7 @@ Optimization:
 
 import sys
 import traceback
+from pathlib import Path
 from typing import Any
 
 from ledger.chain import append_entry
@@ -39,8 +40,8 @@ from pipeline.constitution import (
 from pipeline.defender import run_defender
 from pipeline.oracle import run_oracle
 
-
-_CONSTITUTION_PATH: str = "bench.json"
+_BENCH_ROOT: Path = Path(__file__).resolve().parent.parent
+_CONSTITUTION_PATH: str = str(_BENCH_ROOT / "bench.json")
 
 
 def run_governance_pipeline(
