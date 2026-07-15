@@ -24,7 +24,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-_DEFAULT_LEDGER_PATH: str = "ledger/bench-ledger.json"
+_BENCH_ROOT: Path = Path(__file__).resolve().parent.parent
+_DEFAULT_LEDGER_PATH: str = str(_BENCH_ROOT / "ledger" / "bench-ledger.json")
 META_FILENAME: str = "ledger-meta.json"
 _GENESIS_MARKER: str = "GENESIS"
 _MAX_FIELD_CHARS: int = 10_000

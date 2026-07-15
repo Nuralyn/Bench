@@ -45,37 +45,68 @@ _PROJECT_ROOT: str = os.path.realpath(
 )
 
 
-def _normalize_path(raw_path: str) -> str:
-    """Normalize a file path and reject only genuine traversal.
+def _normalize_relative_to_cwd(candidate: str) -> str:
+    """Normalize path relative to CWD for files outside the Bench repo.
 
-    Resolves the path against the project root. Absolute or relative inputs that
-    stay inside the root are returned project-relative (nameable for governance);
-    only paths that escape the root return a sanitized placeholder so governance
-    still runs (fail-open) but the misleading path never reaches LLM prompts or
-    the ledger. (Previously every absolute path was rejected, which blocked the
-    in-root absolute paths that Write/Edit always supply.)
+    Used by global governance to produce readable, project-relative paths
+    for externally governed files. Returns CWD-relative if the file is
+    inside the governed project, otherwise returns the absolute path for
+    full transparency in the ledger.
+    """
+    try:
+        cwd: str = os.path.realpath(os.getcwd())
+        rel: str = os.path.relpath(candidate, cwd)
+    except ValueError as exc:
+        print(
+            f"[bench diff] CWD-relative normalization failed for "
+            f"{candidate!r}: {exc}",
+            file=sys.stderr,
+        )
+        return candidate
+    if rel == os.pardir or rel.startswith(os.pardir + os.sep):
+        print(
+            f"[bench diff] path escapes CWD, using absolute: {candidate!r}",
+            file=sys.stderr,
+        )
+        return candidate
+    return rel
+
+
+def _normalize_path(raw_path: str) -> str:
+    """Normalize a file path for governance.
+
+    For files inside the Bench repo (_PROJECT_ROOT, derived from __file__):
+    returns project-relative paths, preserving existing CWD-invariant behavior.
+    _PROJECT_ROOT is NOT os.getcwd() because the hook can run with a working
+    directory below the repo root, and resolving against CWD would wrongly
+    reject in-repo edits that live outside it (e.g. editing utils/api.py
+    while CWD is tests/).
+
+    For files outside the Bench repo (global governance mode): normalizes
+    relative to CWD, which Claude Code sets to the governed project's root.
+    This path never blocks; the full absolute path is used when CWD-relative
+    normalization is not possible.
     """
     if not raw_path:
         return raw_path
     root: str = _PROJECT_ROOT
-    # os.path.join leaves raw_path unchanged when it is already absolute, so this
-    # resolves both absolute and relative inputs against the project root.
     candidate: str = os.path.realpath(os.path.join(root, raw_path))
     try:
         rel: str = os.path.relpath(candidate, root)
-    except ValueError:
-        # Different drive on Windows: cannot be inside the project root.
+    except ValueError as exc:
         print(
-            f"[bench diff] path traversal blocked: outside project root {raw_path!r}",
+            f"[bench diff] path on different drive from Bench repo "
+            f"{raw_path!r}: {exc}; normalizing against CWD",
             file=sys.stderr,
         )
-        return _PATH_TRAVERSAL_PLACEHOLDER
+        return _normalize_relative_to_cwd(candidate)
     if rel == os.pardir or rel.startswith(os.pardir + os.sep):
         print(
-            f"[bench diff] path traversal blocked: escapes project root {raw_path!r}",
+            f"[bench diff] path outside Bench repo {raw_path!r}; "
+            f"normalizing against CWD (global governance)",
             file=sys.stderr,
         )
-        return _PATH_TRAVERSAL_PLACEHOLDER
+        return _normalize_relative_to_cwd(candidate)
     return rel
 
 
