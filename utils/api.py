@@ -46,6 +46,19 @@ DEFENDER_MODEL: str = "claude-sonnet-5"
 ORACLE_MODEL: str = "claude-opus-4-8"
 UTILITY_MODEL: str = "claude-haiku-4-5-20251001"
 
+# OpenRouter publishes Anthropic slugs with a dotted version (for example
+# "anthropic/claude-opus-4.8"), while the constants above use the first-party
+# hyphenated IDs. Map the models the pipeline dispatches through call_model to
+# their exact OpenRouter slugs. Anything unlisted (including the reserved,
+# currently-uninvoked UTILITY_MODEL) falls back to the bare "anthropic/"
+# prefix, which is only correct when the first-party ID and the OpenRouter slug
+# coincide (as they do for claude-sonnet-5). A wrong slug would make the stage
+# return API_ERROR, which the runner fails open into a PASS.
+_OPENROUTER_SLUGS: dict[str, str] = {
+    "claude-sonnet-5": "anthropic/claude-sonnet-5",
+    "claude-opus-4-8": "anthropic/claude-opus-4.8",
+}
+
 _PROVIDER_ANTHROPIC: str = "anthropic"
 _PROVIDER_OPENROUTER: str = "openrouter"
 _PROVIDER_CLAUDE_CLI: str = "claude_code"
@@ -298,7 +311,7 @@ def _openrouter_call(
             "openrouter: openai SDK not installed; pip install openai"
         ) from e
 
-    routed_model: str = f"anthropic/{model}"
+    routed_model: str = _OPENROUTER_SLUGS.get(model, f"anthropic/{model}")
     full_messages: list[dict[str, str]] = [
         {"role": "system", "content": system_prompt},
         *messages,
