@@ -22,6 +22,7 @@ if str(_REPO_ROOT) not in sys.path:
 from utils.api import (  # noqa: E402
     _ProviderError,
     _anthropic_call,
+    _openrouter_call,
     _try_parse_dict,
     call_model,
     strip_code_fences,
@@ -295,6 +296,50 @@ class AnthropicCallTests(unittest.TestCase):
         )
         self.assertEqual(text, '{"status": "CLEAR"}')
         self.assertNotIn("LEAK", text)
+
+
+class OpenRouterSlugTests(unittest.TestCase):
+    """The openrouter path must send OpenRouter's published slug (dotted
+    version), not the first-party hyphenated id, or the stage returns an
+    API_ERROR that the runner fails open into a PASS."""
+
+    def _routed_model(self, model: str) -> str:
+        fake_openai: MagicMock = MagicMock()
+        fake_openai.OpenAIError = Exception
+        response: MagicMock = MagicMock()
+        response.choices = [
+            MagicMock(message=MagicMock(content='{"ok": true}'))
+        ]
+        response.usage.prompt_tokens = 1
+        response.usage.completion_tokens = 1
+        create = fake_openai.OpenAI.return_value.chat.completions.create
+        create.return_value = response
+        with patch.dict(sys.modules, {"openai": fake_openai}), patch.dict(
+            os.environ, {"OPENROUTER_API_KEY": "test-key"}
+        ):
+            _openrouter_call(
+                model, "sys", [{"role": "user", "content": "hi"}], 4096
+            )
+        _args, kwargs = create.call_args
+        return kwargs["model"]
+
+    def test_opus_maps_to_dotted_openrouter_slug(self) -> None:
+        self.assertEqual(
+            self._routed_model("claude-opus-4-8"),
+            "anthropic/claude-opus-4.8",
+        )
+
+    def test_sonnet_5_maps_to_its_slug(self) -> None:
+        self.assertEqual(
+            self._routed_model("claude-sonnet-5"),
+            "anthropic/claude-sonnet-5",
+        )
+
+    def test_unmapped_model_falls_back_to_prefix(self) -> None:
+        self.assertEqual(
+            self._routed_model("claude-future-9"),
+            "anthropic/claude-future-9",
+        )
 
 
 if __name__ == "__main__":

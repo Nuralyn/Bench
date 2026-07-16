@@ -152,8 +152,9 @@ client = openai.OpenAI(
     base_url="https://openrouter.ai/api/v1",
     api_key=os.environ["OPENROUTER_API_KEY"],
 )
-# Model strings are auto-prefixed with "anthropic/" on this path,
-# e.g. a model string "<id>" becomes "anthropic/<id>".
+# Model strings are routed to their OpenRouter slug on this path. Most map to
+# "anthropic/<id>", but ids whose OpenRouter slug differs (e.g. the dotted
+# "anthropic/claude-opus-4.8") are translated via a small map in utils/api.py.
 # The openai SDK is a soft dependency — install it only if you set
 # BENCH_PROVIDER=openrouter.
 

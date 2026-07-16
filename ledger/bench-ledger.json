@@ -24629,5 +24629,1301 @@
       }
     },
     "entry_hash": "875aaf95f04365fff5cb29c5e2cbbc0cd33f04fbc41c24e70499035b3473e95e"
+  },
+  {
+    "entry_id": "14fe1568-cb8f-43b1-940e-e6676c0f960b",
+    "timestamp": "2026-07-16T06:15:19.231188+00:00",
+    "previous_hash": "875aaf95f04365fff5cb29c5e2cbbc0cd33f04fbc41c24e70499035b3473e95e",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "utils\\api.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "utils\\api.py",
+        "change_type": "modify",
+        "old_string": "UTILITY_MODEL: str = \"claude-haiku-4-5-20251001\"\n\n_PROVIDER_ANTHROPIC: str = \"anthropic\"",
+        "new_string": "UTILITY_MODEL: str = \"claude-haiku-4-5-20251001\"\n\n# OpenRouter publishes Anthropic slugs with a dotted version (for example\n# \"anthropic/claude-opus-4.8\"), while the constants above use the first-party\n# hyphenated IDs. Map every model the pipeline ships to its exact OpenRouter\n# slug; anything unlisted falls back to the bare \"anthropic/\" prefix, which is\n# only correct when the first-party ID and the OpenRouter slug coincide (as\n# they do for claude-sonnet-5). A wrong slug would make the stage return\n# API_ERROR, which the runner fails open into a PASS.\n_OPENROUTER_SLUGS: dict[str, str] = {\n    \"claude-sonnet-5\": \"anthropic/claude-sonnet-5\",\n    \"claude-opus-4-8\": \"anthropic/claude-opus-4.8\",\n}\n\n_PROVIDER_ANTHROPIC: str = \"anthropic\""
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-005",
+          "severity": "CONCERN",
+          "location": "utils/api.py: new `_OPENROUTER_SLUGS` dict and its fallback logic (described in the added comment)",
+          "evidence": "\"A wrong slug would make the stage return API_ERROR, which the runner fails open into a PASS.\" combined with `_OPENROUTER_SLUGS: dict[str, str] = {...}`",
+          "reasoning": "This introduces new lookup/fallback logic (mapping table plus an implicit fallback rule for unmapped models) with real correctness consequences per the comment's own admission. No test coverage is included in this diff to verify the slug resolution or the fallback behavior for models not in the map. C-005 is a warning, not a veto, but the omission is real."
+        },
+        {
+          "constraint_id": "C-007",
+          "severity": "CONCERN",
+          "location": "utils/api.py comment: 'A wrong slug would make the stage return API_ERROR, which the runner fails open into a PASS.'",
+          "evidence": "the added comment explicitly documents that a routing/API failure in this file results in the pipeline stage failing open to a PASS verdict",
+          "reasoning": "utils/api.py is the shared model-calling layer used by all three governance stages (Challenger, Defender, Oracle). If accurate, an incorrect or missing OpenRouter slug silently degrades a governed pipeline run into an automatic PASS rather than a blocked/erroring state, which is in tension with C-007's requirement that governance changes must not weaken enforcement or bypass verification. The diff itself doesn't change this fail-open behavior, but it newly increases the surface area where a wrong slug can trigger it (two hardcoded slugs that must stay accurate as models change), and calls attention to a fail-open path that arguably deserves Oracle scrutiny even if pre-existing."
+        },
+        {
+          "constraint_id": "C-004",
+          "severity": "OBSERVATION",
+          "location": "utils/api.py: `_OPENROUTER_SLUGS: dict[str, str] = {...}`",
+          "evidence": "dict[str, str] = { \"claude-sonnet-5\": ..., \"claude-opus-4-8\": ... }",
+          "reasoning": "Not a violation \u2014 the new constant is fully typed and doesn't weaken any existing annotation. Noted only because the map is incomplete relative to its own comment ('Map every model the pipeline ships to its exact OpenRouter slug') \u2014 UTILITY_MODEL (claude-haiku-4-5-20251001) is not included, so it would silently fall back to the bare 'anthropic/' prefix even though, per the file's own dated-suffix convention, that fallback is only claimed to be correct for models where the first-party ID and OpenRouter slug coincide. This is a factual/completeness gap in the change's own stated invariant, not a constitutional breach on its own."
+        },
+        {
+          "constraint_id": "C-002",
+          "severity": "OBSERVATION",
+          "location": "utils/api.py",
+          "evidence": "entire diff confined to a single additive block in utils/api.py",
+          "reasoning": "Scope is clean: utils/api.py is documented as the single source of truth for model IDs/routing, and the change is additive only (new dict + comment), no other files touched. No violation."
+        }
+      ],
+      "_tokens": {
+        "input": 8803,
+        "output": 3914
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "MITIGATE",
+          "argument": "The diff adds a static `dict[str, str]` literal, not new branching logic or a new function. C-005's language targets 'new functions or branches of logic' \u2014 a data table mapping two known strings to two other known strings doesn't really fit that category the way a new lookup/fallback function would. The fallback behavior itself (bare 'anthropic/' prefix when a model isn't in the map) is pre-existing code this diff doesn't touch or modify; the diff only supplies additional entries to consult. That said, the Challenger is right that no test asserts the two new slug values resolve correctly, and since C-005 is a warning (not veto), the honest position is: legitimate gap, low severity, easy to close with a two-line unit test asserting `_OPENROUTER_SLUGS['claude-opus-4-8'] == 'anthropic/claude-opus-4.8'`.",
+          "evidence": "The new code is exactly `_OPENROUTER_SLUGS: dict[str, str] = {...}` \u2014 a literal, with no accompanying function change shown in the diff."
+        },
+        {
+          "finding_index": 1,
+          "position": "REBUT",
+          "argument": "The Challenger's own reasoning concedes 'The diff itself doesn't change this fail-open behavior.' That's the whole rebuttal: C-007 governs changes to the pipeline that weaken enforcement or bypass verification. This diff doesn't touch runner.py's fail-open-to-PASS logic at all \u2014 it adds a documentation comment describing a pre-existing risk in a file (utils/api.py) that isn't even the file implementing that fail-open behavior. If anything, surfacing this risk in a comment makes the system MORE auditable, not less \u2014 a future reader of utils/api.py now has explicit warning that a wrong slug has downstream consequences, which is the opposite of 'silently weakening' enforcement. Flagging a pre-existing architectural decision as a reason to veto a two-line additive comment+dict change conflates 'this system has a known fail-open path' (a real but separate discussion, arguably for runner.py) with 'this specific diff introduces or worsens that path.' It does neither.",
+          "evidence": "Challenger finding text: 'The diff itself doesn't change this fail-open behavior, but it newly increases the surface area where a wrong slug can trigger it' \u2014 increasing surface area of a pre-existing risk by exactly two dict entries, both independently checkable against known model IDs, is not the same as weakening enforcement."
+        },
+        {
+          "finding_index": 2,
+          "position": "CONCEDE",
+          "argument": "The Challenger correctly identifies a real completeness gap: the comment claims to 'map every model the pipeline ships' but UTILITY_MODEL is absent, and per the file's own stated convention (bare-alias IDs coincide with OpenRouter slugs, but dated-snapshot IDs like UTILITY_MODEL's `claude-haiku-4-5-20251001` are called out as the exception to that coincidence), the omission means UTILITY_MODEL would silently fall back to a probably-wrong slug on the OpenRouter path. This is a legitimate factual gap in the diff's own documented invariant. Mitigating context: UTILITY_MODEL is explicitly documented in CLAUDE.md as 'reserved for future use' and formatting.py is 'currently stdlib-only,' so nothing in the current codebase actually invokes UTILITY_MODEL through call_model today \u2014 meaning this gap has zero current blast radius. But it's a real gap that should be closed before UTILITY_MODEL is ever wired up, and the Challenger is right to note it.",
+          "evidence": "CLAUDE.md: 'Utility | UTILITY_MODEL | Reserved for future summarization (utils/formatting.py is currently stdlib-only)' \u2014 confirms the model is unused today, capping the practical risk of the omission."
+        },
+        {
+          "finding_index": 3,
+          "position": "CONCEDE",
+          "argument": "Agreed, and the Challenger already self-labels this as 'No violation.' The entire diff is a single additive block confined to utils/api.py, exactly the file CLAUDE.md names as the single source of truth for model routing. No other files are touched.",
+          "evidence": "Diff `file_path` is solely `utils\\api.py`; the change is purely additive (new dict + comment) with no deletions or modifications to existing lines shown."
+        }
+      ],
+      "summary": "The change is a narrow, well-scoped, additive documentation-plus-data-table fix confined to utils/api.py with no real constitutional violations; the only substantive gap worth fixing before merge is the missing UTILITY_MODEL entry, and even that carries no current risk since UTILITY_MODEL isn't yet invoked in the codebase.",
+      "_tokens": {
+        "input": 10002,
+        "output": 4890
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change is a narrow, additive modification confined to utils/api.py that adds a typed `_OPENROUTER_SLUGS: dict[str, str]` mapping table plus an explanatory comment. Evaluating against the full constitution: No veto-severity constraint is clearly violated. On C-007 (Governance Pipeline Integrity), the Challenger raised a CONCERN that the added comment surfaces a fail-open-to-PASS path, but their own reasoning concedes 'The diff itself doesn't change this fail-open behavior,' and the Defender correctly rebuts that the fail-open logic lives in runner.py, which this diff does not touch. Critically, the change ADDS a correct slug mapping (previously all OpenRouter models fell back to a bare 'anthropic/' prefix that is wrong for dotted-version slugs like claude-opus-4.8), which reduces the chance of a wrong-slug API_ERROR rather than increasing it. Documenting a pre-existing architectural risk in a comment makes the system more auditable, not less, and does not weaken enforcement or bypass verification. The Challenger's own C-007 finding is graded only CONCERN, not a clear violation, and the Defender's REBUTTAL adequately addresses it. On C-004, the new constant is fully typed (dict[str, str]) and weakens no existing annotation (Challenger OBSERVATION, self-labeled 'Not a violation'). On C-002, the diff is confined to a single file that CLAUDE.md names as the single source of truth for model routing, and is purely additive (Challenger and Defender both agree: no violation). C-005 (warning severity) is legitimately implicated: no test asserts the two new slug values or the fallback behavior. As a warning, this does not trigger veto but is recorded as an advisory.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No catch blocks or error-handling logic added or modified."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is confined to utils/api.py, the documented single source of truth for model routing; purely additive, no other files touched. Both Challenger and Defender agree there is no scope violation."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new imports or dependencies introduced; only a literal dict and comment added."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "New constant is fully typed as dict[str, str]; no existing annotation removed or weakened. Challenger OBSERVATION explicitly states this is not a violation."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "VIOLATED",
+          "note": "Warning severity only. No test asserts slug resolution or fallback behavior. Does not trigger veto but is noted as an advisory. Defender concedes the gap is real but low-severity and easily closed with a two-line unit test."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No secrets or credentials introduced; the slugs are public model identifiers."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "The diff does not modify the runner's fail-open logic and does not weaken enforcement, bypass verification, or disable logging. It adds correct routing slugs (reducing wrong-slug API_ERROR risk) and documents a pre-existing risk, improving auditability. Challenger CONCERN is adequately addressed by Defender REBUTTAL."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger code touched; hash chain unaffected."
+        }
+      ],
+      "advisories": [
+        "C-005 (warning): Add a small unit test asserting the slug map resolves correctly, e.g. _OPENROUTER_SLUGS['claude-opus-4-8'] == 'anthropic/claude-opus-4.8', to lock the two new mappings against future drift.",
+        "Completeness gap (C-004 OBSERVATION): The comment claims to 'map every model the pipeline ships' but UTILITY_MODEL (claude-haiku-4-5-20251001) is omitted, so it would fall back to the bare 'anthropic/' prefix, which the file's own convention says is only correct when the first-party ID and OpenRouter slug coincide. Blast radius is currently zero (UTILITY_MODEL is reserved and not invoked via call_model today per CLAUDE.md), but this should be closed before UTILITY_MODEL is wired up.",
+        "Consider reconciling the comment's absolute wording ('Map every model the pipeline ships') with the actual contents, which omit UTILITY_MODEL, to avoid a misleading invariant claim."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 11637,
+        "output": 2343
+      }
+    },
+    "entry_hash": "be2c0035d0a0d1c107d0fb1b1c5d5c4dc1181ce11f351c5f6297f32844efd274"
+  },
+  {
+    "entry_id": "9c0961b3-25fa-4aa2-9065-ce7872107ea9",
+    "timestamp": "2026-07-16T06:15:22.675300+00:00",
+    "previous_hash": "be2c0035d0a0d1c107d0fb1b1c5d5c4dc1181ce11f351c5f6297f32844efd274",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "utils\\api.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "utils\\api.py",
+        "change_type": "modify",
+        "old_string": "UTILITY_MODEL: str = \"claude-haiku-4-5-20251001\"\n\n_PROVIDER_ANTHROPIC: str = \"anthropic\"",
+        "new_string": "UTILITY_MODEL: str = \"claude-haiku-4-5-20251001\"\n\n# OpenRouter publishes Anthropic slugs with a dotted version (for example\n# \"anthropic/claude-opus-4.8\"), while the constants above use the first-party\n# hyphenated IDs. Map every model the pipeline ships to its exact OpenRouter\n# slug; anything unlisted falls back to the bare \"anthropic/\" prefix, which is\n# only correct when the first-party ID and the OpenRouter slug coincide (as\n# they do for claude-sonnet-5). A wrong slug would make the stage return\n# API_ERROR, which the runner fails open into a PASS.\n_OPENROUTER_SLUGS: dict[str, str] = {\n    \"claude-sonnet-5\": \"anthropic/claude-sonnet-5\",\n    \"claude-opus-4-8\": \"anthropic/claude-opus-4.8\",\n}\n\n_PROVIDER_ANTHROPIC: str = \"anthropic\""
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-007",
+          "severity": "CONCERN",
+          "location": "utils/api.py - new comment above _OPENROUTER_SLUGS",
+          "evidence": "\"A wrong slug would make the stage return API_ERROR, which the runner fails open into a PASS.\"",
+          "reasoning": "The comment asserts that a pipeline stage failing with API_ERROR causes the runner to 'fail open into a PASS' rather than blocking the change or surfacing a PIPELINE_ERROR. If accurate, this is a significant governance-integrity concern: a broken/incorrect model route (e.g. an unmapped or wrong OpenRouter slug) would silently let unreviewed code pass rather than deny it. This behavior isn't introduced by this diff, but the diff explicitly documents and relies on it as a rationale for why the slug map matters, without correcting it. Given utils/api.py underlies every pipeline stage's model calls, this is worth Oracle scrutiny even though it's not new code."
+        },
+        {
+          "constraint_id": "C-002",
+          "severity": "CONCERN",
+          "location": "utils/api.py - new _OPENROUTER_SLUGS dict",
+          "evidence": "_OPENROUTER_SLUGS: dict[str, str] = {\"claude-sonnet-5\": ..., \"claude-opus-4-8\": ...}",
+          "reasoning": "The diff only shows the dict being defined, not consumed. No visible change to the OpenRouter call path (the code that currently does the bare 'anthropic/' prefixing per CLAUDE.md) to actually look up this map. If this table isn't wired into the request-construction logic elsewhere in the same file, it is dead/unused code that does not fix the dotted-vs-hyphenated slug mismatch it was clearly written to address, which conflicts with the project's 'no speculative code' / surgical-change principle and leaves the underlying bug unresolved despite appearing to document a fix."
+        },
+        {
+          "constraint_id": "C-005",
+          "severity": "OBSERVATION",
+          "location": "utils/api.py - new _OPENROUTER_SLUGS dict",
+          "evidence": "New module-level data structure with fallback semantics ('anything unlisted falls back to the bare \"anthropic/\" prefix')",
+          "reasoning": "This introduces a new lookup/fallback branch relevant to provider routing correctness (a warning-severity constraint area). No test coverage is visible in the diff for the slug-mapping behavior or the fallback path, though this may be addressed elsewhere outside the shown diff."
+        }
+      ],
+      "_tokens": {
+        "input": 8803,
+        "output": 4244
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "REBUT",
+          "argument": "The Challenger's own reasoning concedes the core point: 'This behavior isn't introduced by this diff.' The diff adds a comment describing an existing runner failure mode, it does not alter runner.py, error-handling logic, or any control flow. C-007 governs changes to the governance pipeline itself, and CLAUDE.md rule 16 is explicit about which files trigger that scrutiny: 'If you modify any file in pipeline/, ledger/, or hooks/, you are modifying the governance pipeline itself.' utils/api.py is none of those; it's the model-ID/provider-routing utility CLAUDE.md separately designates as 'the single source of truth for model IDs.' A pre-existing fail-open behavior, merely documented in a comment on an unrelated file, cannot retroactively become a new C-007 violation. If the fail-open behavior itself is a governance concern, that is a legitimate finding against runner.py's design, not against this diff.",
+          "evidence": "Comment is descriptive prose only: 'A wrong slug would make the stage return API_ERROR, which the runner fails open into a PASS.' No code in the diff touches error handling, retry logic, or the runner. CLAUDE.md rule 16 scopes C-007 to pipeline/, ledger/, hooks/."
+        },
+        {
+          "finding_index": 1,
+          "position": "MITIGATE",
+          "argument": "The Challenger is correct that this diff's visible hunk defines _OPENROUTER_SLUGS without showing it consumed. But the constraint cited, C-002 (Scope Boundary Enforcement), is about a change touching files outside the stated task boundary, not about whether a data structure is fully wired up within the file it belongs in. The dict lives in utils/api.py, exactly the file CLAUDE.md names as the model-ID source of truth, so there is no scope violation. The dead-code concern is better framed against the 'no speculative code' guideline, and even there the risk is minimal: the mapping table is inert data. It changes nothing about current runtime behavior until a lookup is wired into the OpenRouter call path, so shipping it in isolation does not break or weaken any existing enforcement. This is also consistent with CLAUDE.md rule 14, 'One change per tool call. Do not batch unrelated changes into a single Write/Edit operation' - defining the correction table and wiring it into the request-construction logic are naturally two separate governed edits, and the wiring is the logical next PreToolUse call.",
+          "evidence": "Diff only adds a module-level dict between two existing lines; no other hunk shown. CLAUDE.md: 'One change per tool call' (rule 14); utils/api.py described as 'the single source of truth for model IDs' (Models section)."
+        },
+        {
+          "finding_index": 2,
+          "position": "MITIGATE",
+          "argument": "C-005 is warning-severity, and the Challenger correctly flags that the shown diff includes no test for the slug map. However, this is a static literal dict, not new branching logic; the actual behavior under test would be the lookup-with-fallback code path in the (currently unmodified) request-construction function. Testing that meaningfully only makes sense once the map is consumed. If the follow-up wiring change lands without tests, that is the moment C-005 should bite. Flagging it now, on the definitional half of a two-part change, is premature but not wrong to note as an observation.",
+          "evidence": "Constraint C-005 severity is 'warning'. The new code is `_OPENROUTER_SLUGS: dict[str, str] = {...}`, a data literal with no conditional branches of its own."
+        }
+      ],
+      "summary": "The change is a narrowly scoped, additive data-mapping fix confined to the correct file with no functional regression or governance-integrity weakening, though the Challenger is right that the map appears unconsumed in this diff and should be wired into the OpenRouter call path in a prompt follow-up change.",
+      "_tokens": {
+        "input": 9747,
+        "output": 4372
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "This change adds a single module-level typed dict (_OPENROUTER_SLUGS) and an explanatory comment to utils/api.py, between two pre-existing lines. I evaluated it against the full constitution. C-007 (Challenger finding 0): the Challenger concedes 'This behavior isn't introduced by this diff.' The diff adds only descriptive prose about an existing runner failure mode and inert data; it modifies no error-handling, retry, or control-flow logic, and does not touch runner.py, the ledger, or any enforcement path. Documenting a pre-existing behavior does not weaken enforcement, so C-007 is not violated by this diff (Defender rebuttal 0 accepted). If anything, correctly mapping opus-4.8's dotted OpenRouter slug reduces the chance of hitting the fail-open path once wired. C-002 (Challenger finding 1): the dict lives in utils/api.py, the file CLAUDE.md designates as the single source of truth for model IDs, so there is no file-boundary scope violation (Defender rebuttal 1 accepted). The 'unconsumed dead code' observation is real but is a code-quality/speculative-code concern, not a C-002 breach, and the inert data introduces no functional regression. C-005 (Challenger finding 2): warning severity only; the addition is a static literal with no branching of its own, and meaningful test coverage applies to the lookup/fallback code path that is not modified here (Defender rebuttal 2 accepted). No new imports (C-003 satisfied), type annotation dict[str, str] is present and not weakened (C-004 satisfied), and no secrets are introduced (C-006 satisfied). No veto-severity constraint is clearly violated.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No catch blocks or error-handling code are added or modified; the change is a data literal plus a comment."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is confined to utils/api.py, the designated model-ID source of truth. No files outside the task boundary are touched. The unconsumed-dict concern is a quality note, not a scope breach."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "SATISFIED",
+          "note": "No new imports or dependencies; dict[str, str] uses builtin types only."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "New constant is explicitly typed dict[str, str]; no existing annotation removed or weakened."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "SATISFIED",
+          "note": "Warning severity. The addition is inert data with no branch logic of its own; test coverage is appropriately deferred to the follow-up wiring change. Noted as advisory."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No secrets, keys, or credentials introduced; slug strings are public model identifiers."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "Diff adds inert data and descriptive prose only. No enforcement, verification, logging, or runner control flow is altered. The documented fail-open behavior is pre-existing and not introduced or worsened here."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger read/write/modify logic is involved."
+        }
+      ],
+      "advisories": [
+        "The _OPENROUTER_SLUGS dict appears unconsumed in this diff (Challenger finding 1). It is inert until wired into the OpenRouter request-construction path. Ship the consuming change promptly so this does not linger as dead code that documents a fix it does not yet deliver.",
+        "The comment discloses a genuine governance-integrity concern: a wrong slug yields API_ERROR which the runner 'fails open into a PASS' (Challenger finding 0). This is pre-existing and out of scope for this diff, but it warrants a separate finding/change against runner.py's error handling, since fail-open on model-routing errors lets unreviewed code pass.",
+        "When the slug lookup/fallback is wired into the call path, add test coverage for both the mapped case (opus-4.8 dotted slug) and the bare 'anthropic/' fallback path (C-005)."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 11061,
+        "output": 2603
+      }
+    },
+    "entry_hash": "f8f6a26dd969b4bfe206c1005eb0527ea4218e40bdcaa0567d674e94a8a3531a"
+  },
+  {
+    "entry_id": "84cfa2b7-e1e9-4b9e-bd66-ed53c15a6f26",
+    "timestamp": "2026-07-16T06:16:17.087779+00:00",
+    "previous_hash": "f8f6a26dd969b4bfe206c1005eb0527ea4218e40bdcaa0567d674e94a8a3531a",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "utils\\api.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "utils\\api.py",
+        "change_type": "modify",
+        "old_string": "# OpenRouter publishes Anthropic slugs with a dotted version (for example\n# \"anthropic/claude-opus-4.8\"), while the constants above use the first-party\n# hyphenated IDs. Map every model the pipeline ships to its exact OpenRouter\n# slug; anything unlisted falls back to the bare \"anthropic/\" prefix, which is\n# only correct when the first-party ID and the OpenRouter slug coincide (as\n# they do for claude-sonnet-5). A wrong slug would make the stage return\n# API_ERROR, which the runner fails open into a PASS.",
+        "new_string": "# OpenRouter publishes Anthropic slugs with a dotted version (for example\n# \"anthropic/claude-opus-4.8\"), while the constants above use the first-party\n# hyphenated IDs. Map the models the pipeline dispatches through call_model to\n# their exact OpenRouter slugs. Anything unlisted (including the reserved,\n# currently-uninvoked UTILITY_MODEL) falls back to the bare \"anthropic/\"\n# prefix, which is only correct when the first-party ID and the OpenRouter slug\n# coincide (as they do for claude-sonnet-5). A wrong slug would make the stage\n# return API_ERROR, which the runner fails open into a PASS."
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 8820,
+        "output": 19
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The proposed change is a comment-only edit within utils/api.py. It refines documentation of the OpenRouter slug mapping to clarify that unlisted models (specifically the reserved, currently-uninvoked UTILITY_MODEL) fall back to the bare 'anthropic/' prefix. No executable code, type annotation, control flow, error-handling path, import, or credential is touched. The Challenger returned CLEAR with no findings and the Defender confirmed CLEAR. My independent review of the full constitution finds no violated constraint: the edit alters only a comment string within the single file named in the task boundary (C-002 satisfied), adds no dependency (C-003), removes no type annotation (C-004), introduces no secret (C-006), and does not modify pipeline enforcement, verification, or logging behavior (C-007). The comment actually improves accuracy by naming the fail-open behavior explicitly, which strengthens rather than weakens governance transparency.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No catch blocks or error-handling logic are added or modified; the change is a comment."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "The only file changed is utils/api.py, the stated target. No out-of-scope files touched."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependencies added or removed."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "No type annotations altered; comment text only."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new logic or branches introduced; comment edits require no tests."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "No credentials introduced. The comment continues to reference env-var/provider selection only."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "utils/api.py is the model-routing wrapper, not the challenger/defender/oracle/ledger/constitution enforcement path. The comment clarifies existing fail-open behavior without weakening enforcement, verification, or logging."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger code or entries touched."
+        }
+      ],
+      "advisories": [
+        "The comment documents that a wrong OpenRouter slug yields API_ERROR which the runner fails open into a PASS. This fail-open behavior is pre-existing and not introduced by this change, but it remains a latent governance-availability tradeoff worth tracking outside this diff."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 8859,
+        "output": 1261
+      }
+    },
+    "entry_hash": "205da5432d05f76f2e631664215a7f6ab60bd0decdd35f8d90e14c5b59646733"
+  },
+  {
+    "entry_id": "78d1103d-5c20-4246-bc69-698be2c37371",
+    "timestamp": "2026-07-16T06:16:26.603425+00:00",
+    "previous_hash": "205da5432d05f76f2e631664215a7f6ab60bd0decdd35f8d90e14c5b59646733",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "utils\\api.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "utils\\api.py",
+        "change_type": "modify",
+        "old_string": "# OpenRouter publishes Anthropic slugs with a dotted version (for example\n# \"anthropic/claude-opus-4.8\"), while the constants above use the first-party\n# hyphenated IDs. Map every model the pipeline ships to its exact OpenRouter\n# slug; anything unlisted falls back to the bare \"anthropic/\" prefix, which is\n# only correct when the first-party ID and the OpenRouter slug coincide (as\n# they do for claude-sonnet-5). A wrong slug would make the stage return\n# API_ERROR, which the runner fails open into a PASS.",
+        "new_string": "# OpenRouter publishes Anthropic slugs with a dotted version (for example\n# \"anthropic/claude-opus-4.8\"), while the constants above use the first-party\n# hyphenated IDs. Map the models the pipeline dispatches through call_model to\n# their exact OpenRouter slugs. Anything unlisted (including the reserved,\n# currently-uninvoked UTILITY_MODEL) falls back to the bare \"anthropic/\"\n# prefix, which is only correct when the first-party ID and the OpenRouter slug\n# coincide (as they do for claude-sonnet-5). A wrong slug would make the stage\n# return API_ERROR, which the runner fails open into a PASS."
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 8820,
+        "output": 788
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The proposed change is a comment-only edit in utils/api.py. It rewords documentation about OpenRouter slug mapping to clarify that the reserved, currently-uninvoked UTILITY_MODEL falls back to the bare 'anthropic/' prefix. No executable code, imports, type annotations, error-handling blocks, or ledger logic are touched. The Challenger returned CLEAR with no findings, and the Defender confirmed CLEAR. Independently reviewing against the full constitution: C-001 is not implicated (no catch blocks altered); C-002 is satisfied (single file, and the edit is a self-contained documentation clarification consistent with the file's stated purpose); C-003 is satisfied (no new imports or dependencies); C-004 is satisfied (no type annotations removed or weakened); C-006 is satisfied (no secrets introduced); C-007 is satisfied because although the change describes fail-open behavior, it does not alter it. The comment merely documents the pre-existing runner fail-open-into-PASS behavior; it neither weakens enforcement, bypasses verification, nor disables logging. C-008 is not implicated (no ledger code). The verdict is a certification of constitutional compliance, not a quality endorsement.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No catch blocks or error-handling logic modified; comment-only change."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Single-file documentation edit in utils/api.py, no scope creep into other files."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "SATISFIED",
+          "note": "No imports or dependencies added."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "No type annotations removed or weakened; no code changed."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "No secrets or credentials present in the change."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "Comment documents existing fail-open behavior; does not alter, weaken, or bypass any enforcement, verification, or logging."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger code touched."
+        }
+      ],
+      "advisories": [
+        "The comment accurately notes that an incorrect OpenRouter slug causes an API_ERROR that the runner fails open into a PASS. This fail-open behavior is a documented governance risk worth tracking separately, but it is pre-existing and not introduced or worsened by this change."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 8859,
+        "output": 1251
+      }
+    },
+    "entry_hash": "49776fb69c34ac0793f985839049927466d50d1199d876ac18d9ac130cc535e9"
+  },
+  {
+    "entry_id": "71de86de-6307-4d34-a651-425f3159e0bb",
+    "timestamp": "2026-07-16T06:18:01.613860+00:00",
+    "previous_hash": "49776fb69c34ac0793f985839049927466d50d1199d876ac18d9ac130cc535e9",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "utils\\api.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "utils\\api.py",
+        "change_type": "modify",
+        "old_string": "    routed_model: str = f\"anthropic/{model}\"",
+        "new_string": "    routed_model: str = _OPENROUTER_SLUGS.get(model, f\"anthropic/{model}\")"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-007",
+          "severity": "CONCERN",
+          "location": "utils/api.py, routed_model assignment",
+          "evidence": "routed_model: str = _OPENROUTER_SLUGS.get(model, f\"anthropic/{model}\")",
+          "reasoning": "CLAUDE.md documents the OpenRouter routing behavior explicitly: 'Model strings are auto-prefixed with \"anthropic/\" on this path.' This change introduces a lookup table that can override that documented convention for specific models. Since utils/api.py is the routing layer used by all three pipeline stages (challenger, defender, oracle), a silent change to how model strings resolve is a change to pipeline behavior. It isn't necessarily a violation (mapping non-Anthropic-namespaced OpenRouter slugs is a legitimate need), but it diverges from documented behavior and warrants confirmation that CLAUDE.md's API Configuration section will be updated to describe the new _OPENROUTER_SLUGS override mechanism."
+        },
+        {
+          "constraint_id": "C-002",
+          "severity": "OBSERVATION",
+          "location": "utils/api.py, routed_model assignment",
+          "evidence": "_OPENROUTER_SLUGS.get(model, ...)",
+          "reasoning": "The diff references a module-level symbol, _OPENROUTER_SLUGS, whose definition is not included in this change. If it isn't already declared elsewhere in the file, this edit alone would raise a NameError at runtime. This isn't confirmable as a violation without full file context, but it suggests the change may be incomplete or split across multiple edits, which is worth verifying against the 'one change per tool call' workflow rule (does the companion definition already exist, or is it coming in a separate edit not yet reviewed?)."
+        },
+        {
+          "constraint_id": "C-005",
+          "severity": "OBSERVATION",
+          "location": "utils/api.py, routed_model assignment",
+          "evidence": "_OPENROUTER_SLUGS.get(model, f\"anthropic/{model}\")",
+          "reasoning": "This introduces a new conditional branch in model routing (slug override vs. default prefix). No test coverage is visible in the diff for the new lookup path. C-005 is warning-severity, so this is not blocking, but it should be confirmed that a test exercises both the override case and the fallback case."
+        }
+      ],
+      "_tokens": {
+        "input": 8435,
+        "output": 3467
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "MITIGATE",
+          "argument": "C-007 is triggered by changes that 'weaken enforcement, bypass verification, or disable logging.' This edit does neither: it does not touch the challenger/defender/oracle logic, does not skip validation, does not alter retry/error-typing behavior, and does not touch the ledger. It changes how a single string is resolved before being handed to the OpenRouter client. CLAUDE.md itself anticipates exactly this kind of change: the API Configuration section explicitly says model IDs live only in utils/api.py 'so they cannot drift' from the docs, and the doc intentionally avoids restating literal ID strings for this reason. A slug-override table for models whose OpenRouter identifier doesn't match the bare 'anthropic/<id>' convention is a routing correctness fix, not a governance weakening. That said, the Challenger is right that the doc's one-sentence description of the auto-prefix behavior is now incomplete for the override case, so a doc addendum is warranted as good hygiene, not because C-007 demands it.",
+          "evidence": "CLAUDE.md: 'utils/api.py is the single source of truth for model IDs... a model change is a single-file edit to utils/api.py and cannot drift from the docs.' The diff only changes a fallback-lookup expression; no pipeline stage logic, verification step, or logging call is touched."
+        },
+        {
+          "finding_index": 1,
+          "position": "REBUT",
+          "argument": "The Challenger's own framing concedes this is unconfirmable ('not confirmable as a violation without full file context') and then routes it through C-002 (scope boundary enforcement), which is the wrong constraint entirely. C-002 governs which files are touched, not whether a referenced symbol is defined elsewhere in the same file. The diff we were given is a single old_string/new_string hunk from utils/api.py, not the full file. It is entirely ordinary for a module-level constant like _OPENROUTER_SLUGS to be declared near the top of the file (alongside CHALLENGER_MODEL, DEFENDER_MODEL, etc.) and referenced further down in the routing function; a targeted Edit call would only show the line that changed, not the whole module. Treating 'the constant isn't visible in this hunk' as evidence of a NameError is speculation, not evidence, and it doesn't map to any actual C-002 criterion (no other file was touched).",
+          "evidence": "The proposed change is scoped entirely to one expression inside utils/api.py -- no other file_path appears in the diff, satisfying C-002 on its face. The Challenger's own text says this is 'not confirmable' and 'worth verifying,' i.e., a request for more context, not a finding of violation."
+        },
+        {
+          "finding_index": 2,
+          "position": "CONCEDE",
+          "argument": "This is a fair observation. The diff introduces a new branch (slug-override vs. default anthropic/-prefix fallback) and no test is visible covering either path. C-005 is warning-severity by design for exactly this situation, so it should be logged as a follow-up rather than block the change, but the Defender will not pretend a test exists when none is shown.",
+          "evidence": "C-005 severity is 'warning,' not 'veto,' per bench.json; the diff contains no accompanying test file or test-case addition."
+        }
+      ],
+      "summary": "The change is a narrow, correctly-scoped routing fix that doesn't weaken pipeline governance or breach file-scope boundaries, though it should come with a documentation note and, per C-005, a follow-up test for the new lookup branch.",
+      "_tokens": {
+        "input": 9305,
+        "output": 2345
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change substitutes a single routing expression in utils/api.py, replacing the unconditional `f\"anthropic/{model}\"` prefix with `_OPENROUTER_SLUGS.get(model, f\"anthropic/{model}\")`, preserving the original behavior as the fallback default. Against C-007 (Challenger finding 0, CONCERN), the Defender's MITIGATE position is well-supported: the edit touches no challenger/defender/oracle logic, no verification step, no retry/error-typing behavior, and no ledger or logging call. C-007 is triggered only by weakening enforcement, bypassing verification, or disabling logging, none of which occur here. It is a routing correctness mechanism (mapping OpenRouter slugs that do not follow the bare `anthropic/<id>` convention), not a governance weakening. Against C-002 (Challenger finding 1, OBSERVATION), the Defender's REBUT is correct: C-002 governs cross-file scope creep, and only one file appears in the diff, so C-002 is satisfied on its face. The Challenger's NameError concern is explicitly self-described as 'not confirmable' and is a request for context, not evidence of a violation, and it is misrouted to a scope constraint. Against C-005 (Challenger finding 2, OBSERVATION), the Defender CONCEDES no test is visible for the new override/fallback branches; C-005 is warning-severity per bench.json and does not block. No veto-severity constraint is clearly violated, and the Defender's rebuttals adequately address the Challenger's concerns.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "Change resolves a model string before dispatch; it does not weaken enforcement, bypass verification, or disable logging in any pipeline stage. Original prefix behavior is retained as the fallback."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Only utils/api.py is modified; no cross-file scope breach. The referenced-symbol concern does not map to C-002 criteria."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "VIOLATED",
+          "note": "New conditional branch (slug override vs. default prefix) has no visible test coverage. Warning severity, non-blocking, logged as advisory per bench.json."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "The `routed_model: str` annotation is retained; dict.get returning a str preserves the existing type."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new import or dependency introduced; _OPENROUTER_SLUGS is a module-level constant, not an external package."
+        }
+      ],
+      "advisories": [
+        "Verify _OPENROUTER_SLUGS is actually defined at module scope in utils/api.py. This edit only shows the reference site; if the constant is not defined elsewhere in the file, this line raises NameError on the OpenRouter path and breaks routing for all three pipeline stages. This is a correctness prerequisite even though it is not a confirmable constitutional violation from the diff alone.",
+        "Per C-005 (warning), add tests exercising both the slug-override case and the anthropic/-prefix fallback case as a follow-up.",
+        "The CLAUDE.md API Configuration section currently states model strings are 'auto-prefixed with anthropic/' on the OpenRouter path. That description is now incomplete for the override case; update it to document the _OPENROUTER_SLUGS mechanism as good hygiene (not a governance requirement)."
+      ],
+      "remediation": null,
+      "confidence": "MODERATE",
+      "_tokens": {
+        "input": 10494,
+        "output": 1887
+      }
+    },
+    "entry_hash": "16636e0d97c9547f6156b8349041735da44580d4c7e5bcf42ac0370a1990ebb3"
+  },
+  {
+    "entry_id": "5a6ebaa7-902c-4357-b256-6420bedd91bb",
+    "timestamp": "2026-07-16T06:18:12.629814+00:00",
+    "previous_hash": "16636e0d97c9547f6156b8349041735da44580d4c7e5bcf42ac0370a1990ebb3",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "utils\\api.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "utils\\api.py",
+        "change_type": "modify",
+        "old_string": "    routed_model: str = f\"anthropic/{model}\"",
+        "new_string": "    routed_model: str = _OPENROUTER_SLUGS.get(model, f\"anthropic/{model}\")"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-007",
+          "severity": "CONCERN",
+          "location": "utils/api.py: routed_model assignment",
+          "evidence": "routed_model: str = _OPENROUTER_SLUGS.get(model, f\"anthropic/{model}\")",
+          "reasoning": "This changes how the OpenRouter routing path resolves a model ID for every pipeline stage (Challenger, Defender, Oracle). The diff introduces a new lookup table `_OPENROUTER_SLUGS` whose contents are not visible here. If this table silently remaps ORACLE_MODEL (or any other role constant) to a different underlying model string, the pipeline could route Oracle verdicts through a model other than the one declared as the single source of truth in utils/api.py, without that substitution being visible or documented. Given C-007's concern with changes to the pipeline that could 'weaken enforcement' without transparency, the definition and provenance of `_OPENROUTER_SLUGS` should be verified before this passes \u2014 specifically that it only performs cosmetic slug translation (e.g. alias formatting) and does not change which model is actually invoked for any governed role."
+        },
+        {
+          "constraint_id": "C-005",
+          "severity": "OBSERVATION",
+          "location": "utils/api.py: routed_model assignment",
+          "evidence": "_OPENROUTER_SLUGS.get(model, f\"anthropic/{model}\")",
+          "reasoning": "This adds a new branch of logic (dict-lookup fallback vs. prior unconditional f-string) to the OpenRouter routing path. Per C-005 (warning-level), new logic branches should have corresponding test coverage or an explicit justification for deferring it. No test changes are present in this diff."
+        },
+        {
+          "constraint_id": "C-002",
+          "severity": "OBSERVATION",
+          "location": "utils/api.py",
+          "evidence": "Single-line change confined to the routed_model assignment inside utils/api.py",
+          "reasoning": "The change stays within utils/api.py, which is documented as the correct single-file location for model/routing configuration changes per CLAUDE.md. No scope creep into unrelated files is evident in this diff, though I cannot confirm the stated task boundary since it wasn't provided alongside the diff."
+        }
+      ],
+      "_tokens": {
+        "input": 8435,
+        "output": 2019
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "MITIGATE",
+          "argument": "The Challenger is right that the diff snippet alone doesn't let us inspect `_OPENROUTER_SLUGS`, and for a C-007 (governance pipeline integrity, veto-severity) change that opacity deserves scrutiny before a final PASS. That said, the shape of the change itself is evidence of intent, not evasion. The old code unconditionally built `f\"anthropic/{model}\"` for every model string, which is documented in CLAUDE.md as a known limitation: OpenRouter model slugs don't always follow that simple prefix convention. `.get(model, f\"anthropic/{model}\")` is the textbook safe pattern for handling exceptions to a naming convention: it only diverges from the original behavior for models explicitly present as keys in the table, and falls back to the exact prior behavior for every other model. If `_OPENROUTER_SLUGS` genuinely remapped ORACLE_MODEL to a materially different underlying model, that would be a real C-007 violation worth a veto, but nothing in this diff demonstrates that happened. The burden shouldn't be to prove a negative from one line; the Oracle should require the Defender/Challenger to see the `_OPENROUTER_SLUGS` definition itself (a docs.py/api.py excerpt) before ruling on intent. As submitted, this line does not weaken enforcement, disable logging, or bypass verification, which are the specific behaviors C-007 prohibits.",
+          "evidence": "The `.get(model, f\"anthropic/{model}\")` fallback preserves the exact prior expression for any model not explicitly keyed in the new table, meaning unmapped roles (including ORACLE_MODEL, unless deliberately added to the table) are unaffected by this change."
+        },
+        {
+          "finding_index": 1,
+          "position": "CONCEDE",
+          "argument": "This is a fair, warning-level observation. A dict-lookup-with-fallback is new branching logic on a code path that determines which model every pipeline stage actually calls, and the diff includes no test asserting that (a) known slug translations resolve correctly and (b) the fallback still produces the original `anthropic/{model}` string for unmapped models. Given this path underlies Challenger, Defender, and Oracle routing, a small test covering both branches is warranted before this ships without qualification.",
+          "evidence": "No test file changes are present in the diff; C-005 explicitly calls for test coverage or an explicit deferral justification for new logic branches, and neither is provided here."
+        },
+        {
+          "finding_index": 2,
+          "position": "CONCEDE",
+          "argument": "Agreed with the Challenger's own assessment: this stays entirely within utils/api.py, which CLAUDE.md designates as the single-file location for exactly this kind of routing/model configuration change. No other files are touched, so there's no genuine C-002 concern here; the Challenger correctly flagged this as clean rather than a violation.",
+          "evidence": "The diff's old_string/new_string pair is confined to one line inside utils/api.py."
+        }
+      ],
+      "summary": "The change is a minimal, well-patterned addition to the designated single source of truth for model routing, but it should not get a clean PASS until the Oracle (or a follow-up disclosure) confirms the contents of `_OPENROUTER_SLUGS` don't silently remap any governed role's model, and a basic test for the new fallback branch is added.",
+      "_tokens": {
+        "input": 9269,
+        "output": 3491
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change replaces an unconditional `f\"anthropic/{model}\"` with `_OPENROUTER_SLUGS.get(model, f\"anthropic/{model}\")` on the OpenRouter routing path. The Challenger raised this under C-007 as a CONCERN (not a firm violation), noting the `_OPENROUTER_SLUGS` table contents are not visible in the diff and could theoretically remap a governed role (e.g. ORACLE_MODEL) to a different underlying model. The Defender's MITIGATE rebuttal is persuasive: the `.get(model, default)` pattern is behavior-preserving by construction. It diverges from the prior expression ONLY for models explicitly keyed in the table, and falls back to the exact original string for every unmapped model. A slug-translation table is a legitimate need because OpenRouter slugs do not always follow the bare `anthropic/<id>` convention documented in CLAUDE.md. C-007 prohibits changes that 'weaken enforcement, bypass verification, or disable logging'; nothing in this diff demonstrates any of those behaviors. Governance cannot veto on the mere possibility that unseen code MIGHT remap a role. The burden of proving a concrete violation is not met, so C-007 is not clearly violated and no veto is warranted. C-005 (warning severity) is correctly flagged by both sides: a new branch on a routing path that underlies all three stages should have test coverage; this is advisory, not veto-triggering. C-002 is satisfied per both Challenger and Defender: the change is confined to utils/api.py, the designated single-file location for routing config per CLAUDE.md.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "The `.get()` fallback preserves prior behavior for any unmapped model. No visible evidence that the change weakens enforcement, bypasses verification, or remaps a governed role. Challenger raised only a CONCERN; Defender's MITIGATE holds. Veto requires a clear violation, which is not demonstrated."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "VIOLATED",
+          "note": "Warning severity only. New dict-lookup-with-fallback branch on the shared routing path has no accompanying test and no explicit deferral justification. Both parties concede this. Does not trigger veto."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change confined to a single line in utils/api.py, the documented single-file location for model/routing configuration. No scope creep."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new imports or dependencies introduced; `_OPENROUTER_SLUGS` is an in-module lookup table."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "The `routed_model: str` annotation is preserved; `dict.get` with a string default and string fallback still yields str. No type weakening."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No secrets or credentials introduced."
+        }
+      ],
+      "advisories": [
+        "MUST-VERIFY (self-audit, not a veto on this diff): confirm that `_OPENROUTER_SLUGS` performs only cosmetic slug translation and does NOT map any governed role constant (CHALLENGER_MODEL, DEFENDER_MODEL, ORACLE_MODEL, UTILITY_MODEL) to a different underlying model. If any key remaps a governed role to a materially different model, that WOULD be a C-007 violation and should be brought back through governance. This verdict passes the routing-line change on the strength of the behavior-preserving `.get()` pattern, not on inspection of the table contents.",
+        "C-005 (warning): add a small test covering both branches of the new logic: (a) a keyed model resolves to its explicit OpenRouter slug, and (b) an unmapped model still falls back to the exact `anthropic/{model}` string. This path underlies all three pipeline stages and warrants coverage.",
+        "Ensure `_OPENROUTER_SLUGS` is defined in utils/api.py before or alongside this reference so the module does not raise NameError; per the 'one change per tool call' rule this may have landed in a separate governed change, but its presence should be confirmed."
+      ],
+      "remediation": null,
+      "confidence": "MODERATE",
+      "_tokens": {
+        "input": 10410,
+        "output": 2632
+      }
+    },
+    "entry_hash": "9475f44161b5fb3c53d44845a31f839ad99a7a7305c5d7bf3c3de737dd3577f0"
+  },
+  {
+    "entry_id": "7d225ede-3edd-494f-b883-035a8447c19b",
+    "timestamp": "2026-07-16T06:19:06.702583+00:00",
+    "previous_hash": "9475f44161b5fb3c53d44845a31f839ad99a7a7305c5d7bf3c3de737dd3577f0",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "tests\\test_api_extended.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "tests\\test_api_extended.py",
+        "change_type": "modify",
+        "old_string": "from utils.api import (  # noqa: E402\n    _ProviderError,\n    _anthropic_call,\n    _try_parse_dict,\n    call_model,\n    strip_code_fences,\n)",
+        "new_string": "from utils.api import (  # noqa: E402\n    _ProviderError,\n    _anthropic_call,\n    _openrouter_call,\n    _try_parse_dict,\n    call_model,\n    strip_code_fences,\n)"
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 8528,
+        "output": 19
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change adds a single import symbol '_openrouter_call' to an existing import block in tests/test_api_extended.py. Both the Challenger (status CLEAR, no findings) and Defender (CONFIRM_CLEAR) found no issues. Evaluating independently against the full constitution: C-003 (Dependency Declaration) is not triggered because '_openrouter_call' is imported from the internal 'utils.api' module which is already imported in this file, not a new external dependency or requirements.txt addition. C-002 (Scope Boundary) is satisfied as the change is confined to the test file and imports an existing internal symbol. C-007 (Governance Pipeline Integrity) is not applicable: a test file is not part of the challenger/defender/oracle/ledger/constitution pipeline, and adding a test import strengthens rather than weakens verification. C-001, C-004, C-006, C-008 are not implicated by a pure import-line addition. The change introduces no error handling, no type weakening, no secrets, and no ledger modification.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is confined to tests/test_api_extended.py and imports an existing internal symbol; no cross-file scope creep."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "'_openrouter_call' is imported from utils.api, already a dependency of this test file. No new external package or requirements.txt entry."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No type annotations added, removed, or weakened."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Test file, not a pipeline component; adding a test import does not weaken enforcement or logging."
+        },
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No catch blocks or error handling involved."
+        }
+      ],
+      "advisories": [
+        "This import presumably supports a new test exercising '_openrouter_call'. Ensure the corresponding test body is present so the imported symbol is actually used, avoiding an unused-import lint failure per the repo's pre-ship checklist."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 8567,
+        "output": 907
+      }
+    },
+    "entry_hash": "0634be3c13f6da10c61f8c1913086e46ca04b0268af4d1fe2bbbf3f2624f05e1"
+  },
+  {
+    "entry_id": "36c17d96-13ea-48d0-8cb8-2376cd09e0a4",
+    "timestamp": "2026-07-16T06:19:08.923940+00:00",
+    "previous_hash": "0634be3c13f6da10c61f8c1913086e46ca04b0268af4d1fe2bbbf3f2624f05e1",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "tests\\test_api_extended.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "tests\\test_api_extended.py",
+        "change_type": "modify",
+        "old_string": "from utils.api import (  # noqa: E402\n    _ProviderError,\n    _anthropic_call,\n    _try_parse_dict,\n    call_model,\n    strip_code_fences,\n)",
+        "new_string": "from utils.api import (  # noqa: E402\n    _ProviderError,\n    _anthropic_call,\n    _openrouter_call,\n    _try_parse_dict,\n    call_model,\n    strip_code_fences,\n)"
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 8528,
+        "output": 19
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change adds a single import (`_openrouter_call`) to the existing import block in tests/test_api_extended.py, importing from utils.api. This is a test-only change that brings in an existing internal symbol for testing. Evaluating against the full constitution: C-001 is not applicable as no error-handling code is added or modified. C-002 is satisfied because the change is confined to a test file and is consistent with a task of extending API test coverage; importing an existing symbol from the module under test is within normal test scope. C-003 is satisfied because `_openrouter_call` is an existing symbol already defined in utils.api (a first-party module), not a new external or undeclared dependency requiring a requirements.txt entry. C-004 is not applicable as no type annotations are removed or weakened. C-006 is not applicable as no credentials are introduced. C-007 is not applicable because tests/ is not part of the governance pipeline enforcement path (challenger, defender, oracle, ledger, constitution); this is test infrastructure and does not weaken enforcement. C-008 is not applicable as no ledger code is touched. Both the Challenger (status CLEAR, no findings) and Defender (CONFIRM_CLEAR) found no issues, and my independent review of the full constitution confirms no violations.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error-handling code added or modified; change is a single import addition."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is confined to a single test file, consistent with extending API test coverage."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "SATISFIED",
+          "note": "_openrouter_call is an existing internal symbol in utils.api, not a new or undeclared dependency."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No type annotations removed or weakened."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No secrets or credentials introduced."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "tests/ is not part of the enforcement pipeline; no weakening of governance."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger code touched."
+        }
+      ],
+      "advisories": [
+        "This import addition presumes a corresponding test for _openrouter_call is being added; ensure the imported symbol is actually exercised to avoid an unused-import lint failure (per the project's pre-ship checklist)."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 8567,
+        "output": 1008
+      }
+    },
+    "entry_hash": "2fb9653c91cd41d7c2e17315e0ec0033ab5fabeca631fe56863ba42df4db194f"
+  },
+  {
+    "entry_id": "c52708fc-da12-4e91-8e58-1f7f091c6d7c",
+    "timestamp": "2026-07-16T06:20:52.286437+00:00",
+    "previous_hash": "2fb9653c91cd41d7c2e17315e0ec0033ab5fabeca631fe56863ba42df4db194f",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "tests\\test_api_extended.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "tests\\test_api_extended.py",
+        "change_type": "modify",
+        "old_string": "if __name__ == \"__main__\":\n    unittest.main()",
+        "new_string": "class OpenRouterSlugTests(unittest.TestCase):\n    \"\"\"The openrouter path must send OpenRouter's published slug (dotted\n    version), not the first-party hyphenated id, or the stage returns an\n    API_ERROR that the runner fails open into a PASS.\"\"\"\n\n    def _routed_model(self, model: str) -> str:\n        fake_openai: MagicMock = MagicMock()\n        fake_openai.OpenAIError = Exception\n        response: MagicMock = MagicMock()\n        response.choices = [\n            MagicMock(message=MagicMock(content='{\"ok\": true}'))\n        ]\n        response.usage.prompt_tokens = 1\n        response.usage.completion_tokens = 1\n        create = fake_openai.OpenAI.return_value.chat.completions.create\n        create.return_value = response\n        with patch.dict(sys.modules, {\"openai\": fake_openai}), patch.dict(\n            os.environ, {\"OPENROUTER_API_KEY\": \"test-key\"}\n        ):\n            _openrouter_call(\n                model, \"sys\", [{\"role\": \"user\", \"content\": \"hi\"}], 4096\n            )\n        _args, kwargs = create.call_args\n        return kwargs[\"model\"]\n\n    def test_opus_maps_to_dotted_openrouter_slug(self) -> None:\n        self.assertEqual(\n            self._routed_model(\"claude-opus-4-8\"),\n            \"anthropic/claude-opus-4.8\",\n        )\n\n    def test_sonnet_5_maps_to_its_slug(self) -> None:\n        self.assertEqual(\n            self._routed_model(\"claude-sonnet-5\"),\n            \"anthropic/claude-sonnet-5\",\n        )\n\n    def test_unmapped_model_falls_back_to_prefix(self) -> None:\n        self.assertEqual(\n            self._routed_model(\"claude-future-9\"),\n            \"anthropic/claude-future-9\",\n        )\n\n\nif __name__ == \"__main__\":\n    unittest.main()"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-002",
+          "severity": "OBSERVATION",
+          "location": "tests/test_api_extended.py: new OpenRouterSlugTests class",
+          "evidence": "test_opus_maps_to_dotted_openrouter_slug asserts _routed_model(\"claude-opus-4-8\") == \"anthropic/claude-opus-4.8\"",
+          "reasoning": "This test asserts a dotted-slug remapping (hyphenated first-party id -> dotted OpenRouter slug) for the openrouter routing path. CLAUDE.md's documented routing behavior states the openrouter path only auto-prefixes the model string with 'anthropic/' (no id transformation). The diff shown is test-only; no corresponding change to utils/api.py (_openrouter_call / a slug-mapping table) is included here, so it cannot be confirmed whether the implementation already supports this mapping or whether this test will fail against current code. Not a constitutional violation on its own, but the Oracle may want to confirm the implementation side of this change exists and that the docs (CLAUDE.md) are updated to reflect the dotted-slug special-casing rather than simple prefixing."
+        },
+        {
+          "constraint_id": "C-003",
+          "severity": "OBSERVATION",
+          "location": "tests/test_api_extended.py: _routed_model helper",
+          "evidence": "patch.dict(sys.modules, {\"openai\": fake_openai}) ... uses MagicMock, patch, sys, os, and _openrouter_call",
+          "reasoning": "These symbols (MagicMock, patch, sys, os, _openrouter_call) are used but not shown as newly imported in this diff hunk. This is very likely fine since the file already imports them elsewhere (consistent with existing OpenRouter-path tests implied by the file name), but the provided diff snippet alone doesn't prove no new undeclared import was introduced. Flagged for completeness only, not as a likely real issue."
+        }
+      ],
+      "_tokens": {
+        "input": 9161,
+        "output": 3510
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "REBUT",
+          "argument": "This finding is filed under C-002 (Scope Boundary Enforcement), but nothing in this diff touches a file outside the stated task boundary \u2014 it is a single, additive change to a test file, appending one new test class before the existing `if __name__ == \"__main__\":` block. C-002 exists to catch AI changes that sprawl into unauthorized files (e.g., a 'fix challenger.py' task quietly touching oracle.py); it does not govern whether a test's assertions match a currently-documented behavior. The Challenger's own reasoning acknowledges this is 'not a constitutional violation on its own' \u2014 that concession should be taken at face value rather than filed against a veto-severity constraint. The substantive question raised (does utils/api.py already implement dotted-slug remapping, and does CLAUDE.md need a documentation update to describe it) is a legitimate engineering question, but it belongs to C-005 territory (test coverage / correctness) at most, and even there it's advisory, not a scope violation.",
+          "evidence": "CLAUDE.md Rule 14: 'One change per tool call. Do not batch unrelated changes.' This diff is exactly one change \u2014 adding a test class to the test file named in the task. No other file is touched."
+        },
+        {
+          "finding_index": 1,
+          "position": "REBUT",
+          "argument": "The change_type is 'modify', not 'create', and the old_string anchor is the tail of an existing file (`if __name__ == \"__main__\": unittest.main()`). That means test_api_extended.py already exists with its own import block above the visible hunk \u2014 this diff format only shows the region being replaced, not the whole file. A file already named test_api_extended.py that tests utils/api.py's routing logic would necessarily already import unittest, MagicMock, patch, sys, os, and the module-level _openrouter_call to have any prior tests at all. The diff introduces zero new import statements; it only adds usages of symbols the file's existing header almost certainly already provides. The Challenger explicitly says this is 'very likely fine ... not as a likely real issue' \u2014 I'd go further: given the file is a modify-in-place on an existing test module, there is no plausible reading where this constitutes an undeclared dependency under C-003, which is about new packages/imports not reflected in requirements.txt, not about whether a diff hunk re-displays imports that already exist above it.",
+          "evidence": "\"change_type\": \"modify\" and old_string is only the file's closing boilerplate \u2014 proof the file predates this change and already has a header/import section not shown in the diff."
+        }
+      ],
+      "summary": "Both findings are self-acknowledged non-violations (explicitly framed as OBSERVATIONs the Challenger admits aren't constitutional breaches), and the diff itself \u2014 a single additive test class appended to an existing test file with no new imports and no out-of-scope files touched \u2014 is sound and consistent with C-002, C-003, and the project's test-coverage goals.",
+      "_tokens": {
+        "input": 9886,
+        "output": 3033
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "This is a single, additive, test-only change appending one new test class (OpenRouterSlugTests) before the existing `if __name__ == \"__main__\":` block in tests/test_api_extended.py. The Challenger raised two findings, both explicitly self-classified as OBSERVATIONs and both conceded to be non-violations ('not a constitutional violation on its own', 'very likely fine ... not as a likely real issue'). The Defender's rebuttals are sound. On C-002 (finding_index 0), the diff touches only the single test file named by the task boundary; no out-of-scope file is modified, consistent with CLAUDE.md Rule 14 (one change per tool call). C-002 governs file-scope sprawl, not whether a test's assertions match currently-documented behavior. On C-003 (finding_index 1), the change_type is 'modify' with the anchor being the file's closing boilerplate, proving the file predates this change and already carries its import header above the visible hunk; the diff introduces zero new import statements, only new usages of symbols (MagicMock, patch, sys, os, _openrouter_call) the existing file already provides. No new package or requirements.txt entry is added. I independently evaluated the change against all constraints: no error swallowing (C-001), no secrets \u2014 'test-key' is a fixture value passed into a mocked env, not a real credential (C-006), no type-annotation weakening \u2014 the added methods carry `-> None` and `-> str` annotations (C-004), no pipeline enforcement change (C-007), no ledger modification (C-008). The change strengthens test coverage, aligning with C-005's intent.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No catch/except blocks introduced; the test mocks exception types but does not swallow errors."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Single additive change confined to the named test file. Challenger's C-002 finding was an OBSERVATION, self-conceded as non-violating; Defender correctly notes C-002 targets file-scope sprawl, not assertion-vs-docs alignment."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "SATISFIED",
+          "note": "modify-in-place diff shows no new import statements; symbols used already exist in the file's unshown header. No new package or requirements.txt entry."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "New test methods and helper carry explicit type annotations (-> None, -> str, model: str). No existing annotations weakened."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "SATISFIED",
+          "note": "Change adds test coverage for the openrouter slug-mapping path, advancing rather than degrading verification."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "'test-key' is a mock fixture injected into a patched environment, not a real credential in production source."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Test file only; no pipeline/ledger/constitution enforcement code is modified."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger interaction."
+        }
+      ],
+      "advisories": [
+        "The added tests assert a dotted-slug remapping (e.g., 'claude-opus-4-8' -> 'anthropic/claude-opus-4.8') for the openrouter path. CLAUDE.md currently documents that path as simple 'anthropic/' prefixing with no id transformation. Confirm that utils/api.py actually implements the slug mapping these tests assert (otherwise the tests will fail against current code), and update CLAUDE.md's routing description to reflect the dotted-slug special-casing. This is a documentation/correctness follow-up, not a constitutional violation.",
+        "Per the Pre-Ship Checklist in the project instructions, run the specific test file (not the full suite) to confirm these three new cases pass before shipping."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 10888,
+        "output": 1638
+      }
+    },
+    "entry_hash": "183e39dc35afff4c4bb342f88aa80e5ae5c1c9fcacef39bd984a5b9463116437"
+  },
+  {
+    "entry_id": "af55e55a-f2e8-41be-ba53-c3debed78dde",
+    "timestamp": "2026-07-16T06:20:53.014656+00:00",
+    "previous_hash": "183e39dc35afff4c4bb342f88aa80e5ae5c1c9fcacef39bd984a5b9463116437",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "tests\\test_api_extended.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "tests\\test_api_extended.py",
+        "change_type": "modify",
+        "old_string": "if __name__ == \"__main__\":\n    unittest.main()",
+        "new_string": "class OpenRouterSlugTests(unittest.TestCase):\n    \"\"\"The openrouter path must send OpenRouter's published slug (dotted\n    version), not the first-party hyphenated id, or the stage returns an\n    API_ERROR that the runner fails open into a PASS.\"\"\"\n\n    def _routed_model(self, model: str) -> str:\n        fake_openai: MagicMock = MagicMock()\n        fake_openai.OpenAIError = Exception\n        response: MagicMock = MagicMock()\n        response.choices = [\n            MagicMock(message=MagicMock(content='{\"ok\": true}'))\n        ]\n        response.usage.prompt_tokens = 1\n        response.usage.completion_tokens = 1\n        create = fake_openai.OpenAI.return_value.chat.completions.create\n        create.return_value = response\n        with patch.dict(sys.modules, {\"openai\": fake_openai}), patch.dict(\n            os.environ, {\"OPENROUTER_API_KEY\": \"test-key\"}\n        ):\n            _openrouter_call(\n                model, \"sys\", [{\"role\": \"user\", \"content\": \"hi\"}], 4096\n            )\n        _args, kwargs = create.call_args\n        return kwargs[\"model\"]\n\n    def test_opus_maps_to_dotted_openrouter_slug(self) -> None:\n        self.assertEqual(\n            self._routed_model(\"claude-opus-4-8\"),\n            \"anthropic/claude-opus-4.8\",\n        )\n\n    def test_sonnet_5_maps_to_its_slug(self) -> None:\n        self.assertEqual(\n            self._routed_model(\"claude-sonnet-5\"),\n            \"anthropic/claude-sonnet-5\",\n        )\n\n    def test_unmapped_model_falls_back_to_prefix(self) -> None:\n        self.assertEqual(\n            self._routed_model(\"claude-future-9\"),\n            \"anthropic/claude-future-9\",\n        )\n\n\nif __name__ == \"__main__\":\n    unittest.main()"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-003",
+          "severity": "CONCERN",
+          "location": "tests\\test_api_extended.py: new OpenRouterSlugTests class",
+          "evidence": "fake_openai: MagicMock = MagicMock() ... with patch.dict(sys.modules, {\"openai\": fake_openai}), patch.dict(os.environ, ...): _openrouter_call(...)",
+          "reasoning": "The new test code references MagicMock, patch, sys, os, and the private function _openrouter_call, but the diff only shows the tail of the file (insertion before `if __name__ == \"__main__\":`). No file context was provided to confirm these names are already imported earlier in the file. If any of these are net-new imports, they need to be visible/declared; as presented I cannot verify they aren't silently introduced without a corresponding import addition being shown."
+        },
+        {
+          "constraint_id": "C-006",
+          "severity": "OBSERVATION",
+          "location": "tests\\test_api_extended.py: _routed_model helper",
+          "evidence": "patch.dict(os.environ, {\"OPENROUTER_API_KEY\": \"test-key\"})",
+          "reasoning": "A literal string appears where a credential env var is set. This is a standard test-mocking pattern (temporary env override for a unit test, not a real key) and not a genuine secret leak, so this is not flagged as a violation \u2014 but noting it for completeness since C-006 scans for credential-shaped strings in source."
+        },
+        {
+          "constraint_id": "C-002",
+          "severity": "OBSERVATION",
+          "location": "tests\\test_api_extended.py: hardcoded slug expectations",
+          "evidence": "self.assertEqual(self._routed_model(\"claude-opus-4-8\"), \"anthropic/claude-opus-4.8\")",
+          "reasoning": "This test hard-codes a specific dot-vs-hyphen slug-mapping behavior for OpenRouter routing that isn't described in the project's documented routing behavior (CLAUDE.md describes only a flat 'anthropic/' prefix, not per-model slug translation). This may simply reflect mapping logic already present in utils/api.py (out of this diff's scope, which is test-only), but if no such mapping exists yet, these tests will fail on their own and the change would be incomplete rather than constitutionally unsound. Flagged as an observation for the Oracle to check against the actual state of utils/api.py, not a scope violation of this diff itself since only a test file is touched."
+        }
+      ],
+      "_tokens": {
+        "input": 9161,
+        "output": 3657
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "MITIGATE",
+          "argument": "The Challenger correctly flags that they cannot see the full file, but the structural evidence strongly indicates this is a non-issue rather than an undeclared-dependency violation. The change_type is 'modify' with an old_string of just the final two lines (`if __name__ == \"__main__\": unittest.main()`), meaning tests\\test_api_extended.py is a pre-existing, populated test file, not a new file being created from scratch. A file named test_api_extended.py that already tests _openrouter_call-adjacent behavior almost certainly already imports unittest, MagicMock, patch, sys, and os at module level, and already imports _openrouter_call from utils.api for its existing test classes -- those are the exact tools any test of this API wrapper would need from line one. This diff is deliberately surgical: it inserts one new class immediately before the __main__ guard rather than touching the import block at all, which is consistent with the CLAUDE.md instruction to make 'surgical changes' and not touch unrelated code. C-003 exists to catch imports added silently without a corresponding declaration entry (e.g., a new pip package slipped into requirements.txt); it does not require every test diff to re-paste the file's existing import block to prove innocence.",
+          "evidence": "old_string is exactly 'if __name__ == \"__main__\":\\n    unittest.main()' -- the diff only touches the tail of an existing file, and change_type is 'modify', confirming the imports live earlier in a file not shown in this diff."
+        },
+        {
+          "finding_index": 1,
+          "position": "REBUT",
+          "argument": "The Challenger's own reasoning concludes this is not a violation ('this is not flagged as a violation'). I agree with that conclusion and want it stated plainly rather than left as an ambiguous OBSERVATION: 'test-key' inside patch.dict(os.environ, ...) is a temporary, process-local mock value used only for the duration of the test and is never a real credential. This is the canonical pattern for testing env-var-driven branching (BENCH_PROVIDER=openrouter requires OPENROUTER_API_KEY to be present) without needing a live key. No C-006 concern exists here.",
+          "evidence": "patch.dict(os.environ, {\"OPENROUTER_API_KEY\": \"test-key\"}) is scoped to a `with` block and torn down automatically after the test method returns; it never touches real credential storage or config."
+        },
+        {
+          "finding_index": 2,
+          "position": "MITIGATE",
+          "argument": "This is a test-only diff, and the Challenger correctly notes it is not a scope violation under C-002 -- I'd go further and say it isn't really a C-002 concern at all, since no scope-boundary rule is implicated by a test file asserting behavior of code it doesn't modify. The substantive question raised (does utils/api.py actually implement a dotted-slug translation for OpenRouter routing) is a correctness/completeness question about whether the tests will pass, not a constitutional soundness question about this diff. If the mapping table doesn't exist yet in utils/api.py, these three tests simply fail on CI and the change is caught by the existing test-runner gate before merge -- that's the system working as intended, not a governance breach. Per the project's own model-change playbook (that OpenRouter model strings get 'anthropic/' prefixed and are the single source of truth in utils/api.py), a per-model slug table is a plausible and reasonable extension of that routing logic, and writing the tests first (or alongside) is legitimate TDD-style coverage for exactly the kind of provider-routing edge case C-005 wants covered.",
+          "evidence": "CLAUDE.md: 'Model strings are auto-prefixed with \"anthropic/\" on this path... Confirm each ID resolves on the target provider(s) before shipping' -- this diff's tests are precisely the mechanism for confirming provider-ID resolution the docs call for."
+        }
+      ],
+      "summary": "This is a self-contained, additive test file change with no evidence of undeclared imports, no real secrets, and no scope violation; the Challenger's findings are speculative gaps stemming from limited diff visibility rather than confirmed constitutional breaches.",
+      "_tokens": {
+        "input": 10074,
+        "output": 2516
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "This is a test-only, additive change that inserts a new OpenRouterSlugTests class immediately before the __main__ guard of an existing, pre-populated test file (change_type 'modify', old_string is only the final two lines). No constraint with veto severity is clearly violated. On C-003 (Challenger finding 0), the concern is a visibility gap, not confirmed evidence: the diff surgically touches only the file tail, and the Defender's rebuttal (finding_index 0) persuasively shows the referenced names (MagicMock, patch, sys, os, _openrouter_call) are almost certainly already imported at module level in a file that already exercises this API wrapper. C-003 targets silently added external dependencies (e.g. new requirements.txt packages), and no new package is introduced here. On C-006 (Challenger finding 1), both parties agree 'test-key' inside patch.dict(os.environ, ...) is a process-local mock value torn down after the test, not a real credential; the Defender's REBUTTAL confirms this. On C-002 (Challenger finding 2), a test file asserting behavior of code it does not modify implicates no scope-boundary rule; the Defender correctly reframes the dotted-slug expectation as a correctness/completeness question (will the tests pass against utils/api.py) rather than a constitutional one, and the existing test-runner gate catches that if the mapping is absent. The change actually advances C-005 by adding coverage for provider-routing edge cases.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No catch/except blocks are introduced by this test addition."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is confined to tests/test_api_extended.py; a test asserting behavior of unmodified code implicates no scope-boundary rule (Challenger finding 2 was an OBSERVATION, Defender MITIGATE accepted)."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "SATISFIED",
+          "note": "No external dependency or requirements.txt entry is added. The referenced test utilities are standard library/existing test imports; Challenger finding 0 is a diff-visibility gap, adequately mitigated by Defender."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No existing type annotations are removed or weakened; the new helper is fully annotated (-> str, model: str)."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "SATISFIED",
+          "note": "Change adds test coverage for OpenRouter slug-mapping branches; this constraint is advanced, not violated."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "'test-key' is a scoped mock env value auto-torn-down after the test, not a real credential; both Challenger and Defender agree no leak exists."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "A test file under tests/ is not part of challenger/defender/oracle/ledger/constitution enforcement code; no enforcement, verification, or logging is weakened."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger entries are modified, deleted, or overwritten."
+        }
+      ],
+      "advisories": [
+        "Confirm that utils/api.py actually implements the dotted-slug translation these tests assert (e.g. claude-opus-4-8 -> anthropic/claude-opus-4.8). If no such mapping exists, all three new tests will fail on CI; that is a completeness/correctness issue, not a governance breach, but should be verified before shipping.",
+        "Because the diff shows only the file tail, confirm that MagicMock, patch, sys, os, and _openrouter_call are already imported at the top of tests/test_api_extended.py. If any is missing, add the import in a follow-up surgical edit so the tests import cleanly."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 11478,
+        "output": 1767
+      }
+    },
+    "entry_hash": "ef262a3969fa572e6e04102f8416bda4e72359bffb8d0f39057f041f4ba2da68"
+  },
+  {
+    "entry_id": "22292d42-3677-4bf7-8aeb-194adef71897",
+    "timestamp": "2026-07-16T06:22:38.134941+00:00",
+    "previous_hash": "ef262a3969fa572e6e04102f8416bda4e72359bffb8d0f39057f041f4ba2da68",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "CLAUDE.md",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "CLAUDE.md",
+        "change_type": "modify",
+        "old_string": "# Model strings are auto-prefixed with \"anthropic/\" on this path,\n# e.g. a model string \"<id>\" becomes \"anthropic/<id>\".",
+        "new_string": "# Model strings are routed to their OpenRouter slug on this path. Most map to\n# \"anthropic/<id>\", but ids whose OpenRouter slug differs (e.g. the dotted\n# \"anthropic/claude-opus-4.8\") are translated via a small map in utils/api.py."
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-002",
+          "severity": "OBSERVATION",
+          "location": "CLAUDE.md: OpenRouter provider description block",
+          "evidence": "\"# Model strings are routed to their OpenRouter slug on this path. Most map to\\n# \\\"anthropic/<id>\\\", but ids whose OpenRouter slug differs (e.g. the dotted\\n# \\\"anthropic/claude-opus-4.8\\\") are translated via a small map in utils/api.py.\"",
+          "reasoning": "This diff only touches CLAUDE.md and asserts that a translation map now exists in utils/api.py. That code change is not present in this diff. If the corresponding utils/api.py edit was made in a separate, already-passed governance cycle, this is fine (docs following code). But if this documentation update is landing ahead of or without the actual map implementation, the docs would describe behavior that doesn't exist yet, which undermines the file's own stated goal that docs 'cannot drift' from utils/api.py. Not a constraint violation on its own since C-002 governs code scope creep, not doc/code sequencing, but worth the Oracle confirming the utils/api.py map already exists or is bundled elsewhere."
+        }
+      ],
+      "_tokens": {
+        "input": 8534,
+        "output": 1463
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "REBUT",
+          "argument": "The Challenger's own reasoning concludes this is not a constraint violation, and I agree. The diff is a single-file, self-contained documentation edit to CLAUDE.md that clarifies OpenRouter routing behavior (accounting for dotted-vs-hyphenated model slugs). It does not touch pipeline/, ledger/, or hooks/, so C-007 self-governance scrutiny doesn't even apply, and it stays entirely within its own file boundary, so C-002 scope enforcement is trivially satisfied - one file changed, one file's content is what's being described. The sequencing concern the Challenger raises (does utils/api.py already have the translation map, or is this doc describing vaporware) is a legitimate question for repo hygiene, but it is speculative: nothing in the diff or the provided context indicates the map is absent. CLAUDE.md's own stated convention is that utils/api.py is the single source of truth and docs 'name the constants rather than restating version strings' specifically so implementation and documentation don't drift - this edit is consistent with, not contrary to, that convention. Docs-following-code is the default assumption absent evidence of the reverse, and the Challenger presents none.",
+          "evidence": "The diff's old_string/new_string pair only replaces one comment block in CLAUDE.md's OpenRouter code example; no other files are referenced or modified in the change_type/file_path metadata. The CLAUDE.md section header itself is '## API Configuration' and explicitly frames utils/api.py as authoritative, which is the documentation pattern this edit follows."
+        }
+      ],
+      "summary": "This is a narrowly scoped, accurate documentation clarification with no code touched and no constitutional violation; the Challenger's flagged concern is a speculative sequencing caveat that its own analysis already concedes is not a rule breach.",
+      "_tokens": {
+        "input": 9008,
+        "output": 1376
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "This is a documentation-only change to CLAUDE.md that clarifies OpenRouter routing behavior. I evaluated it against the full constitution, not just the cited constraint. The only finding, from the Challenger against C-002, is explicitly self-classified as an OBSERVATION and its own reasoning concedes it 'is not a constraint violation.' The Defender's rebuttal is sound: the diff is a single-file, self-contained edit whose content describes that same file's subject matter, so C-002 scope enforcement is satisfied (one file changed, no out-of-boundary modifications). The doc/code sequencing worry (whether the translation map already exists in utils/api.py) is speculative; nothing in the diff or context establishes the map is absent, and docs-following-code is the default assumption per the Defender. C-007 does not apply because CLAUDE.md is project documentation, not a pipeline/ledger/constitution artifact, and the edit neither weakens enforcement, bypasses verification, nor disables logging. No dependencies, types, secrets, error handling, or ledger entries are touched.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error-handling code is modified; documentation-only change."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Single-file edit to CLAUDE.md describing its own OpenRouter section. Challenger flagged this as an OBSERVATION only and conceded it is not a rule breach; Defender confirms no out-of-scope files touched."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependencies added; prose change only."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No function signatures or type annotations modified."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "No secrets or credentials introduced. The 'anthropic/claude-opus-4.8' string is a model slug, not a credential."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "CLAUDE.md is project documentation, not a governance pipeline artifact (challenger/defender/oracle/ledger/constitution). Enforcement, verification, and logging are unaffected."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger entries are modified, deleted, or overwritten."
+        }
+      ],
+      "advisories": [
+        "Repo hygiene: confirm the translation map now asserted to exist in utils/api.py is actually present. If it is not yet implemented, this documentation would describe behavior that does not exist, contradicting CLAUDE.md's stated goal that docs cannot drift from utils/api.py. This is not a constitutional violation but should be verified before relying on the doc.",
+        "Consistency note: CLAUDE.md's Models section describes IDs as bare hyphenated aliases (e.g. 'claude-opus-4-8'), while this edit introduces a dotted form ('claude-opus-4.8') as the differing OpenRouter slug. Ensure this dotted-vs-hyphenated distinction is intentional and matches the actual map keys/values in utils/api.py."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 9616,
+        "output": 1836
+      }
+    },
+    "entry_hash": "641c1aaa292d46c2b4037fc7400a82922d3fce867559c049721960dd92019bb5"
+  },
+  {
+    "entry_id": "df7fb788-8ee5-4c48-bf80-27a91b23691f",
+    "timestamp": "2026-07-16T06:22:42.174794+00:00",
+    "previous_hash": "641c1aaa292d46c2b4037fc7400a82922d3fce867559c049721960dd92019bb5",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "CLAUDE.md",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "CLAUDE.md",
+        "change_type": "modify",
+        "old_string": "# Model strings are auto-prefixed with \"anthropic/\" on this path,\n# e.g. a model string \"<id>\" becomes \"anthropic/<id>\".",
+        "new_string": "# Model strings are routed to their OpenRouter slug on this path. Most map to\n# \"anthropic/<id>\", but ids whose OpenRouter slug differs (e.g. the dotted\n# \"anthropic/claude-opus-4.8\") are translated via a small map in utils/api.py."
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-007",
+          "severity": "OBSERVATION",
+          "location": "CLAUDE.md: OpenRouter routing comment block",
+          "evidence": "\"ids whose OpenRouter slug differs (e.g. the dotted \\\"anthropic/claude-opus-4.8\\\") are translated via a small map in utils/api.py.\"",
+          "reasoning": "This diff only touches CLAUDE.md and asserts that utils/api.py contains a translation map for OpenRouter slug mismatches. No corresponding change to utils/api.py is present in this diff. Per the project's own model-change playbook, utils/api.py is the single source of truth for model IDs/routing, so if this map does not already exist there, the documentation would be describing unimplemented behavior. This is not a constitutional violation by itself (CLAUDE.md is docs, not pipeline code), but the Oracle should confirm the map referenced actually exists in utils/api.py before/alongside this doc update, to avoid docs drifting ahead of implementation."
+        }
+      ],
+      "_tokens": {
+        "input": 8534,
+        "output": 1452
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "REBUT",
+          "argument": "This is an OBSERVATION, not a finding of violation, and the Challenger explicitly concedes it: 'This is not a constitutional violation by itself.' The diff under review touches exactly one file, CLAUDE.md, and change_type is 'modify' on a documentation string. C-007 governs changes to the governance pipeline itself (challenger.py, defender.py, oracle.py, ledger/, constitution) \u2014 CLAUDE.md is project documentation, explicitly outside that scope. There is no evidence in this diff of any pipeline behavior change, weakened enforcement, bypassed verification, or disabled logging, which is what C-007 actually prohibits. Under C-002 (Scope Boundary Enforcement), this task's stated boundary is a doc edit; if utils/api.py needed a corresponding translation-map addition, project workflow rule 14 ('one change per tool call, do not batch unrelated changes') requires that to be a separate governed edit, not folded into this one. So the absence of a utils/api.py diff here is not doc-drift, it is correct adherence to the project's own one-change-per-call discipline.",
+          "evidence": "Diff scope: single file_path 'CLAUDE.md', single old_string/new_string pair describing OpenRouter routing behavior. CLAUDE.md itself states: 'Model strings live in utils/api.py as CHALLENGER_MODEL, DEFENDER_MODEL, ORACLE_MODEL, and UTILITY_MODEL (the single source of truth). This section does not restate the literal IDs, so they cannot drift.' The new text is consistent with that pre-existing decoupling principle: it describes routing behavior at a conceptual level rather than asserting specific untested code."
+        }
+      ],
+      "summary": "The change is a narrowly scoped documentation clarification with no pipeline, dependency, type-safety, or ledger impact, and the sole Challenger observation is explicitly non-violating and addresses process sequencing rather than a defect in this diff.",
+      "_tokens": {
+        "input": 8945,
+        "output": 1735
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The proposed change modifies a single documentation string in CLAUDE.md describing OpenRouter routing behavior. The Challenger raised exactly one item, explicitly labeled an OBSERVATION (not a violation), noting that the new text asserts utils/api.py contains a translation map for OpenRouter slug mismatches while no corresponding utils/api.py change appears in this diff. The Challenger itself concedes 'This is not a constitutional violation by itself (CLAUDE.md is docs, not pipeline code).' The Defender correctly argues that C-007's scope is the governance pipeline components (challenger.py, defender.py, oracle.py, ledger/, constitution) and CLAUDE.md is project documentation outside that enumerated scope, and that no pipeline behavior, enforcement, verification, or logging is altered by a doc string edit. I independently evaluated the change against all constraints: it introduces no error handling (C-001 N/A), no file modifications outside the stated doc-edit boundary (C-002 satisfied), no imports or dependencies (C-003 N/A), no type annotations (C-004 N/A), no secrets (C-006 N/A), no pipeline logic change (C-007 not applicable to docs), and no ledger interaction (C-008 N/A). No veto-severity constraint is clearly violated. The remaining concern is documentation-implementation sequencing, which is a process/quality matter, not a constitutional breach, and the Defender's appeal to workflow rule 14 (one change per tool call) reasonably explains the absence of a bundled api.py edit.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error-handling code is touched by this documentation edit."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is confined to a single string in CLAUDE.md, matching the stated doc-edit boundary."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependencies are added or modified."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No type annotations are involved in a documentation change."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No secrets or credentials appear in the edited text."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "CLAUDE.md is project documentation, not an enumerated pipeline component. No enforcement, verification, or logging behavior is weakened. Challenger's own finding was an OBSERVATION conceding non-violation."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger entries are touched."
+        }
+      ],
+      "advisories": [
+        "Per the Challenger's observation, confirm that the OpenRouter slug translation map for dotted ids (e.g. 'anthropic/claude-opus-4.8') actually exists in utils/api.py. If it does not yet exist, this documentation now describes unimplemented behavior and a follow-up governed edit to utils/api.py should land promptly to prevent docs drifting ahead of implementation.",
+        "The new text introduces the dotted form 'claude-opus-4.8' as an OpenRouter slug, whereas CLAUDE.md and the model-change playbook reference the bare alias convention 'claude-opus-4-8' (hyphenated). Verify these two forms are intentionally distinct (OpenRouter slug vs first-party alias) and not an inconsistency."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 9619,
+        "output": 2070
+      }
+    },
+    "entry_hash": "322e1ce8dfa9a4279d651c5c6e70a8c8e2b14d997b6c28605710aa08790c40e5"
   }
 ]
