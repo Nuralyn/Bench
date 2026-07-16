@@ -19,6 +19,7 @@ if str(_REPO_ROOT) not in sys.path:
 from utils.stats import (  # noqa: E402
     compute_ledger_stats,
     entry_has_pipeline_error,
+    entry_verdict,
     pct,
 )
 
@@ -128,6 +129,44 @@ class ComputeLedgerStatsTests(unittest.TestCase):
         self.assertEqual(stats["total"], 1)
         self.assertEqual(stats["passed"], 0)
         self.assertEqual(stats["vetoed"], 0)
+
+
+class EntryVerdictTests(unittest.TestCase):
+    def test_top_level_verdict_wins(self) -> None:
+        entry: dict = {"verdict": "VETO", "oracle": {"verdict": "PASS"}}
+        self.assertEqual(entry_verdict(entry), "VETO")
+
+    def test_falls_back_to_oracle_verdict(self) -> None:
+        self.assertEqual(entry_verdict({"oracle": {"verdict": "PASS"}}), "PASS")
+
+    def test_none_when_no_verdict(self) -> None:
+        self.assertIsNone(entry_verdict({}))
+        self.assertIsNone(entry_verdict({"oracle": "corrupt"}))
+        self.assertIsNone(entry_verdict({"verdict": ""}))
+
+
+class TopLevelPipelineErrorTests(unittest.TestCase):
+    def test_top_level_flag_detected(self) -> None:
+        # A constitution-load fail-closed VETO runs no stage but sets the flag.
+        self.assertTrue(entry_has_pipeline_error({"pipeline_error": True}))
+
+    def test_false_flag_and_no_stage_is_false(self) -> None:
+        self.assertFalse(entry_has_pipeline_error({"pipeline_error": False}))
+
+
+class FailClosedStatsTests(unittest.TestCase):
+    def test_fail_closed_veto_counted_as_veto_and_pipeline_error(self) -> None:
+        # Fail-closed VETOs carry a top-level verdict and pipeline_error and
+        # no oracle stage; they must appear in both tallies, not vanish.
+        entries: list[dict] = [
+            {"verdict": "VETO", "pipeline_error": True,
+             "challenger": {"status": "PIPELINE_ERROR"}},
+            {"verdict": "VETO", "pipeline_error": True},  # constitution failure
+        ]
+        stats: dict = compute_ledger_stats(entries)
+        self.assertEqual(stats["vetoed"], 2)
+        self.assertEqual(stats["pipeline_errors"], 2)
+        self.assertEqual(stats["passed"], 0)
 
 
 if __name__ == "__main__":
