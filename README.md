@@ -109,9 +109,9 @@ Set `BENCH_PROVIDER=claude_code` to run the pipeline on the subscription that al
 
 ## Design Decisions
 
-### Fail-Open by Design
+### Fail-Closed by Design
 
-Bench always exits with code 0. Flow control uses JSON `permissionDecision` fields (`"allow"` or `"deny"`), never exit codes. If the governance pipeline encounters an error (API timeout, malformed response, import failure), the change is allowed through with a stderr warning. This prevents Bench from becoming a blocker that stalls Claude Code on infrastructure failures. Governance should be a gate, not a wall.
+Bench always exits with code 0. Flow control uses JSON `permissionDecision` fields (`"allow"` or `"deny"`), never exit codes. If the governance pipeline cannot adjudicate a change (API timeout, malformed response, unimportable pipeline, unreadable constitution), the change is **denied**, with a stderr warning and a `pipeline_error` VETO recorded in the ledger, rather than allowed through. A broken or exploited judge must not be able to wave changes past governance, so governance is a wall when it cannot render a verdict, not a gate that swings open on failure. Recovery from a genuinely broken pipeline is an out-of-band human action (editing files directly, outside the governed tools), never an automatic pass. The lone exception is the reentrancy guard that lets a Bench-spawned governance subprocess through, so the pipeline does not recurse into itself and deadlock.
 
 ### Diff Hardening
 
