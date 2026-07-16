@@ -35,9 +35,15 @@ from typing import Any
 import anthropic
 
 
-CHALLENGER_MODEL: str = "claude-sonnet-4-6"
-DEFENDER_MODEL: str = "claude-sonnet-4-6"
-ORACLE_MODEL: str = "claude-opus-4-7"
+# Single source of truth for pipeline model IDs (CLAUDE.md and README reference
+# these constants by name, not by value, so the docs cannot drift). Each is the
+# exact first-party Anthropic model ID: current-generation aliases are complete
+# as-is, so no dated suffix is used except for models that publish dated
+# snapshots (see UTILITY_MODEL). Verify each ID resolves on the target
+# provider before shipping a change.
+CHALLENGER_MODEL: str = "claude-sonnet-5"
+DEFENDER_MODEL: str = "claude-sonnet-5"
+ORACLE_MODEL: str = "claude-opus-4-8"
 UTILITY_MODEL: str = "claude-haiku-4-5-20251001"
 
 _PROVIDER_ANTHROPIC: str = "anthropic"
@@ -77,7 +83,7 @@ def call_model(
     model: str,
     system_prompt: str,
     user_content: str,
-    max_tokens: int = 4096,
+    max_tokens: int = 8192,  # Sonnet 5 stages spend part of this on adaptive thinking
 ) -> dict[str, Any]:
     """Call the configured LLM provider expecting a JSON-object response.
 
