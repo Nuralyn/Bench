@@ -1,7 +1,7 @@
-"""Tests for pipeline.runner — orchestration, fail-open, CLEAR optimization, tokens.
+"""Tests for pipeline.runner: orchestration, fail-closed, CLEAR optimization, tokens.
 
 All pipeline stages, constitution loading, and ledger append are mocked.
-Covers: happy paths (PASS/VETO), fail-open on every error source,
+Covers: happy paths (PASS/VETO), fail-closed on every adjudication error,
 CLEAR-skips-defender optimization, token accumulation, and finalize behavior.
 
 Run: python -m unittest tests.test_runner -v
@@ -144,27 +144,28 @@ class HappyPathTests(unittest.TestCase):
 @patch("pipeline.runner.run_defender")
 @patch("pipeline.runner.run_challenger")
 @patch("pipeline.runner.load_constitution_snapshot")
-class FailOpenTests(unittest.TestCase):
-    def test_constitution_load_failure_fails_open(
+class FailClosedTests(unittest.TestCase):
+    def test_constitution_load_failure_fails_closed(
         self, mock_const: MagicMock, mock_chall: MagicMock,
         mock_def: MagicMock, mock_oracle: MagicMock, mock_ledger: MagicMock,
     ) -> None:
         mock_const.side_effect = ConstitutionError("file missing")
         result: dict = run_governance_pipeline("Write", _TOOL_INPUT, _DIFF)
-        self.assertEqual(result["verdict"], "PASS")
+        self.assertEqual(result["verdict"], "VETO")
         self.assertTrue(result.get("pipeline_error"))
+        self.assertTrue(result.get("remediation"))
 
-    def test_challenger_pipeline_error_fails_open(
+    def test_challenger_pipeline_error_fails_closed(
         self, mock_const: MagicMock, mock_chall: MagicMock,
         mock_def: MagicMock, mock_oracle: MagicMock, mock_ledger: MagicMock,
     ) -> None:
         mock_const.return_value = _MOCK_CONSTITUTION
         mock_chall.return_value = _pipeline_error_stage()
         result: dict = run_governance_pipeline("Write", _TOOL_INPUT, _DIFF)
-        self.assertEqual(result["verdict"], "PASS")
+        self.assertEqual(result["verdict"], "VETO")
         self.assertTrue(result.get("pipeline_error"))
 
-    def test_defender_pipeline_error_fails_open(
+    def test_defender_pipeline_error_fails_closed(
         self, mock_const: MagicMock, mock_chall: MagicMock,
         mock_def: MagicMock, mock_oracle: MagicMock, mock_ledger: MagicMock,
     ) -> None:
@@ -172,10 +173,10 @@ class FailOpenTests(unittest.TestCase):
         mock_chall.return_value = _findings_challenger()
         mock_def.return_value = _pipeline_error_stage()
         result: dict = run_governance_pipeline("Write", _TOOL_INPUT, _DIFF)
-        self.assertEqual(result["verdict"], "PASS")
+        self.assertEqual(result["verdict"], "VETO")
         self.assertTrue(result.get("pipeline_error"))
 
-    def test_oracle_pipeline_error_fails_open(
+    def test_oracle_pipeline_error_fails_closed(
         self, mock_const: MagicMock, mock_chall: MagicMock,
         mock_def: MagicMock, mock_oracle: MagicMock, mock_ledger: MagicMock,
     ) -> None:
@@ -184,7 +185,7 @@ class FailOpenTests(unittest.TestCase):
         mock_def.return_value = _rebuttal_defender()
         mock_oracle.return_value = _pipeline_error_stage()
         result: dict = run_governance_pipeline("Write", _TOOL_INPUT, _DIFF)
-        self.assertEqual(result["verdict"], "PASS")
+        self.assertEqual(result["verdict"], "VETO")
         self.assertTrue(result.get("pipeline_error"))
 
     def test_ledger_failure_does_not_block_verdict(

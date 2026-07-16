@@ -4,21 +4,25 @@ Loads the constitution snapshot, drives Challenger -> Defender -> Oracle in
 sequence, appends a hash-chained receipt to the ledger, and returns a
 consolidated result dict for the hook to translate into a permissionDecision.
 
-Fail-open policy:
-  * Any stage returning PIPELINE_ERROR short-circuits to a PASS verdict.
-  * A missing or malformed constitution short-circuits to a PASS verdict.
+Fail-closed policy:
+  * Any stage returning PIPELINE_ERROR short-circuits to a VETO verdict.
+  * A missing or malformed constitution short-circuits to a VETO verdict.
   * The returned dict carries pipeline_error=True whenever this happens so
-    the hook and ledger can flag the incident for the developer. A broken
-    governance layer must not block work.
+    the hook and ledger can flag the incident. A change that governance
+    cannot adjudicate is blocked, not allowed: a broken or exploited judge
+    must not be able to wave changes through. Recovery from a genuinely
+    broken pipeline is an out-of-band human action (a human editing files
+    directly, outside the governed tools), never an automatic pass.
 
 Ledger policy:
   * Every exit path records a ledger entry via append_entry before
-    returning — PASS, VETO, and fail-open alike. Fail-open entries carry
+    returning: PASS, VETO, and fail-closed alike. Fail-closed entries carry
     pipeline_error=True so the evidence chain distinguishes them from
     adjudicated verdicts.
   * If the ledger write itself raises, the exception is logged to stderr
-    and the verdict is returned anyway. A broken ledger must not block
-    the developer (same motivation as the fail-open verdict policy).
+    and the verdict is returned anyway. A recording failure is not an
+    adjudication bypass: it cannot turn a VETO into a PASS, so it must not
+    block a verdict governance already rendered.
 
 Optimization:
   * Challenger CLEAR skips the Defender (saves one model call). A synthetic
@@ -66,9 +70,16 @@ def run_governance_pipeline(
     except ConstitutionError as e:
         return _finalize(
             {
-                "verdict": "PASS",
-                "reason": f"Constitution load failure — failing open: {e}",
-                "remediation": None,
+                "verdict": "VETO",
+                "reason": (
+                    f"Constitution load failure; cannot adjudicate. "
+                    f"Failing closed: {e}"
+                ),
+                "remediation": (
+                    "Governance could not load the constitution. Fix bench.json "
+                    "(or the loader) so the pipeline can run, then retry. A change "
+                    "that cannot be adjudicated is blocked, not allowed."
+                ),
                 "pipeline_error": True,
                 "_tokens": accumulated,
             },
@@ -83,9 +94,17 @@ def run_governance_pipeline(
     if challenger_result.get("status") == "PIPELINE_ERROR":
         return _finalize(
             {
-                "verdict": "PASS",
-                "reason": "Challenger pipeline error — failing open",
-                "remediation": None,
+                "verdict": "VETO",
+                "reason": (
+                    "Challenger stage error; the change could not be "
+                    "adjudicated. Failing closed."
+                ),
+                "remediation": (
+                    "The Challenger stage returned a pipeline error (see the "
+                    "ledger entry and stderr). Fix the pipeline (model, provider, "
+                    "or CLI configuration) and retry. A change governance cannot "
+                    "adjudicate is blocked, not allowed."
+                ),
                 "challenger": challenger_result,
                 "constitution_hash": constitution_hash,
                 "pipeline_error": True,
@@ -111,9 +130,17 @@ def run_governance_pipeline(
         if defender_result.get("status") == "PIPELINE_ERROR":
             return _finalize(
                 {
-                    "verdict": "PASS",
-                    "reason": "Defender pipeline error — failing open",
-                    "remediation": None,
+                    "verdict": "VETO",
+                    "reason": (
+                        "Defender stage error; the change could not be "
+                        "adjudicated. Failing closed."
+                    ),
+                    "remediation": (
+                        "The Defender stage returned a pipeline error (see the "
+                        "ledger entry and stderr). Fix the pipeline (model, "
+                        "provider, or CLI configuration) and retry. A change that "
+                        "governance cannot adjudicate is blocked, not allowed."
+                    ),
                     "challenger": challenger_result,
                     "defender": defender_result,
                     "constitution_hash": constitution_hash,
@@ -135,9 +162,17 @@ def run_governance_pipeline(
     if oracle_result.get("status") == "PIPELINE_ERROR":
         return _finalize(
             {
-                "verdict": "PASS",
-                "reason": "Oracle pipeline error — failing open",
-                "remediation": None,
+                "verdict": "VETO",
+                "reason": (
+                    "Oracle stage error; no binding verdict could be "
+                    "rendered. Failing closed."
+                ),
+                "remediation": (
+                    "The Oracle stage returned a pipeline error (see the ledger "
+                    "entry and stderr). Fix the pipeline (model, provider, or CLI "
+                    "configuration) and retry. Without a binding Oracle verdict "
+                    "the change is blocked, not allowed."
+                ),
                 "challenger": challenger_result,
                 "defender": defender_result,
                 "oracle": oracle_result,
