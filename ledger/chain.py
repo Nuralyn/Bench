@@ -131,10 +131,13 @@ def append_entry(
     """Append a governance verdict to the ledger and update ledger-meta.json.
 
     Expects ``pipeline_result`` to include the standard runner keys
-    (``constitution_hash``, ``challenger``, ``defender``, ``oracle``) and a
-    ``change`` dict with ``file``, ``tool``, ``diff_summary``. Missing
-    fields fall back to safe defaults so the ledger never fails to record
-    a verdict because of an upstream shape drift.
+    (``verdict``, ``pipeline_error``, ``constitution_hash``, ``challenger``,
+    ``defender``, ``oracle``) and a ``change`` dict with ``file``, ``tool``,
+    ``diff_summary``. The top-level ``verdict`` and ``pipeline_error`` are
+    recorded so fail-closed error VETOs (which carry no oracle stage) stay
+    legible in the audit trail. Missing fields fall back to safe defaults so
+    the ledger never fails to record a verdict because of an upstream shape
+    drift.
 
     Returns the full new entry (including its computed ``entry_hash``).
     """
@@ -158,6 +161,8 @@ def append_entry(
         "timestamp": timestamp,
         "previous_hash": previous_hash,
         "constitution_hash": pipeline_result.get("constitution_hash", ""),
+        "verdict": pipeline_result.get("verdict"),
+        "pipeline_error": bool(pipeline_result.get("pipeline_error", False)),
         "change": {
             "file": change_in.get("file", "unknown"),
             "tool": change_in.get("tool", "unknown"),

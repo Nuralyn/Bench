@@ -109,9 +109,9 @@ Set `BENCH_PROVIDER=claude_code` to run the pipeline on the subscription that al
 
 ## Design Decisions
 
-### Fail-Open by Design
+### Fail-Closed by Design
 
-Bench always exits with code 0. Flow control uses JSON `permissionDecision` fields (`"allow"` or `"deny"`), never exit codes. If the governance pipeline encounters an error (API timeout, malformed response, import failure), the change is allowed through with a stderr warning. This prevents Bench from becoming a blocker that stalls Claude Code on infrastructure failures. Governance should be a gate, not a wall.
+Bench always exits with code 0. Flow control uses JSON `permissionDecision` fields (`"allow"` or `"deny"`), never exit codes. If the governance pipeline cannot adjudicate a change (API timeout, malformed response, unimportable pipeline, unreadable constitution), the change is **denied**, with a stderr warning and a `pipeline_error` VETO recorded in the ledger, rather than allowed through. A broken or exploited judge must not be able to wave changes past governance, so governance is a wall when it cannot render a verdict, not a gate that swings open on failure. Recovery from a genuinely broken pipeline is an out-of-band human action (editing files directly, outside the governed tools), never an automatic pass. The lone exception is the reentrancy guard that lets a Bench-spawned governance subprocess through, so the pipeline does not recurse into itself and deadlock.
 
 ### Diff Hardening
 
@@ -139,8 +139,9 @@ With `BENCH_PROVIDER=claude_code` (set by the repo's `.claude/settings.json`),
 the local Claude Code CLI must be recent enough to recognize these IDs: Claude
 Sonnet 5 needs Claude Code v2.1.197+ and Claude Opus 4.8 needs v2.1.154+ (per
 Claude Code's model-config docs; run `claude update` to upgrade). An older CLI
-fails the stage, and under the runner's fail-open policy that surfaces as a
-flagged `pipeline_error` rather than a hard block, so keep the CLI current.
+fails the stage, and under the runner's fail-closed policy that blocks the
+change (a flagged `pipeline_error` VETO) until the pipeline can run, so keep the
+CLI current.
 
 ## Built With
 

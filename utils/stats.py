@@ -11,7 +11,15 @@ from typing import Any
 
 
 def entry_has_pipeline_error(entry: dict) -> bool:
-    """True if any stage of the entry recorded a PIPELINE_ERROR status."""
+    """True if the entry recorded a pipeline error.
+
+    Checks the top-level ``pipeline_error`` flag (set on fail-closed error
+    VETOs, including a constitution-load failure that runs no stage) and,
+    for older entries and stage-level errors, any stage with a
+    PIPELINE_ERROR status.
+    """
+    if entry.get("pipeline_error"):
+        return True
     for stage in ("challenger", "defender", "oracle"):
         stage_result: Any = entry.get(stage)
         if (
@@ -20,6 +28,25 @@ def entry_has_pipeline_error(entry: dict) -> bool:
         ):
             return True
     return False
+
+
+def entry_verdict(entry: dict) -> str | None:
+    """The authoritative verdict for a ledger entry.
+
+    Prefers the top-level ``verdict`` recorded by append_entry (present on
+    fail-closed error VETOs, which never produce an oracle stage), then the
+    oracle stage verdict (older entries written before the top-level field
+    existed), else None.
+    """
+    top: Any = entry.get("verdict")
+    if isinstance(top, str) and top:
+        return top
+    oracle: Any = entry.get("oracle")
+    if isinstance(oracle, dict):
+        v: Any = oracle.get("verdict")
+        if isinstance(v, str) and v:
+            return v
+    return None
 
 
 def pct(part: int, total: int) -> str:
@@ -45,9 +72,9 @@ def compute_ledger_stats(entries: list[dict]) -> dict:
     citation_counts: dict[str, int] = {}
 
     for entry in entries:
+        verdict: Any = entry_verdict(entry)
         oracle: Any = entry.get("oracle")
         oracle_dict: dict = oracle if isinstance(oracle, dict) else {}
-        verdict: Any = oracle_dict.get("verdict")
 
         if entry_has_pipeline_error(entry):
             pipeline_errors += 1
