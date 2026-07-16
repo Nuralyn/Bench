@@ -139,8 +139,9 @@ With `BENCH_PROVIDER=claude_code` (set by the repo's `.claude/settings.json`),
 the local Claude Code CLI must be recent enough to recognize these IDs: Claude
 Sonnet 5 needs Claude Code v2.1.197+ and Claude Opus 4.8 needs v2.1.154+ (per
 Claude Code's model-config docs; run `claude update` to upgrade). An older CLI
-fails the stage, and under the runner's fail-open policy that surfaces as a
-flagged `pipeline_error` rather than a hard block, so keep the CLI current.
+fails the stage, and under the runner's fail-closed policy that blocks the
+change (a flagged `pipeline_error` VETO) until the pipeline can run, so keep the
+CLI current.
 
 ## Built With
 
