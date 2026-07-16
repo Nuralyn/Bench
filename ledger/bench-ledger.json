@@ -25925,5 +25925,676 @@
       }
     },
     "entry_hash": "322e1ce8dfa9a4279d651c5c6e70a8c8e2b14d997b6c28605710aa08790c40e5"
+  },
+  {
+    "entry_id": "30086b0a-28ab-41d2-85f3-4a5a315d5462",
+    "timestamp": "2026-07-16T06:23:49.909178+00:00",
+    "previous_hash": "322e1ce8dfa9a4279d651c5c6e70a8c8e2b14d997b6c28605710aa08790c40e5",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "C:\\Users\\mstar\\.claude\\projects\\D--Business-Builder\\memory\\huzzah-project.md",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "C:\\Users\\mstar\\.claude\\projects\\D--Business-Builder\\memory\\huzzah-project.md",
+        "change_type": "modify",
+        "old_string": "- **Build moat decision:** orchestrate external builders (Bolt/Lovable, Claude Code fallback) behind a swappable `BuilderAdapter`; win as the safety + spec + readiness layer, not by building our own code-gen.",
+        "new_string": "- **Build moat decision:** orchestrate external builders (Bolt/Lovable, Claude Code fallback) behind a swappable `BuilderAdapter`; win as the safety + spec + readiness layer, not by building our own code-gen.\n- **Positioning (2026-07-15):** KEEP the \"AI cofounder\" frame for comprehension, but the landing page must LEAD WITH THE REFUSAL as a filter: state up front what Huzzah will NOT do (won't run your sales call, won't ask for the money - that part is you), plus a dose of the verified-outcome mechanic (\"nothing counts until it's real\"). Goal: repel lazy vibe-coders at the door (they have lovable/bolt) and attract the paying niche - people who want to do the work but hate doing it alone and can't tell if progress is real. Product personality target: \"unhinged co-conspirator,\" NOT paternalistic babysitter (co-conspirator implies both parties commit the crime)."
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 6187,
+        "output": 19
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change modifies a single Markdown memory file (huzzah-project.md) by appending a positioning note. It contains no executable code, no error-handling logic, no imports or dependencies, no type annotations, no secrets, no governance-pipeline code, and no ledger operations. The Challenger returned CLEAR with no findings and the Defender confirmed CLEAR. My independent review against the full constitution confirms no constraint is engaged: this is prose documentation of product positioning strategy. No veto-severity constraint is implicated.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No catch blocks or error-handling code; the change is Markdown prose."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is confined to the single stated memory file; no out-of-scope files touched."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependency manifests modified."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No functions or type annotations present in a Markdown note."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "No API keys, tokens, or credentials appear in the added text."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "The file is a project memory note, not part of the challenger/defender/oracle/ledger/constitution pipeline; no enforcement mechanism is altered."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "This is a working memory document, not a governance ledger; no ledger entries are modified or deleted."
+        }
+      ],
+      "advisories": [
+        "Per the user's standing style rule, verify no em dashes or en dashes were introduced; the added text uses hyphens (e.g. 'zero-to-hero', 'that part is you -'), which appear compliant, but a final scan is advisable if this note ever informs customer-facing copy."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 6226,
+        "output": 865
+      }
+    },
+    "entry_hash": "1ed8ea6ff41637989828fdbcd6a2dedb0a7596ac893a18f7052ad3f16195a6b1"
+  },
+  {
+    "entry_id": "1566ba40-3031-467c-b743-3bee61af3952",
+    "timestamp": "2026-07-16T06:28:36.159491+00:00",
+    "previous_hash": "1ed8ea6ff41637989828fdbcd6a2dedb0a7596ac893a18f7052ad3f16195a6b1",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "C:\\Users\\mstar\\.claude\\projects\\D--Business-Builder\\memory\\huzzah-project.md",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "C:\\Users\\mstar\\.claude\\projects\\D--Business-Builder\\memory\\huzzah-project.md",
+        "change_type": "modify",
+        "old_string": "See [[huzzah-ops-runbook]] for deploy/migrate commands and [[huzzah-memory-store-constraints]] for the test-double gotcha.",
+        "new_string": "**FULL PRODUCT REVIEW (2026-07-15, 4-agent audit: pipeline/LLM, tone, artifact quality, stickiness/niche). Key findings, ranked, drive the next roadmap:**\n- **P0 INTEGRITY BREAKS (violate the inviolable rule from inside the UI):** (1) \"Use a sample call\" in /coach records a REAL interview_completed event; 8 clicks passes Gate 2 on fiction. (2) approveAndSendOutreachAction records email_sent even when Gmail send silently fails or recipient email is blank (falls through to attested). (3) page_visit dedup keys on a CLIENT-supplied visitorKey = farmable momentum; signups have no verification; no rate limiting on public endpoints.\n- **P0 PROD BRICK:** Stage 4 on huzzah.dev (MockBuilder + real API key) is permanently impassable: real opus auditors audit the immutable goldenV1Fixture with a seeded non-waivable pii critical; remediation can never succeed; build.ts treats 'gated' as in-flight so no new build can start. Every \"Fix it\" click burns an opus call that cannot succeed.\n- **P0 FABRICATION:** recon \"watch it work\" fabricates quotes/URLs with the app Anthropic key (AnthropicAdapter ignores search:true; only xAI honors it). Fix = wire Anthropic web_search tool. Sourcing head-start likewise presents invented prospects as found people (contact always null).\n- **P1 DEAD LOOP:** daily loop dies after one mission (2 moves); \"A fresh move lands tomorrow\" is false (no regeneration mechanism, no scheduler); no stage-3/5 mission variants; only 5 prospects ever sourced. Ladder numbers inconsistent: stage name says 20 strangers, gate needs 8 interviews, mission says 5. Stage 1 gate is identical to Stage 0 (free pass-through). Vibecoders can NEVER pass Stage 3 (no path to create a Huzzah page post-onboarding).\n- **P1 SILENT GOOD NEWS:** zero out-of-app re-engagement; signups/visits/payments land in ledger silently. Founders can never SEE their leads (emails trapped in event payloads; UI shows counts only). Digest email at the recordOutcome chokepoint = highest-leverage retention fix (Phase B Inngest home).\n- **P1 FCO IS WRITE-ONLY:** all downstream prompts use only problemStatement+targetUser; interview insights never feed sourcing/copy/spec. Moat architected, not activated.\n- **P1 SMOKE PAGE:** no generateMetadata on /p/[slug] (shared links unfurl as \"Huzzah! Your AI cofounder\", not the founder's startup = cheapest big fix); every page pixel-identical Huzzah-branded; keyless mock copy is mad-lib sludge (\"Finally, {problem} without the headache\").\n- **P1 STAGE 4 ARTIFACT:** generated \"app\" = migration SQL + JSON config; interpreter is headless JSON API (no UI, nothing mints customer sessions, no email send, no payment code). \"Basement without a house.\" Security engineering below waterline is genuinely ahead of lovable/bolt (forced RLS, composite FKs, fail-closed gate).\n- **TONE VERDICT:** \"co-conspirator exists in architecture, has no mouth.\" Copy lands when stating hard rules/real-vs-fake; fails when encouraging (nursery voice). NO shared voice spec exists; every prompt is a job title. Fix = exported HUZZAH_VOICE block in every founder-facing system prompt + delete \"kind\" from coach prompt + 15 specific copy rewrites (in tone audit report). Em/en dash scan of user copy: CLEAN. \u00f0\u0178\u017d\u2030 emoji in 3 spots vs minimal-emoji taste. CelebrationTier \"micro\" is dead code (all 6 wins are full-screen).\n- **COST:** LLM spend trivial (~$0.05/onboarding, ~$0.05-0.10/active day, ~$0.30-0.50/build). Problem is futile+fabricated calls, not dollars. Opus on spec/DSL could be sonnet; deterministic golden-codegen audits should be content-hash cached.\n- **NICHE (recommended):** employed side-project professionals: non-coders with a day job and a first idea. NOT indie hackers (outgrow template, resent gates). Accelerators = later B2B2C channel (ledger as cohort dashboard).\n- **MONETIZATION:** none exists for Huzzah itself. Charge at the Stage 3->4 gate (\"real demand is on the board, now Huzzah builds your app\"), ~$49-99/mo; free through Stage 2; never paywall Stage 2 (it's the churn wall). Optional annual upsell at first_dollar.\n- **DIFFERENTIATOR PLAY:** ledger is buried plumbing; surface it: public-shareable verified-traction timeline page (proof artifact + viral loop), overnight digest, next-win preview on /today.\n- **DOC ROT:** README/ARCHITECTURE still say Stage 4 \"not started\" / Prisma \"next wiring step\" while both are shipped.\n\nSee [[huzzah-ops-runbook]] for deploy/migrate commands and [[huzzah-memory-store-constraints]] for the test-double gotcha."
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [
+        {
+          "constraint_id": "C-002",
+          "severity": "OBSERVATION",
+          "location": "huzzah-project.md (memory file)",
+          "evidence": "Entire diff is confined to the single memory note file; old_string is fully preserved inside new_string with only prepended content.",
+          "reasoning": "This change is a documentation/memory update, not a source-code change. None of the constitution's constraints (error handling, dependencies, type safety, tests, secrets, governance-pipeline self-modification, ledger tampering) are implicated by this file or content type. Noting this only because the constitution appears scoped to code changes and this diff falls outside that domain rather than violating any specific rule."
+        }
+      ],
+      "_tokens": {
+        "input": 7752,
+        "output": 983
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change is a pure documentation update to a memory note file (huzzah-project.md), prepending a product-review summary while fully preserving the original old_string content inside the new_string. The Challenger issued a CLEAR status (single OBSERVATION under C-002 noting the diff falls outside the code-scoped domain of the constitution), and the Defender confirmed CLEAR with no rebuttals needed. I independently evaluated the change against all eight constraints: none are implicated. C-001 (error handling), C-003 (dependencies), C-004 (type safety), C-005 (tests), and C-006 (secrets) all concern source code and no code is modified. C-007 (governance pipeline integrity) is not touched: this file is a personal memory note, not challenger/defender/oracle/ledger/constitution machinery. C-008 (ledger immutability) refers to the governance evidence ledger, not this markdown note, and in any case the diff only appends content and preserves the prior text verbatim. Note: the memory content itself describes P0 'integrity breaks' in the Huzzah product (e.g. fake sample calls recording real interview_completed events), but those are descriptions of findings to be addressed, not code changes in this diff, so they do not constitute constitutional violations here.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No catch blocks or error-handling code in a markdown memory file."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is confined to the single stated file; old_string is preserved verbatim within new_string with only prepended documentation. Challenger confirmed no scope creep."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependency manifests altered."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No type annotations present in a documentation file."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new logic or functions introduced; documentation only."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "No credentials, API keys, or tokens present in the added text."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "File is a personal memory note, not part of the governance pipeline machinery; no enforcement weakened."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "SATISFIED",
+          "note": "Content is appended, not overwritten; no governance ledger entry is modified or deleted."
+        }
+      ],
+      "advisories": [
+        "The recorded content documents live P0 product integrity breaks in Huzzah (fake sample calls minting real interview_completed events, email_sent recorded on silent Gmail failure, farmable page_visit dedup). These directly implicate the project's 'inviolable rule' that progress flows only from verified OutcomeEvents. This memory note is the correct place to capture them, but they should be tracked to actual code remediation under a future governed change.",
+        "The added text contains a mojibake artifact ('\\u00f0\\u0178\\u017d\\u2030 emoji') from an encoding round-trip. Harmless in a memory note, but worth cleaning if legibility matters."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 8025,
+        "output": 1283
+      }
+    },
+    "entry_hash": "7a982240c918baba404276ea2dc5ba9b0b63aff897ee8913a22460f205a4d8da"
+  },
+  {
+    "entry_id": "3ee7e652-0320-4655-b08d-9fbff3a91a81",
+    "timestamp": "2026-07-16T06:29:25.907105+00:00",
+    "previous_hash": "7a982240c918baba404276ea2dc5ba9b0b63aff897ee8913a22460f205a4d8da",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "C:\\Users\\mstar\\.claude\\projects\\D--Business-Builder\\memory\\huzzah-project.md",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "C:\\Users\\mstar\\.claude\\projects\\D--Business-Builder\\memory\\huzzah-project.md",
+        "change_type": "modify",
+        "old_string": "Em/en dash scan of user copy: CLEAN. \u00f0\u0178\u017d\u2030 emoji in 3 spots vs minimal-emoji taste.",
+        "new_string": "Em/en dash scan of user copy: CLEAN. Party-popper emoji in 3 user-facing spots vs minimal-emoji taste."
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 5884,
+        "output": 19
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change modifies a single line in a project memory markdown file (huzzah-project.md), replacing a mojibake-corrupted emoji reference ('\\u00f0\\u0178\\u017d\\u2030 emoji') with a plain-text description ('Party-popper emoji in 3 user-facing spots'). This is a documentation/notes edit with no executable code. The Challenger returned CLEAR with no findings, and the Defender confirmed CLEAR. I independently evaluated the change against all eight constraints: none are engaged. There is no error-handling code (C-001 N/A), no source file outside a task boundary is touched since this is a standalone memory file edit (C-002 N/A), no imports or dependencies are altered (C-003 N/A), no type annotations exist in markdown (C-004 N/A), no new logic requiring tests (C-005 N/A), no secrets are introduced (C-006 N/A), no governance pipeline component (challenger/defender/oracle/ledger/constitution) is modified (C-007 N/A), and no ledger entry is altered (C-008 N/A). The change is purely cosmetic text cleanup and does not violate the declared constitution.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error-handling or catch blocks in a markdown documentation edit."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Only the single memory file huzzah-project.md is modified; no scope creep into other files."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependency manifests are affected."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No type annotations exist in a markdown file."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new functions or logic branches introduced."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "No credentials or secrets present; text is a descriptive note."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "The edited memory file is not part of the governance pipeline (challenger/defender/oracle/ledger/constitution)."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger entry is modified, deleted, or overwritten; this is a memory notes file."
+        }
+      ],
+      "advisories": [
+        "The original text contained mojibake ('\\u00f0\\u0178\\u017d\\u2030'), which the replacement correctly resolves to a plain-text label. Note the new text also serves the standing global rule to avoid emoji glyphs in written deliverables by describing rather than embedding the emoji."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 5923,
+        "output": 1153
+      }
+    },
+    "entry_hash": "83b521b89d036e4aeeff78dc65fa6c1716af91a50892b12cc5f173a9139dd699"
+  },
+  {
+    "entry_id": "9c802312-80d9-42c1-a5ff-bdb3f3f4abde",
+    "timestamp": "2026-07-16T06:32:33.867067+00:00",
+    "previous_hash": "83b521b89d036e4aeeff78dc65fa6c1716af91a50892b12cc5f173a9139dd699",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "README.md",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "README.md",
+        "change_type": "modify",
+        "old_string": "`utils/api.py` is the single source of truth for model IDs. The \"Current model\"\ncolumn is an illustrative snapshot for readers, not an authoritative record;\nrefresh it when you change a model. The exact IDs live in the constants named\nabove.",
+        "new_string": "`utils/api.py` is the single source of truth for model IDs. The \"Current model\"\ncolumn is an illustrative snapshot for readers, not an authoritative record;\nrefresh it when you change a model. The exact IDs live in the constants named\nabove.\n\nWith `BENCH_PROVIDER=claude_code` (the default), the local Claude Code CLI must\nbe recent enough to recognize these IDs: Claude Sonnet 5 needs Claude Code\nv2.1.197+ and Claude Opus 4.8 needs v2.1.154+ (`claude update` to upgrade). An\nolder CLI fails the stage, and under the runner's fail-open policy that surfaces\nas a flagged `pipeline_error` rather than a hard block, so keep the CLI current."
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-007",
+          "severity": "OBSERVATION",
+          "location": "README.md, new paragraph in API Configuration section",
+          "evidence": "\"An older CLI fails the stage, and under the runner's fail-open policy that surfaces as a flagged `pipeline_error` rather than a hard block, so keep the CLI current.\"",
+          "reasoning": "This documentation asserts specific governance-pipeline behavior (a 'fail-open policy' producing a flagged pipeline_error rather than a hard block). The diff only touches README.md, not runner.py or the pipeline itself, so C-007 doesn't strictly apply \u2014 but if this characterization of the runner's failure handling doesn't match the actual implementation in pipeline/runner.py, the docs would misrepresent how strictly the governance system enforces itself. Worth confirming against runner.py before merging, since inaccurate docs about enforcement leniency could mislead future maintainers about how 'binding' the pipeline actually is."
+        },
+        {
+          "constraint_id": "N/A",
+          "severity": "OBSERVATION",
+          "location": "README.md, version numbers 'v2.1.197+' and 'v2.1.154+'",
+          "evidence": "\"Claude Sonnet 5 needs Claude Code v2.1.197+ and Claude Opus 4.8 needs v2.1.154+\"",
+          "reasoning": "Not a constitutional issue, but these are precise, verifiable version-gate claims with no supporting evidence in the diff. If unverified, they risk becoming stale or incorrect documentation. No constraint mandates fact-checking prose, so this is informational only."
+        }
+      ],
+      "_tokens": {
+        "input": 8767,
+        "output": 1640
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "REBUT",
+          "argument": "C-007 by its own text is scoped to 'changes to the governance pipeline itself (challenger, defender, oracle, ledger, constitution)' \u2014 README.md is explicitly not in that enumerated set, and the Challenger concedes as much ('C-007 doesn't strictly apply'). This diff does not touch runner.py, oracle.py, or any enforcement logic; it only documents a CLI version prerequisite. On the accuracy question itself: the project's own CLAUDE.md rule 12 already establishes the described behavior \u2014 'Parse failures retry once, then record as PIPELINE_ERROR in the ledger.' An older CLI that fails to recognize a model ID would produce exactly that kind of call/parse failure, so the README's characterization ('flagged pipeline_error rather than a hard block') is consistent with documented pipeline behavior, not a novel or unverified claim invented for this diff. This is a documentation-accuracy note at most, not a governance-integrity violation.",
+          "evidence": "CLAUDE.md rule 12: 'All structured output validated before use. Parse failures retry once, then record as PIPELINE_ERROR in the ledger.' C-007 scope text: 'changes to the governance pipeline itself (challenger, defender, oracle, ledger, constitution)' \u2014 README.md is not in that list."
+        },
+        {
+          "finding_index": 1,
+          "position": "REBUT",
+          "argument": "The Challenger's own reasoning states 'No constraint mandates fact-checking prose, so this is informational only.' That is a self-disqualifying finding \u2014 it is explicitly not tied to any constraint (constraint_id: N/A) and the Challenger does not claim the version numbers are wrong, only that they're unverified in the diff context. Precise version gates for CLI compatibility are exactly the kind of operational detail a defender/maintainer would supply from direct knowledge of the CLI release notes; nothing in the diff or constitution requires inline citations for such claims. This is a suggestion for the human author to double check, not a governance defect.",
+          "evidence": "Challenger's own text: 'No constraint mandates fact-checking prose, so this is informational only.'"
+        }
+      ],
+      "summary": "This is a scope-appropriate, README-only documentation addition that adds a useful operational caveat about CLI version compatibility; neither Challenger finding identifies an actual constitutional violation, and both are explicitly flagged by the Challenger as non-binding observations.",
+      "_tokens": {
+        "input": 9390,
+        "output": 1895
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "This is a README.md-only documentation change adding a CLI version-compatibility caveat. Both Challenger findings are explicitly labeled OBSERVATION and non-binding. On finding 0, the Challenger itself concedes 'C-007 doesn't strictly apply' because the diff touches only README.md, not any file in the enumerated governance pipeline set (challenger, defender, oracle, ledger, constitution). The Defender's rebuttal correctly grounds the README's 'flagged pipeline_error rather than a hard block' characterization in the project's documented behavior (CLAUDE.md rule 12: 'Parse failures retry once, then record as PIPELINE_ERROR in the ledger'), so the prose is consistent with established pipeline behavior rather than a novel weakening of enforcement. No enforcement logic, logging, or verification is altered by a documentation string, so C-007 is SATISFIED. Finding 1 (version numbers) is self-disqualified by the Challenger ('No constraint mandates fact-checking prose') and tied to no constraint (constraint_id N/A); the Defender's rebuttal is accepted. Reviewing the change against the full constitution: no error handling (C-001), no imports/dependencies (C-003), no type annotations (C-004), no secrets (C-006), and no ledger interaction (C-008) are involved. C-002 is satisfied since the change is confined to README.md, an appropriate scope for a documentation update.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error-handling code is introduced or modified; change is documentation prose only."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is confined to README.md; no files outside a documentation-update boundary are touched."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new imports or dependencies added."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No function signatures or type annotations affected."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "No credentials or secrets present; version numbers and env var names are not secrets."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "No governance pipeline file is modified. The documented 'fail-open -> pipeline_error' behavior aligns with CLAUDE.md rule 12 per the Defender rebuttal; enforcement is not weakened, bypassed, or disabled."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger entries are modified, deleted, or appended by this change."
+        }
+      ],
+      "advisories": [
+        "The new text states 'With BENCH_PROVIDER=claude_code (the default)', but CLAUDE.md documents the default provider as anthropic when BENCH_PROVIDER is unset. This is a potential documentation inconsistency the author should reconcile. It is not a constitutional violation, but inaccurate default-behavior docs could mislead maintainers.",
+        "Per Challenger finding 1, the precise version gates (v2.1.197+, v2.1.154+) are unverifiable within the diff. The author should confirm these against CLI release notes before relying on them, as no constraint mandates but staleness risk exists."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 10228,
+        "output": 1515
+      }
+    },
+    "entry_hash": "54137ceddb4d2abd7d8bcee75034255f0e7452e94d40a02c0d270b9a7aa0e59c"
+  },
+  {
+    "entry_id": "8d8b96b2-835c-4c56-b461-74a32b4ebe44",
+    "timestamp": "2026-07-16T06:32:46.159647+00:00",
+    "previous_hash": "54137ceddb4d2abd7d8bcee75034255f0e7452e94d40a02c0d270b9a7aa0e59c",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "README.md",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "README.md",
+        "change_type": "modify",
+        "old_string": "`utils/api.py` is the single source of truth for model IDs. The \"Current model\"\ncolumn is an illustrative snapshot for readers, not an authoritative record;\nrefresh it when you change a model. The exact IDs live in the constants named\nabove.",
+        "new_string": "`utils/api.py` is the single source of truth for model IDs. The \"Current model\"\ncolumn is an illustrative snapshot for readers, not an authoritative record;\nrefresh it when you change a model. The exact IDs live in the constants named\nabove.\n\nWith `BENCH_PROVIDER=claude_code` (the default), the local Claude Code CLI must\nbe recent enough to recognize these IDs: Claude Sonnet 5 needs Claude Code\nv2.1.197+ and Claude Opus 4.8 needs v2.1.154+ (`claude update` to upgrade). An\nolder CLI fails the stage, and under the runner's fail-open policy that surfaces\nas a flagged `pipeline_error` rather than a hard block, so keep the CLI current."
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-002",
+          "severity": "OBSERVATION",
+          "location": "README.md, new paragraph after model-source-of-truth note",
+          "evidence": "\"Claude Sonnet 5 needs Claude Code v2.1.197+ and Claude Opus 4.8 needs v2.1.154+ (`claude update` to upgrade)\"",
+          "reasoning": "This introduces specific, precise version-number claims (v2.1.197, v2.1.154) that are not derivable from anything in the provided diff or repo context. If these numbers are inaccurate or will drift out of date, the doc becomes misleading. Not a scope violation on its own (docs are fair game), but worth verifying the numbers are sourced from an actual changelog/release note rather than asserted from memory."
+        },
+        {
+          "constraint_id": "C-007",
+          "severity": "OBSERVATION",
+          "location": "README.md, \"under the runner's fail-open policy that surfaces as a flagged pipeline_error rather than a hard block\"",
+          "evidence": "\"An older CLI fails the stage, and under the runner's fail-open policy that surfaces as a flagged pipeline_error rather than a hard block\"",
+          "reasoning": "This documentation describes pipeline error-handling behavior (fail-open, no hard block on a failed stage). The existing project docs describe a different mechanism: 'Parse failures retry once, then record as PIPELINE_ERROR in the ledger' (rule 12), without stating whether that ultimately allows or denies the change. If 'fail-open' here means the change is allowed through despite a stage failure, that description should be double-checked against actual runner.py behavior before treating it as authoritative documentation, since inaccurately documenting the pipeline's own fail-safe/fail-open semantics touches on governance integrity (even though this diff itself only edits README.md, not pipeline code)."
+        }
+      ],
+      "_tokens": {
+        "input": 8767,
+        "output": 1967
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "MITIGATE",
+          "argument": "The Challenger correctly flags that the version numbers (v2.1.197, v2.1.154) can't be verified from the diff alone, but explicitly concedes 'not a scope violation on its own.' C-002 governs file-boundary scope creep (e.g., editing oracle.py when the task says challenger.py), not factual precision of prose within an in-scope file. This is a README.md-only edit to a README.md-relevant section (the model-ID sourcing note), squarely within scope. The real concern here is documentation accuracy, which isn't a constitutional constraint in bench.json at all \u2014 there's no C-00X for 'doc claims must cite a changelog.' That said, the practical point is fair: presenting specific version floors as bare fact without a citation is weaker practice than the existing 'illustrative snapshot, not authoritative record' hedge used elsewhere in this same README section. I'd flag this as a documentation-quality nit worth a follow-up (e.g., 'per Claude Code release notes' or a link), not a governance violation.",
+          "evidence": "Existing README text this diff sits beside already models the right pattern: 'The \"Current model\" column is an illustrative snapshot for readers, not an authoritative record.' The new paragraph doesn't carry an equivalent hedge for the version numbers."
+        },
+        {
+          "finding_index": 1,
+          "position": "REBUT",
+          "argument": "C-007 applies to 'changes to the governance pipeline itself (challenger, defender, oracle, ledger, constitution)' that 'weaken enforcement, bypass verification, or disable logging.' This diff touches none of those files \u2014 it's README.md prose describing existing runner behavior, not a code change to runner.py. The Challenger's own reasoning concedes this: 'even though this diff itself only edits README.md, not pipeline code.' A documentation paragraph that potentially mischaracterizes existing behavior is a correctness question, not a self-cannibalization of the pipeline's actual enforcement mechanism \u2014 nothing about how the runner fails open or closed is altered by this edit. Whether the described fail-open semantics are precisely accurate against runner.py is worth a fact-check, but misdescribing behavior in prose (if that's even what happened here) doesn't itself weaken enforcement \u2014 the enforcement code is untouched either way.",
+          "evidence": "The diff's only touched file is README.md; runner.py, pipeline/, ledger/, and hooks/ are all unmodified. C-007's rule text is scoped to 'changes to the governance pipeline itself,' which this is not."
+        }
+      ],
+      "summary": "Both findings are labeled OBSERVATION rather than veto-triggering violations, and neither maps cleanly onto the constraint it's filed under (C-002 is about file-scope creep, not prose accuracy; C-007 is about code changes to the pipeline, not README prose describing it) \u2014 the change is a low-risk, in-scope documentation addition whose only real risk is unverified factual claims, which is a copyediting concern rather than a constitutional one.",
+      "_tokens": {
+        "input": 9465,
+        "output": 2352
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "This change modifies only README.md, adding a documentation paragraph about CLI version requirements for the claude_code provider path. Both Challenger findings are explicitly labeled OBSERVATION, not violations. On C-002, the Defender correctly argues (and the Challenger concedes) that the constraint governs file-boundary scope creep, not the factual precision of prose; the edit is confined to an in-scope README section about model-ID sourcing. On C-007, the Defender correctly argues (and the Challenger concedes with 'even though this diff itself only edits README.md, not pipeline code') that the constraint is scoped to code changes to challenger/defender/oracle/ledger/constitution files that weaken enforcement; documentation prose that merely describes runner behavior does not alter any enforcement mechanism. No new imports (C-003 N/A), no code/type changes (C-004 N/A), no secrets introduced (C-006 N/A), no ledger modification (C-008 N/A), no error-handling code (C-001 N/A). The change does not violate any veto-severity constraint.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error-handling code is touched; this is documentation prose."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is confined to README.md within the relevant model-sourcing section. Challenger's C-002 flag is an OBSERVATION about prose accuracy, which the Defender correctly shows is outside the file-scope-creep intent of C-002."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependency declarations changed."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No function signatures or type annotations affected."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "No credentials or secrets introduced; only version-number references and env-var names."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "runner.py and all pipeline/ledger/hooks files are unmodified. Per the Defender rebuttal, describing existing fail-open behavior in README prose does not weaken, bypass, or disable any enforcement mechanism."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger entries touched."
+        }
+      ],
+      "advisories": [
+        "Documentation accuracy (Challenger finding 0, Defender MITIGATE): the specific version floors (v2.1.197, v2.1.154) are asserted without a citation. Verify these against actual Claude Code release notes and consider adding a source reference or the same 'illustrative snapshot' hedge used elsewhere in this README section, to prevent drift.",
+        "Fail-open semantics (Challenger finding 1, Defender REBUT): confirm the new prose ('surfaces as a flagged pipeline_error rather than a hard block') accurately reflects runner.py behavior and reconciles with project rule 12 ('Parse failures retry once, then record as PIPELINE_ERROR'). This is a correctness fact-check, not a governance issue.",
+        "Possible factual inconsistency: the new text states 'BENCH_PROVIDER=claude_code (the default)', but the project CLAUDE.md documents the anthropic provider as the default when BENCH_PROVIDER is unset. Reconcile which provider is actually the default to avoid contradictory documentation."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 10499,
+        "output": 1613
+      }
+    },
+    "entry_hash": "c1bf04755f73dfdae152959e72f7f6e6c841807f2c6d24fab672a4f96a96574d"
+  },
+  {
+    "entry_id": "f3044428-7f3b-4f35-8e8c-6ee706fb53df",
+    "timestamp": "2026-07-16T06:33:32.079752+00:00",
+    "previous_hash": "c1bf04755f73dfdae152959e72f7f6e6c841807f2c6d24fab672a4f96a96574d",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "README.md",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "README.md",
+        "change_type": "modify",
+        "old_string": "With `BENCH_PROVIDER=claude_code` (the default), the local Claude Code CLI must\nbe recent enough to recognize these IDs: Claude Sonnet 5 needs Claude Code\nv2.1.197+ and Claude Opus 4.8 needs v2.1.154+ (`claude update` to upgrade). An\nolder CLI fails the stage, and under the runner's fail-open policy that surfaces\nas a flagged `pipeline_error` rather than a hard block, so keep the CLI current.",
+        "new_string": "With `BENCH_PROVIDER=claude_code` (set by the repo's `.claude/settings.json`),\nthe local Claude Code CLI must be recent enough to recognize these IDs: Claude\nSonnet 5 needs Claude Code v2.1.197+ and Claude Opus 4.8 needs v2.1.154+ (per\nClaude Code's model-config docs; run `claude update` to upgrade). An older CLI\nfails the stage, and under the runner's fail-open policy that surfaces as a\nflagged `pipeline_error` rather than a hard block, so keep the CLI current."
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 8792,
+        "output": 302
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change modifies a single prose paragraph in README.md, clarifying that BENCH_PROVIDER=claude_code is set by the repo's .claude/settings.json (rather than describing it as 'the default') and attributing the CLI version requirements to Claude Code's model-config docs. No source code, pipeline files, ledger files, dependencies, type annotations, error-handling logic, or secrets are touched. The Challenger returned CLEAR with no findings, and the Defender confirmed CLEAR. I independently reviewed the diff against all eight constraints and find no violation. C-007 (governance pipeline integrity) is not implicated because README.md is documentation, not challenger/defender/oracle/ledger/constitution code, and no enforcement, verification, or logging behavior is altered. C-002 (scope) is satisfied because the change is confined to the single documentation file consistent with a documentation edit.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No catch blocks or error-handling code in a README prose change."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change confined to a single paragraph in README.md; no out-of-boundary file modifications."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependencies added or altered."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No function signatures or type annotations affected."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new logic or branches; documentation only, no tests required."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "No secrets or credentials introduced; only version numbers and env var name in prose."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "README.md is not part of the pipeline code; no enforcement, verification, or logging behavior changed."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger entries touched; documentation edit only."
+        }
+      ],
+      "advisories": [
+        "The new text asserts BENCH_PROVIDER=claude_code is 'set by the repo's .claude/settings.json' rather than 'the default'. This is a factual accuracy claim not verifiable within this diff. Confirm .claude/settings.json actually sets this value so the docs do not drift from configuration."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 8831,
+        "output": 1115
+      }
+    },
+    "entry_hash": "e484728fe0d721965450b09229023f9fb180bf0c9d1602b30fc308c0895ea8b1"
+  },
+  {
+    "entry_id": "8788be1d-c2ff-4192-a20b-99a10bc9e36a",
+    "timestamp": "2026-07-16T06:33:37.067988+00:00",
+    "previous_hash": "e484728fe0d721965450b09229023f9fb180bf0c9d1602b30fc308c0895ea8b1",
+    "constitution_hash": "c29662f31eeaacee3b7abc76f553b87efb061b9dbe9e29a39147166e700a974e",
+    "change": {
+      "file": "README.md",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "README.md",
+        "change_type": "modify",
+        "old_string": "With `BENCH_PROVIDER=claude_code` (the default), the local Claude Code CLI must\nbe recent enough to recognize these IDs: Claude Sonnet 5 needs Claude Code\nv2.1.197+ and Claude Opus 4.8 needs v2.1.154+ (`claude update` to upgrade). An\nolder CLI fails the stage, and under the runner's fail-open policy that surfaces\nas a flagged `pipeline_error` rather than a hard block, so keep the CLI current.",
+        "new_string": "With `BENCH_PROVIDER=claude_code` (set by the repo's `.claude/settings.json`),\nthe local Claude Code CLI must be recent enough to recognize these IDs: Claude\nSonnet 5 needs Claude Code v2.1.197+ and Claude Opus 4.8 needs v2.1.154+ (per\nClaude Code's model-config docs; run `claude update` to upgrade). An older CLI\nfails the stage, and under the runner's fail-open policy that surfaces as a\nflagged `pipeline_error` rather than a hard block, so keep the CLI current."
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 8792,
+        "output": 555
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The proposed change is a documentation-only edit to README.md. It corrects a factual claim about how BENCH_PROVIDER=claude_code is selected (from 'the default' to 'set by the repo's .claude/settings.json', which better aligns with CLAUDE.md's statement that the anthropic provider is the default when BENCH_PROVIDER is unset) and adds a reference to Claude Code's model-config docs. The Challenger reported CLEAR with no findings, and the Defender confirmed CONFIRM_CLEAR. I independently evaluated the change against the full constitution. No code paths, error-handling blocks, imports, type annotations, secrets, pipeline logic, or ledger entries are touched. C-007 is not implicated because README.md is documentation, not a governance pipeline component (challenger/defender/oracle/ledger/constitution). No constraint is violated.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error-handling code is modified; change is documentation text only."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "The only file modified is README.md, consistent with a documentation edit. No out-of-scope files touched."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependencies added or changed."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No function signatures or type annotations involved."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "No credentials or secrets present; only doc text and version numbers."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "README.md is not part of the governance pipeline (challenger/defender/oracle/ledger/constitution)."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger entries modified, deleted, or overwritten."
+        }
+      ],
+      "advisories": [
+        "The revised text asserts specific CLI version requirements (v2.1.197+, v2.1.154+) and attributes them to 'Claude Code's model-config docs.' Ensure these version numbers remain accurate against the upstream docs to avoid documentation drift."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 8831,
+        "output": 1191
+      }
+    },
+    "entry_hash": "66b8fd55ecbda6a9d59aa5e6bd2f5c269060a5a94ff629e82e35c3ec12c7e8fa"
   }
 ]
