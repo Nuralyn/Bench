@@ -9,6 +9,7 @@ Run: python -m unittest tests.test_api_extended -v
 import os
 import sys
 import unittest
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -197,7 +198,7 @@ class AnthropicCallTests(unittest.TestCase):
         self, mock_cls: MagicMock
     ) -> None:
         mock_response: MagicMock = MagicMock()
-        mock_response.content = [MagicMock(text='{"result": true}')]
+        mock_response.content = [MagicMock(type="text", text='{"result": true}')]
         mock_response.usage.input_tokens = 50
         mock_response.usage.output_tokens = 100
         mock_cls.return_value.messages.create.return_value = mock_response
@@ -232,6 +233,68 @@ class AnthropicCallTests(unittest.TestCase):
             _anthropic_call(
                 "model", "system", [{"role": "user", "content": "hi"}], 4096
             )
+
+
+    @patch("utils.api.anthropic.Anthropic")
+    def test_skips_thinking_block_and_extracts_text(
+        self, mock_cls: MagicMock
+    ) -> None:
+        # Sonnet 5 runs adaptive thinking by default, so a thinking block can
+        # precede the text block; the reply body must still be extracted.
+        mock_response: MagicMock = MagicMock()
+        mock_response.content = [
+            SimpleNamespace(type="thinking", thinking="deliberating"),
+            SimpleNamespace(type="text", text='{"status": "CLEAR"}'),
+        ]
+        mock_response.usage.input_tokens = 5
+        mock_response.usage.output_tokens = 7
+        mock_cls.return_value.messages.create.return_value = mock_response
+
+        text, in_tok, out_tok = _anthropic_call(
+            "model", "system", [{"role": "user", "content": "hi"}], 4096
+        )
+        self.assertEqual(text, '{"status": "CLEAR"}')
+        self.assertEqual(in_tok, 5)
+        self.assertEqual(out_tok, 7)
+
+    @patch("utils.api.anthropic.Anthropic")
+    def test_concatenates_multiple_text_blocks(
+        self, mock_cls: MagicMock
+    ) -> None:
+        mock_response: MagicMock = MagicMock()
+        mock_response.content = [
+            SimpleNamespace(type="text", text='{"sta'),
+            SimpleNamespace(type="text", text='tus": "CLEAR"}'),
+        ]
+        mock_response.usage.input_tokens = 1
+        mock_response.usage.output_tokens = 1
+        mock_cls.return_value.messages.create.return_value = mock_response
+
+        text, _in_tok, _out_tok = _anthropic_call(
+            "model", "system", [{"role": "user", "content": "hi"}], 4096
+        )
+        self.assertEqual(text, '{"status": "CLEAR"}')
+
+    @patch("utils.api.anthropic.Anthropic")
+    def test_non_text_block_with_text_attr_is_ignored(
+        self, mock_cls: MagicMock
+    ) -> None:
+        # A non-"text" block that happens to carry a .text field must not leak
+        # into the governed reply body.
+        mock_response: MagicMock = MagicMock()
+        mock_response.content = [
+            SimpleNamespace(type="citation", text="LEAK"),
+            SimpleNamespace(type="text", text='{"status": "CLEAR"}'),
+        ]
+        mock_response.usage.input_tokens = 1
+        mock_response.usage.output_tokens = 1
+        mock_cls.return_value.messages.create.return_value = mock_response
+
+        text, _in_tok, _out_tok = _anthropic_call(
+            "model", "system", [{"role": "user", "content": "hi"}], 4096
+        )
+        self.assertEqual(text, '{"status": "CLEAR"}')
+        self.assertNotIn("LEAK", text)
 
 
 if __name__ == "__main__":

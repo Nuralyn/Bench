@@ -246,8 +246,22 @@ def _anthropic_call(
         text: str = ""
         content = getattr(response, "content", None)
         if content:
-            first = content[0]
-            text = getattr(first, "text", "") or ""
+            # Concatenate the text blocks. Adaptive-thinking models (Sonnet 5
+            # runs adaptive thinking by default when `thinking` is unset) can
+            # return a thinking block as content[0]; reading content[0].text
+            # would then yield "" and force a spurious PARSE_FAILURE that the
+            # runner fails open into a PASS. Anchor selection to the documented
+            # "text" block type (and require non-empty text) so thinking,
+            # tool_use, or any future non-text block cannot leak into the
+            # governed reply body.
+            texts: list[str] = []
+            for block in content:
+                if getattr(block, "type", None) != "text":
+                    continue
+                block_text = getattr(block, "text", "")
+                if isinstance(block_text, str) and block_text:
+                    texts.append(block_text)
+            text = "".join(texts)
 
         usage = getattr(response, "usage", None)
         input_tokens: int = (
