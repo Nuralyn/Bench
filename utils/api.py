@@ -35,10 +35,29 @@ from typing import Any
 import anthropic
 
 
-CHALLENGER_MODEL: str = "claude-sonnet-4-6"
-DEFENDER_MODEL: str = "claude-sonnet-4-6"
-ORACLE_MODEL: str = "claude-opus-4-7"
+# Single source of truth for pipeline model IDs (CLAUDE.md and README reference
+# these constants by name, not by value, so the docs cannot drift). Each is the
+# exact first-party Anthropic model ID: current-generation aliases are complete
+# as-is, so no dated suffix is used except for models that publish dated
+# snapshots (see UTILITY_MODEL). Verify each ID resolves on the target
+# provider before shipping a change.
+CHALLENGER_MODEL: str = "claude-sonnet-5"
+DEFENDER_MODEL: str = "claude-sonnet-5"
+ORACLE_MODEL: str = "claude-opus-4-8"
 UTILITY_MODEL: str = "claude-haiku-4-5-20251001"
+
+# OpenRouter publishes Anthropic slugs with a dotted version (for example
+# "anthropic/claude-opus-4.8"), while the constants above use the first-party
+# hyphenated IDs. Map the models the pipeline dispatches through call_model to
+# their exact OpenRouter slugs. Anything unlisted (including the reserved,
+# currently-uninvoked UTILITY_MODEL) falls back to the bare "anthropic/"
+# prefix, which is only correct when the first-party ID and the OpenRouter slug
+# coincide (as they do for claude-sonnet-5). A wrong slug would make the stage
+# return API_ERROR, which the runner fails open into a PASS.
+_OPENROUTER_SLUGS: dict[str, str] = {
+    "claude-sonnet-5": "anthropic/claude-sonnet-5",
+    "claude-opus-4-8": "anthropic/claude-opus-4.8",
+}
 
 _PROVIDER_ANTHROPIC: str = "anthropic"
 _PROVIDER_OPENROUTER: str = "openrouter"
@@ -77,7 +96,7 @@ def call_model(
     model: str,
     system_prompt: str,
     user_content: str,
-    max_tokens: int = 4096,
+    max_tokens: int = 8192,  # Sonnet 5 stages spend part of this on adaptive thinking
 ) -> dict[str, Any]:
     """Call the configured LLM provider expecting a JSON-object response.
 
@@ -240,8 +259,22 @@ def _anthropic_call(
         text: str = ""
         content = getattr(response, "content", None)
         if content:
-            first = content[0]
-            text = getattr(first, "text", "") or ""
+            # Concatenate the text blocks. Adaptive-thinking models (Sonnet 5
+            # runs adaptive thinking by default when `thinking` is unset) can
+            # return a thinking block as content[0]; reading content[0].text
+            # would then yield "" and force a spurious PARSE_FAILURE that the
+            # runner fails open into a PASS. Anchor selection to the documented
+            # "text" block type (and require non-empty text) so thinking,
+            # tool_use, or any future non-text block cannot leak into the
+            # governed reply body.
+            texts: list[str] = []
+            for block in content:
+                if getattr(block, "type", None) != "text":
+                    continue
+                block_text = getattr(block, "text", "")
+                if isinstance(block_text, str) and block_text:
+                    texts.append(block_text)
+            text = "".join(texts)
 
         usage = getattr(response, "usage", None)
         input_tokens: int = (
@@ -278,7 +311,7 @@ def _openrouter_call(
             "openrouter: openai SDK not installed; pip install openai"
         ) from e
 
-    routed_model: str = f"anthropic/{model}"
+    routed_model: str = _OPENROUTER_SLUGS.get(model, f"anthropic/{model}")
     full_messages: list[dict[str, str]] = [
         {"role": "system", "content": system_prompt},
         *messages,
