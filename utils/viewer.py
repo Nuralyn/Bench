@@ -457,6 +457,9 @@ _JS: str = """
   }
 
   function verdictOf(entry) {
+    if (entry && typeof entry.verdict === 'string' && entry.verdict) {
+      return entry.verdict;
+    }
     const o = entry && entry.oracle;
     if (o && typeof o === 'object' && typeof o.verdict === 'string') {
       return o.verdict;
@@ -466,6 +469,7 @@ _JS: str = """
 
   function hasPipelineError(entry) {
     if (!entry) return false;
+    if (entry.pipeline_error) return true;
     const stages = ['challenger', 'defender', 'oracle'];
     for (let i = 0; i < stages.length; i++) {
       const s = entry[stages[i]];

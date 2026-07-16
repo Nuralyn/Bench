@@ -179,7 +179,7 @@ class MainFlowTests(unittest.TestCase):
         self.assertEqual(code, 0)
         mock_pipeline.assert_called_once()
 
-    def test_pipeline_import_failure_fails_open(self) -> None:
+    def test_pipeline_import_failure_fails_closed(self) -> None:
         original = _hook_module.run_governance_pipeline
         try:
             _hook_module.run_governance_pipeline = None
@@ -191,25 +191,44 @@ class MainFlowTests(unittest.TestCase):
             self.assertEqual(code, 0)
             resp: dict = json.loads(output)
             self.assertEqual(
-                resp["hookSpecificOutput"]["permissionDecision"], "allow"
+                resp["hookSpecificOutput"]["permissionDecision"], "deny"
             )
         finally:
             _hook_module.run_governance_pipeline = original
 
-    def test_invalid_json_stdin_fails_open(self) -> None:
+    def test_invalid_json_stdin_fails_closed(self) -> None:
         code, output = self._run_main_with_stdin("{{{bad json")
         self.assertEqual(code, 0)
         resp: dict = json.loads(output)
         self.assertEqual(
-            resp["hookSpecificOutput"]["permissionDecision"], "allow"
+            resp["hookSpecificOutput"]["permissionDecision"], "deny"
         )
 
-    def test_non_dict_payload_fails_open(self) -> None:
+    def test_non_dict_payload_fails_closed(self) -> None:
         code, output = self._run_main_with_stdin("[1, 2, 3]")
         self.assertEqual(code, 0)
         resp: dict = json.loads(output)
         self.assertEqual(
-            resp["hookSpecificOutput"]["permissionDecision"], "allow"
+            resp["hookSpecificOutput"]["permissionDecision"], "deny"
+        )
+
+    @patch.object(_hook_module, "run_governance_pipeline")
+    def test_pipeline_exception_fails_closed(
+        self, mock_pipeline: MagicMock
+    ) -> None:
+        # An unexpected exception from the pipeline hits the outer handler,
+        # which now denies (fail closed) instead of allowing, while still
+        # returning exit 0 per Absolute Rule 6.
+        mock_pipeline.side_effect = RuntimeError("boom")
+        payload: str = json.dumps({
+            "tool_name": "Write",
+            "tool_input": {"file_path": "test.py", "content": "hello"},
+        })
+        code, output = self._run_main_with_stdin(payload)
+        self.assertEqual(code, 0)
+        resp: dict = json.loads(output)
+        self.assertEqual(
+            resp["hookSpecificOutput"]["permissionDecision"], "deny"
         )
 
     @patch.object(_hook_module, "run_governance_pipeline")

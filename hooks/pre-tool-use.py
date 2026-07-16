@@ -10,10 +10,12 @@ Invariants:
   * Exit code is ALWAYS 0. Flow control is via JSON, not exit codes.
     (Exit-2 would cause Claude Code to stall.)
   * All structured output goes to stdout. All diagnostics go to stderr.
-  * The hook fails open: any internal error returns 'allow' so a broken
-    governance layer never blocks the developer. Failures are logged to
-    stderr for the developer to notice. The runner also fails open on its
-    own internal errors; this wrapper is defense in depth.
+  * The hook fails closed: if governance cannot run (pipeline import
+    failure) or the hook itself errors, the change is denied, not allowed,
+    so a broken or exploited pipeline cannot wave changes through. Failures
+    are logged to stderr. The sole exception is the reentrancy guard for a
+    Bench-spawned governance subprocess (the claude_code provider), which is
+    allowed so the pipeline does not recurse into itself and deadlock.
 """
 
 import json
@@ -321,22 +323,34 @@ def main() -> int:
         diff_info: dict[str, Any] = extract_diff_info(tool_name, tool_input)
         if run_governance_pipeline is None:
             verdict: dict[str, Any] = {
-                "verdict": "PASS",
-                "reason": "Pipeline unavailable (import failed) — failing open",
-                "remediation": None,
+                "verdict": "VETO",
+                "reason": (
+                    "Governance pipeline is unavailable (import failed); "
+                    "cannot adjudicate. Failing closed."
+                ),
+                "remediation": (
+                    "The pipeline failed to import (see stderr). Fix the import "
+                    "error, then retry. Changes are blocked until governance can "
+                    "run. Emergency recovery is a human editing files directly, "
+                    "outside Claude Code's governed tools."
+                ),
             }
         else:
             verdict = run_governance_pipeline(tool_name, tool_input, diff_info)
         response: dict[str, Any] = build_response_from_verdict(verdict)
 
-    except Exception as e:  # fail-open: governance must never block on its own bug
+    except Exception as e:  # fail-closed: an unadjudicated change must not pass
         print(
-            f"[bench hook] internal error, failing open: {type(e).__name__}: {e}",
+            f"[bench hook] internal error, failing closed: {type(e).__name__}: {e}",
             file=sys.stderr,
         )
         traceback.print_exc(file=sys.stderr)
-        response = build_allow_response(
-            "Bench governance: hook error, failing open. See stderr."
+        response = build_deny_response(
+            "BENCH VETO: governance hook error; the change could not be "
+            "adjudicated. Failing closed.",
+            "Remediation: the hook raised an unexpected error (see stderr). Fix "
+            "it, then retry. Emergency recovery is a human editing files "
+            "directly, outside Claude Code's governed tools.",
         )
 
     json.dump(response, sys.stdout)

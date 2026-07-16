@@ -23,7 +23,12 @@ from pipeline.constitution import (
     ConstitutionError,
     load_constitution_snapshot,
 )
-from utils.stats import compute_ledger_stats, entry_has_pipeline_error, pct
+from utils.stats import (
+    compute_ledger_stats,
+    entry_has_pipeline_error,
+    entry_verdict,
+    pct,
+)
 from utils.viewer import generate_viewer_html
 
 _HASH_PREFIX_LEN: int = 12
@@ -80,8 +85,7 @@ def cmd_ledger(show_all: bool = False, vetoes_only: bool = False) -> int:
     if vetoes_only:
         filtered = [
             e for e in filtered
-            if isinstance(e.get("oracle"), dict)
-            and e["oracle"].get("verdict") == "VETO"
+            if entry_verdict(e) == "VETO"
         ]
 
     if not filtered:
@@ -233,8 +237,10 @@ def _print_entry_line(entry: dict) -> None:
 
     oracle: Any = entry.get("oracle")
     oracle_dict: dict = oracle if isinstance(oracle, dict) else {}
-    verdict: str = str(oracle_dict.get("verdict") or "").strip()
+    verdict: str = str(entry_verdict(entry) or "").strip()
     if not verdict:
+        # No recorded verdict: an older fail-open entry (pipeline error with
+        # no adjudicated verdict) reads as FAIL-OPEN for historical accuracy.
         if entry_has_pipeline_error(entry):
             verdict = "FAIL-OPEN"
         else:
