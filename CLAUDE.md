@@ -14,7 +14,7 @@ governance pipeline. This is non-negotiable.
 ## Architecture
 
 ```
-PreToolUse Hook -> Challenger (Sonnet 4.6) -> Defender (Sonnet 4.6) -> Oracle (Opus 4.7) -> Ledger
+PreToolUse Hook -> Challenger (Sonnet) -> Defender (Sonnet) -> Oracle (Opus) -> Ledger
 ```
 
 - Hook intercepts Write/Edit/MultiEdit tool calls
@@ -35,9 +35,9 @@ bench/
   hooks/
     pre-tool-use.py       # Hook entry point
   pipeline/
-    challenger.py         # Adversarial analysis (Sonnet 4.6)
-    defender.py           # Soundness argument (Sonnet 4.6)
-    oracle.py             # Binding verdict (Opus 4.7)
+    challenger.py         # Adversarial analysis (Sonnet)
+    defender.py           # Soundness argument (Sonnet)
+    oracle.py             # Binding verdict (Opus)
     constitution.py       # Load, snapshot, hash
     runner.py             # Sequential orchestration
   ledger/
@@ -59,12 +59,21 @@ bench/
 
 ## Models
 
-| Role       | Model      | Purpose                          |
-|------------|------------|----------------------------------|
-| Challenger | Sonnet 4.6 | Find problems in proposed change |
-| Defender   | Sonnet 4.6 | Argue soundness of the change    |
-| Oracle     | Opus 4.7   | Issue binding PASS or VETO       |
-| Utility    | Haiku 4.5  | Reserved for future summarization (utils/formatting.py is currently stdlib-only) |
+| Role       | Constant (in `utils/api.py`) | Purpose                          |
+|------------|------------------------------|----------------------------------|
+| Challenger | `CHALLENGER_MODEL`           | Find problems in proposed change |
+| Defender   | `DEFENDER_MODEL`             | Argue soundness of the change    |
+| Oracle     | `ORACLE_MODEL`               | Issue binding PASS or VETO       |
+| Utility    | `UTILITY_MODEL`              | Reserved for future summarization (utils/formatting.py is currently stdlib-only) |
+
+`utils/api.py` is the single source of truth for model IDs. This document names
+the constants rather than restating version strings, so a model change is a
+single-file edit to `utils/api.py` and cannot drift from the docs. Each constant
+holds the exact first-party Anthropic model ID. For current-generation models
+these are bare aliases (for example `claude-sonnet-5`, `claude-opus-4-8`), which
+are complete as-is; a dated suffix is used only for models that publish dated
+snapshots (as with the reserved `UTILITY_MODEL`). Confirm each ID resolves on the
+target provider(s) before shipping.
 
 Models are Anthropic by default. The wrapper in utils/api.py also supports
 OpenRouter as a routing backend (selected via the BENCH_PROVIDER env var) so
@@ -127,8 +136,9 @@ The constitution lives in bench.json. Current constraints:
 ## API Configuration
 
 The LLM wrapper lives at `utils/api.py` and exposes a single
-`call_model(model, system_prompt, user_content, max_tokens=4096) -> dict`
-function. The provider is selected at call time by the `BENCH_PROVIDER`
+`call_model(model, system_prompt, user_content, max_tokens=...) -> dict`
+function (the `max_tokens` default is defined in `utils/api.py`, the single
+source of truth). The provider is selected at call time by the `BENCH_PROVIDER`
 environment variable; the function signature is identical across all backends.
 
 ```python
@@ -142,8 +152,9 @@ client = openai.OpenAI(
     base_url="https://openrouter.ai/api/v1",
     api_key=os.environ["OPENROUTER_API_KEY"],
 )
-# Model strings are auto-prefixed with "anthropic/" on this path,
-# e.g. "claude-sonnet-4-6" -> "anthropic/claude-sonnet-4-6".
+# Model strings are routed to their OpenRouter slug on this path. Most map to
+# "anthropic/<id>", but ids whose OpenRouter slug differs (e.g. the dotted
+# "anthropic/claude-opus-4.8") are translated via a small map in utils/api.py.
 # The openai SDK is a soft dependency — install it only if you set
 # BENCH_PROVIDER=openrouter.
 
@@ -157,11 +168,10 @@ client = openai.OpenAI(
 # adds no dependency. Per-stage timeout is BENCH_CLAUDE_TIMEOUT seconds
 # (default 120).
 
-# Model strings (same across all providers; routing handles any prefix)
-CHALLENGER_MODEL = "claude-sonnet-4-6"
-DEFENDER_MODEL = "claude-sonnet-4-6"
-ORACLE_MODEL = "claude-opus-4-7"
-UTILITY_MODEL = "claude-haiku-4-5-20251001"
+# Model strings live in utils/api.py as CHALLENGER_MODEL, DEFENDER_MODEL,
+# ORACLE_MODEL, and UTILITY_MODEL (the single source of truth). This section
+# does not restate the literal IDs, so they cannot drift. Routing handles any
+# prefix (the openrouter path prepends "anthropic/").
 ```
 
 ## Hook Response Format

@@ -123,12 +123,24 @@ Not all tool inputs are simple text edits. Bench handles three edge cases:
 
 ## Models
 
-| Role       | Model      | Purpose                     |
-|------------|------------|-----------------------------|
-| Challenger | Sonnet 4.6 | Adversarial analysis        |
-| Defender   | Sonnet 4.6 | Soundness argument          |
-| Oracle     | Opus 4.7   | Binding verdict             |
-| Utility    | Haiku 4.5  | Reserved for future summarization (formatting is currently stdlib-only) |
+| Role       | Constant (in `utils/api.py`) | Current model    | Purpose                     |
+|------------|------------------------------|------------------|-----------------------------|
+| Challenger | `CHALLENGER_MODEL`           | Claude Sonnet 5  | Adversarial analysis        |
+| Defender   | `DEFENDER_MODEL`             | Claude Sonnet 5  | Soundness argument          |
+| Oracle     | `ORACLE_MODEL`               | Claude Opus 4.8  | Binding verdict             |
+| Utility    | `UTILITY_MODEL`              | Claude Haiku 4.5 | Reserved for future summarization (formatting is currently stdlib-only) |
+
+`utils/api.py` is the single source of truth for model IDs. The "Current model"
+column is an illustrative snapshot for readers, not an authoritative record;
+refresh it when you change a model. The exact IDs live in the constants named
+above.
+
+With `BENCH_PROVIDER=claude_code` (set by the repo's `.claude/settings.json`),
+the local Claude Code CLI must be recent enough to recognize these IDs: Claude
+Sonnet 5 needs Claude Code v2.1.197+ and Claude Opus 4.8 needs v2.1.154+ (per
+Claude Code's model-config docs; run `claude update` to upgrade). An older CLI
+fails the stage, and under the runner's fail-open policy that surfaces as a
+flagged `pipeline_error` rather than a hard block, so keep the CLI current.
 
 ## Built With
 

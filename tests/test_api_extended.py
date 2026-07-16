@@ -9,6 +9,7 @@ Run: python -m unittest tests.test_api_extended -v
 import os
 import sys
 import unittest
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -21,6 +22,7 @@ if str(_REPO_ROOT) not in sys.path:
 from utils.api import (  # noqa: E402
     _ProviderError,
     _anthropic_call,
+    _openrouter_call,
     _try_parse_dict,
     call_model,
     strip_code_fences,
@@ -197,7 +199,7 @@ class AnthropicCallTests(unittest.TestCase):
         self, mock_cls: MagicMock
     ) -> None:
         mock_response: MagicMock = MagicMock()
-        mock_response.content = [MagicMock(text='{"result": true}')]
+        mock_response.content = [MagicMock(type="text", text='{"result": true}')]
         mock_response.usage.input_tokens = 50
         mock_response.usage.output_tokens = 100
         mock_cls.return_value.messages.create.return_value = mock_response
@@ -232,6 +234,112 @@ class AnthropicCallTests(unittest.TestCase):
             _anthropic_call(
                 "model", "system", [{"role": "user", "content": "hi"}], 4096
             )
+
+
+    @patch("utils.api.anthropic.Anthropic")
+    def test_skips_thinking_block_and_extracts_text(
+        self, mock_cls: MagicMock
+    ) -> None:
+        # Sonnet 5 runs adaptive thinking by default, so a thinking block can
+        # precede the text block; the reply body must still be extracted.
+        mock_response: MagicMock = MagicMock()
+        mock_response.content = [
+            SimpleNamespace(type="thinking", thinking="deliberating"),
+            SimpleNamespace(type="text", text='{"status": "CLEAR"}'),
+        ]
+        mock_response.usage.input_tokens = 5
+        mock_response.usage.output_tokens = 7
+        mock_cls.return_value.messages.create.return_value = mock_response
+
+        text, in_tok, out_tok = _anthropic_call(
+            "model", "system", [{"role": "user", "content": "hi"}], 4096
+        )
+        self.assertEqual(text, '{"status": "CLEAR"}')
+        self.assertEqual(in_tok, 5)
+        self.assertEqual(out_tok, 7)
+
+    @patch("utils.api.anthropic.Anthropic")
+    def test_concatenates_multiple_text_blocks(
+        self, mock_cls: MagicMock
+    ) -> None:
+        mock_response: MagicMock = MagicMock()
+        mock_response.content = [
+            SimpleNamespace(type="text", text='{"sta'),
+            SimpleNamespace(type="text", text='tus": "CLEAR"}'),
+        ]
+        mock_response.usage.input_tokens = 1
+        mock_response.usage.output_tokens = 1
+        mock_cls.return_value.messages.create.return_value = mock_response
+
+        text, _in_tok, _out_tok = _anthropic_call(
+            "model", "system", [{"role": "user", "content": "hi"}], 4096
+        )
+        self.assertEqual(text, '{"status": "CLEAR"}')
+
+    @patch("utils.api.anthropic.Anthropic")
+    def test_non_text_block_with_text_attr_is_ignored(
+        self, mock_cls: MagicMock
+    ) -> None:
+        # A non-"text" block that happens to carry a .text field must not leak
+        # into the governed reply body.
+        mock_response: MagicMock = MagicMock()
+        mock_response.content = [
+            SimpleNamespace(type="citation", text="LEAK"),
+            SimpleNamespace(type="text", text='{"status": "CLEAR"}'),
+        ]
+        mock_response.usage.input_tokens = 1
+        mock_response.usage.output_tokens = 1
+        mock_cls.return_value.messages.create.return_value = mock_response
+
+        text, _in_tok, _out_tok = _anthropic_call(
+            "model", "system", [{"role": "user", "content": "hi"}], 4096
+        )
+        self.assertEqual(text, '{"status": "CLEAR"}')
+        self.assertNotIn("LEAK", text)
+
+
+class OpenRouterSlugTests(unittest.TestCase):
+    """The openrouter path must send OpenRouter's published slug (dotted
+    version), not the first-party hyphenated id, or the stage returns an
+    API_ERROR that the runner fails open into a PASS."""
+
+    def _routed_model(self, model: str) -> str:
+        fake_openai: MagicMock = MagicMock()
+        fake_openai.OpenAIError = Exception
+        response: MagicMock = MagicMock()
+        response.choices = [
+            MagicMock(message=MagicMock(content='{"ok": true}'))
+        ]
+        response.usage.prompt_tokens = 1
+        response.usage.completion_tokens = 1
+        create = fake_openai.OpenAI.return_value.chat.completions.create
+        create.return_value = response
+        with patch.dict(sys.modules, {"openai": fake_openai}), patch.dict(
+            os.environ, {"OPENROUTER_API_KEY": "test-key"}
+        ):
+            _openrouter_call(
+                model, "sys", [{"role": "user", "content": "hi"}], 4096
+            )
+        _args, kwargs = create.call_args
+        return kwargs["model"]
+
+    def test_opus_maps_to_dotted_openrouter_slug(self) -> None:
+        self.assertEqual(
+            self._routed_model("claude-opus-4-8"),
+            "anthropic/claude-opus-4.8",
+        )
+
+    def test_sonnet_5_maps_to_its_slug(self) -> None:
+        self.assertEqual(
+            self._routed_model("claude-sonnet-5"),
+            "anthropic/claude-sonnet-5",
+        )
+
+    def test_unmapped_model_falls_back_to_prefix(self) -> None:
+        self.assertEqual(
+            self._routed_model("claude-future-9"),
+            "anthropic/claude-future-9",
+        )
 
 
 if __name__ == "__main__":
