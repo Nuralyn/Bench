@@ -25,23 +25,28 @@ import sys
 import traceback
 from typing import Any
 
-from ledger.chain import load_ledger
+from ledger.chain import load_ledger, resolve_ledger_path
 from ledger.verify import verify_chain
 from utils.stats import compute_ledger_stats, pct
 
-_DEFAULT_LEDGER_PATH: str = "ledger/bench-ledger.json"
 _HASH_SHORT_LEN: int = 12
 
 
-def generate_viewer_html(ledger_path: str = _DEFAULT_LEDGER_PATH) -> str:
+def generate_viewer_html(ledger_path: str | None = None) -> str:
     """Return a complete self-contained HTML string rendering the ledger.
+
+    ``ledger_path`` defaults to ``resolve_ledger_path()`` so the viewer
+    renders the same project-scoped chain the writer appends to.
 
     On any unexpected error, logs to stderr with a full traceback and
     returns a minimal error HTML page — never raises.
     """
     try:
-        entries: list[dict] = load_ledger(ledger_path)
-        chain_status: dict = _compute_chain_status(ledger_path)
+        resolved: str = (
+            ledger_path if ledger_path is not None else resolve_ledger_path()
+        )
+        entries: list[dict] = load_ledger(resolved)
+        chain_status: dict = _compute_chain_status(resolved)
         stats: dict = compute_ledger_stats(entries)
         return _build_html(stats, chain_status, entries)
     except Exception as e:
