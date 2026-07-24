@@ -40,8 +40,15 @@ See [bench.json](bench.json) for the current constraints.
 
 ## Self-Governance
 
-This tool was built under its own governance. Every change in this codebase
-was challenged, defended, ruled on, and recorded by Bench itself.
+This tool was built under its own governance. Every change authored through
+Claude Code's file tools was challenged, defended, ruled on, and recorded by
+Bench itself.
+
+One category is outside that boundary and is named here rather than glossed
+over: bot-authored dependency PRs. Dependabot edits `requirements.txt` on
+GitHub, which never reaches the PreToolUse hook, so those changes merge on a
+human decision and carry no ledger entry. Bench governs what a model proposes
+through the tools it hooks, not everything that can reach a branch.
 
 During the build, Bench vetoed a change to its own governance pipeline code
 under constraint C-007 (governance pipeline integrity). The change would have
