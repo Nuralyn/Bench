@@ -368,7 +368,6 @@ class TestFallbackExternalNormalization(unittest.TestCase):
         import os
 
         original = _hook_module._build_diff_info_hardened
-        original_cwd: str = os.getcwd()
         try:
             _hook_module._build_diff_info_hardened = None
             original_relpath = os.path.relpath
