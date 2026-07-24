@@ -121,6 +121,20 @@ Not all tool inputs are simple text edits. Bench handles three edge cases:
 - **Large diffs** exceeding 300 lines are truncated while preserving governance-critical lines: imports, function/class signatures, and exception handlers.
 - **New file creation** is typed as `change_type: "create"` so the pipeline knows it is reviewing a creation, not a modification.
 
+### Project-Scoped Ledger
+
+Bench's hook can be registered globally in `~/.claude/settings.json`, which governs every project on the machine. Each project's verdicts land in that project's own ledger, not in Bench's:
+
+| Working directory | Ledger |
+|---|---|
+| Inside the Bench repo | `ledger/bench-ledger.json` (Bench governing itself) |
+| Any other project | `<project>/.bench/bench-ledger.json` |
+| `BENCH_LEDGER_PATH` set | That path, overriding both |
+
+`ledger-meta.json` is written alongside whichever ledger is selected, so every chain carries its own anchor and verifies independently. `python -m cli verify` prints which ledger it read, and validates that chain only: per-project chains under `.bench/` are verified by running the command from that project.
+
+This matters because a ledger records the full diff of every change it governs. Routing all projects into one chain mixes unrelated codebases together, and if that chain is committed to a public repository, it publishes them. Set `BENCH_LEDGER_PATH` if you deliberately want one central ledger across projects.
+
 ## Models
 
 | Role       | Constant (in `utils/api.py`) | Current model    | Purpose                     |

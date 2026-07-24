@@ -1,0 +1,21 @@
+version: 2
+
+updates:
+  # Python runtime dependencies (requirements.txt).
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "[bench] deps:"
+
+  # GitHub Actions used by .github/workflows. Keeps the CI supply chain from
+  # silently aging into unmaintained action versions.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "[bench] ci:"
