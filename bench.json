@@ -1,6 +1,6 @@
 {
   "constitution": "bench-v1",
-  "version": 2,
+  "version": 4,
   "author": "Nuralyn LLC",
   "created": "2026-04-21T00:00:00Z",
   "description": "Constitutional constraints for the Bench governance pipeline",
@@ -33,9 +33,9 @@
       "id": "C-004",
       "name": "Type Safety Preservation",
       "scope": "type-safety",
-      "rule": "Functions must not remove or weaken existing type annotations. Adding 'Any' type or removing a typed return annotation is a violation.",
+      "rule": "Functions must not remove or weaken existing type annotations. The following are violations: replacing an annotation with a less precise one; deleting a parameter or return annotation; and introducing a bare 'Any' (x: Any, or -> Any) where the value's shape is known at that point and expressible in the type system. The following are permitted: parameterized generics that contain 'Any' for genuinely heterogeneous data, such as dict[str, Any] for a parsed JSON object, since they are strictly more precise than the bare 'dict' or 'Any' they would otherwise be; and a bare 'Any' where the value really is unconstrained. Prefer 'object' over a bare 'Any' for a value that is only stored or passed through, because 'object' forces an explicit narrowing check at the point of use. The operative test is whether precision that was available has been discarded, not whether the token 'Any' appears in the diff.",
       "severity": "veto",
-      "rationale": "Type annotations are governance infrastructure. Weakening them degrades the ability to reason about correctness."
+      "rationale": "Type annotations are governance infrastructure. Weakening them degrades the ability to reason about correctness. This constraint targets discarded precision rather than the token 'Any'. An earlier phrasing read literally enough to veto dict[str, Any], an idiom this codebase uses in more than sixty places to describe parsed JSON accurately, which meant the rule condemned the correct construct and the codebase it governs. A constraint that fires on correct code trains authors to route around governance, and that costs more than the imprecision it was meant to prevent."
     },
     {
       "id": "C-005",
