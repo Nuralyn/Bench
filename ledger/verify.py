@@ -19,26 +19,32 @@ from pathlib import Path
 from typing import Any
 
 from ledger.chain import META_FILENAME as _META_FILENAME
-from ledger.chain import compute_entry_hash
+from ledger.chain import compute_entry_hash, resolve_ledger_path
 
-_DEFAULT_LEDGER_PATH: str = "ledger/bench-ledger.json"
 _GENESIS_MARKER: str = "GENESIS"
 
 
-def verify_chain(path: str = _DEFAULT_LEDGER_PATH) -> dict:
+def verify_chain(path: str | None = None) -> dict:
     """Walk the ledger at ``path`` and return a verification summary.
+
+    ``path`` defaults to ``resolve_ledger_path()`` so the auditor inspects
+    the same project-scoped chain the writer appends to. Sharing the
+    resolver is not a break with this module's independence: the auditor
+    still recomputes every hash itself and never calls ``load_ledger``.
+    Agreeing on *which* file to audit is a precondition for auditing it.
 
     Returns a dict describing either a valid chain (with summary stats)
     or the first detected failure (with the index and the expected vs.
     found values). An empty or absent ledger is treated as trivially
     valid — there is nothing to tamper with.
     """
-    file_path: Path = Path(path)
+    file_path: Path = Path(path if path is not None else resolve_ledger_path())
 
     if not file_path.exists():
         return {
             "valid": True,
             "entries": 0,
+            "ledger_path": str(file_path),
             "message": "No ledger found. Nothing to verify.",
         }
 
@@ -179,6 +185,7 @@ def verify_chain(path: str = _DEFAULT_LEDGER_PATH) -> dict:
     return {
         "valid": True,
         "entries": len(entries),
+        "ledger_path": str(file_path),
         "first_entry": first_entry.get("timestamp", ""),
         "last_entry": last_entry.get("timestamp", ""),
         "genesis_hash": first_entry.get("entry_hash", ""),
