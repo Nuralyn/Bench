@@ -163,12 +163,19 @@ def cmd_stats() -> int:
     else:
         integrity = f"INVALID ({verify.get('failure_type', 'unknown')})"
 
+    anchors: int = stats["anchors"]
+    adjudicated: int = stats["adjudicated"]
+
     print("Bench Governance Statistics")
     print("=" * 40)
-    print(f"Total governed changes : {total}")
-    print(f"Passed                 : {passed} ({pct(passed, total)})")
-    print(f"Vetoed                 : {vetoed} ({pct(vetoed, total)})")
+    print(f"Total governed changes : {adjudicated}")
+    print(f"Passed                 : {passed} ({pct(passed, adjudicated)})")
+    print(f"Vetoed                 : {vetoed} ({pct(vetoed, adjudicated)})")
     print(f"Pipeline errors        : {pipeline_errors}")
+    if anchors:
+        # Chain-retirement markers (C-008). Not adjudicated changes, so they
+        # sit outside the pass/veto rates above.
+        print(f"Chain anchors          : {anchors}")
     if most_cited is not None:
         print(
             f"Most cited constraint  : {most_cited[0]} "

@@ -131,6 +131,51 @@ class ComputeLedgerStatsTests(unittest.TestCase):
         self.assertEqual(stats["vetoed"], 0)
 
 
+class AnchorVerdictStatsTests(unittest.TestCase):
+    """Chain-retirement anchors are bookkeeping, not adjudicated changes.
+
+    Counting an anchor as a governed verdict would skew the pass rate the
+    project publishes, so it is tallied separately (C-008, constitution v2).
+    """
+
+    def _entries(self) -> list[dict]:
+        return [
+            {"verdict": "ANCHOR", "change": {"file": "ledger/x.json"}},
+            {"verdict": "PASS", "change": {"file": "a.py"}},
+            {"verdict": "PASS", "change": {"file": "b.py"}},
+            {"verdict": "VETO", "change": {"file": "c.py"}},
+        ]
+
+    def test_anchor_counted_separately(self) -> None:
+        stats: dict = compute_ledger_stats(self._entries())
+        self.assertEqual(stats["anchors"], 1)
+        self.assertEqual(stats["passed"], 2)
+        self.assertEqual(stats["vetoed"], 1)
+
+    def test_adjudicated_excludes_anchors(self) -> None:
+        stats: dict = compute_ledger_stats(self._entries())
+        self.assertEqual(stats["total"], 4)
+        self.assertEqual(stats["adjudicated"], 3)
+        self.assertEqual(stats["anchors"] + stats["adjudicated"], stats["total"])
+
+    def test_pass_rate_uses_adjudicated_denominator(self) -> None:
+        stats: dict = compute_ledger_stats(self._entries())
+        # 2 of 3 adjudicated, not 2 of 4 entries.
+        self.assertEqual(pct(stats["passed"], stats["adjudicated"]), "66.7%")
+
+    def test_ledger_without_anchors_is_unchanged(self) -> None:
+        stats: dict = compute_ledger_stats(
+            [{"verdict": "PASS", "change": {"file": "a.py"}}]
+        )
+        self.assertEqual(stats["anchors"], 0)
+        self.assertEqual(stats["adjudicated"], stats["total"])
+
+    def test_empty_ledger_has_zero_anchors(self) -> None:
+        stats: dict = compute_ledger_stats([])
+        self.assertEqual(stats["anchors"], 0)
+        self.assertEqual(stats["adjudicated"], 0)
+
+
 class EntryVerdictTests(unittest.TestCase):
     def test_top_level_verdict_wins(self) -> None:
         entry: dict = {"verdict": "VETO", "oracle": {"verdict": "PASS"}}
