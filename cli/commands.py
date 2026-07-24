@@ -36,6 +36,37 @@ _DEFAULT_LEDGER_TAIL: int = 10
 _RULE_PREVIEW_LEN: int = 100
 
 
+def _display_path(raw: str) -> str:
+    """Render a ledger path for terminal output, preferring a relative form.
+
+    Now that the ledger is project-scoped, operators need to see which chain
+    a command actually read. Printing the absolute path would put the user's
+    home directory (and username) into any output they paste into a bug
+    report, so collapse it to a CWD-relative path when the ledger sits under
+    the working directory, and fall back to the absolute path otherwise.
+
+    Mirrors the normalization idiom in ``hooks/pre-tool-use.py``.
+    """
+    if not raw or raw == "-":
+        return "-"
+    try:
+        rel: str = os.path.relpath(os.path.realpath(raw), os.getcwd())
+    except ValueError:
+        # Windows: path on a different drive from CWD, so no relative form
+        # exists. Expected control flow, not a fault.
+        return raw
+    except OSError as exc:
+        # An unresolvable path is a genuine fault; do not hide it (C-001).
+        print(
+            f"[bench cli] cannot resolve ledger path {raw!r}: {exc}",
+            file=sys.stderr,
+        )
+        return raw
+    if rel == os.pardir or rel.startswith(os.pardir + os.sep):
+        return raw
+    return rel
+
+
 def cmd_verify() -> int:
     """Validate the ledger hash chain and print a pass/fail summary."""
     result: dict[str, Any] = verify_chain()
@@ -46,6 +77,7 @@ def cmd_verify() -> int:
             print("Ledger: EMPTY (nothing to verify)")
             return 0
         print("Ledger: VALID")
+        print(f"  ledger       : {_display_path(result.get('ledger_path', '-'))}")
         print(f"  entries      : {entries}")
         print(f"  first entry  : {result.get('first_entry', '-')}")
         print(f"  last entry   : {result.get('last_entry', '-')}")

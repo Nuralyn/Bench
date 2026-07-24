@@ -26,10 +26,53 @@ from typing import Any
 
 _BENCH_ROOT: Path = Path(__file__).resolve().parent.parent
 _DEFAULT_LEDGER_PATH: str = str(_BENCH_ROOT / "ledger" / "bench-ledger.json")
+_PROJECT_LEDGER_DIRNAME: str = ".bench"
 META_FILENAME: str = "ledger-meta.json"
 _GENESIS_MARKER: str = "GENESIS"
 _MAX_FIELD_CHARS: int = 10_000
 _MAX_STAGE_CHARS: int = 50_000
+
+
+def resolve_ledger_path() -> str:
+    """Resolve which ledger the current run's verdict belongs to.
+
+    Bench's PreToolUse hook can be registered globally (in the user's
+    ``~/.claude/settings.json``), in which case it governs every project on
+    the machine. Routing all of those verdicts to Bench's own ledger mixes
+    unrelated projects' diffs into one chain and, if that chain is committed
+    to a public repository, publishes them. The ledger therefore follows the
+    project being governed:
+
+    1. ``BENCH_LEDGER_PATH`` wins outright, for an explicit central ledger.
+    2. A working directory inside the Bench repo (Bench governing itself)
+       uses Bench's own ``ledger/bench-ledger.json``, unchanged.
+    3. Anything else writes to ``<cwd>/.bench/bench-ledger.json``.
+
+    Claude Code invokes hooks with the governed project as the working
+    directory. That is the same assumption ``utils.diff`` already relies on
+    when normalizing paths that fall outside the Bench repo.
+    """
+    override: str = os.environ.get("BENCH_LEDGER_PATH", "").strip()
+    if override:
+        return override
+
+    try:
+        cwd: Path = Path.cwd().resolve()
+    except OSError as exc:
+        # A deleted or unreadable CWD cannot be recovered here. Fall back to
+        # Bench's own ledger so the verdict is still recorded somewhere
+        # rather than lost (C-001: no silent swallowing).
+        print(
+            f"[bench ledger] cannot resolve working directory ({exc}); "
+            f"recording to Bench's own ledger",
+            file=sys.stderr,
+        )
+        return _DEFAULT_LEDGER_PATH
+
+    if cwd == _BENCH_ROOT or _BENCH_ROOT in cwd.parents:
+        return _DEFAULT_LEDGER_PATH
+
+    return str(cwd / _PROJECT_LEDGER_DIRNAME / "bench-ledger.json")
 
 
 def _cap_stage_fields(stage: Any) -> Any:
@@ -84,8 +127,11 @@ def compute_entry_hash(entry: dict) -> str:
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
-def load_ledger(path: str = _DEFAULT_LEDGER_PATH) -> list[dict]:
+def load_ledger(path: str | None = None) -> list[dict]:
     """Load the ledger at ``path`` as a list of entries.
+
+    ``path`` defaults to ``resolve_ledger_path()``, so readers follow the
+    same project-scoped routing as writers.
 
     Returns an empty list when the file is absent. If the file exists but
     is unreadable, unparseable, or does not contain a JSON array, logs the
@@ -93,7 +139,7 @@ def load_ledger(path: str = _DEFAULT_LEDGER_PATH) -> list[dict]:
     on disk — preserving a corrupted ledger for forensic inspection rather
     than silently overwriting it.
     """
-    file_path: Path = Path(path)
+    file_path: Path = Path(path if path is not None else resolve_ledger_path())
 
     if not file_path.exists():
         return []
@@ -126,9 +172,14 @@ def load_ledger(path: str = _DEFAULT_LEDGER_PATH) -> list[dict]:
 
 def append_entry(
     pipeline_result: dict,
-    path: str = _DEFAULT_LEDGER_PATH,
+    path: str | None = None,
 ) -> dict:
     """Append a governance verdict to the ledger and update ledger-meta.json.
+
+    ``path`` defaults to ``resolve_ledger_path()``, which routes the verdict
+    to the ledger of the project being governed rather than always to
+    Bench's own. ``ledger-meta.json`` is written alongside whichever ledger
+    is selected, so each chain carries its own anchor.
 
     Expects ``pipeline_result`` to include the standard runner keys
     (``verdict``, ``pipeline_error``, ``constitution_hash``, ``challenger``,
@@ -141,11 +192,14 @@ def append_entry(
 
     Returns the full new entry (including its computed ``entry_hash``).
     """
-    file_path: Path = Path(path)
+    # Resolve once and reuse, so the entry is read from and appended to the
+    # same chain even if resolution inputs were to change mid-run.
+    resolved: str = path if path is not None else resolve_ledger_path()
+    file_path: Path = Path(resolved)
     directory: Path = file_path.parent
     directory.mkdir(parents=True, exist_ok=True)
 
-    existing: list[dict] = load_ledger(path)
+    existing: list[dict] = load_ledger(resolved)
 
     previous_hash: str = (
         existing[-1].get("entry_hash", _GENESIS_MARKER)

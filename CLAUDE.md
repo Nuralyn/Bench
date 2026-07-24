@@ -21,6 +21,12 @@ PreToolUse Hook -> Challenger (Sonnet) -> Defender (Sonnet) -> Oracle (Opus) -> 
 - Constitution snapshot loaded once per pipeline run (frozen within, hot-reload between)
 - Oracle verdict is PASS or VETO. VETO is binding.
 - Every verdict hashed and chained into bench-ledger.json
+- Ledger destination is project-scoped via `ledger.chain.resolve_ledger_path()`:
+  Bench's own repo uses `ledger/bench-ledger.json`, any other governed project
+  uses `<project>/.bench/bench-ledger.json`, and `BENCH_LEDGER_PATH` overrides
+  both. Readers (`load_ledger`, `verify_chain`, the viewer) resolve through the
+  same function, so the auditor never inspects a different file than the writer
+  appends to.
 - On VETO: JSON permissionDecision "deny" with remediation feedback
 - On PASS: JSON permissionDecision "allow"
 - Exit code is ALWAYS 0. Flow control is via JSON, not exit codes.
