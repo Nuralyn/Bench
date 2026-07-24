@@ -7,6 +7,9 @@ venv/
 *.egg-info/
 .coverage
 htmlcov/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
 
 # Environment
 .env
