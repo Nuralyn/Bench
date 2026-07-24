@@ -90,7 +90,16 @@ non-Anthropic model families remain out of scope.
 
 ### Absolute
 
-1. Every file change is governed. No exceptions. No bypasses.
+1. Every file change made through Claude Code's Write/Edit/MultiEdit tools is
+   governed. No exceptions and no bypasses on that path. One category sits
+   outside it and cannot be brought in: a bot-authored dependency PR, where
+   Dependabot edits requirements.txt on GitHub, never reaches the PreToolUse
+   hook, so it merges without a verdict or a ledger entry. Merge those by
+   deliberate human decision after reading the diff, and do not enable
+   auto-merge on them. That last point is project policy, not constitutional
+   text: C-007 binds changes to the pipeline files themselves, so it does not
+   literally reach a GitHub merge setting, though auto-merge would defeat the
+   same verification it exists to protect.
 2. The ledger is append-only. Never modify, delete, or overwrite entries.
 3. The hash chain must remain intact. Every entry references the previous.
 4. Constitution is loaded as a snapshot per pipeline run. All three stages

@@ -116,7 +116,13 @@ Understanding these will save you time deciding whether a finding is in scope.
   contents of governed files accordingly.
 - **Only the PreToolUse path is governed.** Direct shell commands, editors, and
   anything that does not route through Claude Code's Write/Edit/MultiEdit tools
-  is outside Bench's reach by design.
+  is outside Bench's reach by design. The recurring case worth stating plainly
+  is a bot-authored dependency PR: Dependabot edits `requirements.txt` on
+  GitHub, so it never touches the hook and merges without a verdict or a ledger
+  entry. Read those diffs before merging and do not enable auto-merge. A report
+  that Bench "failed to govern" such a change is not a vulnerability, because
+  it was never in scope; a way to make an ordinary tool-path change *look* like
+  one in order to skip adjudication would be.
 
 ## Credentials
 
