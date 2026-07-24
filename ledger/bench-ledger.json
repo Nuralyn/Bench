@@ -853,5 +853,1070 @@
       }
     },
     "entry_hash": "cd89f25c59cc2beb2b9a8bc98ab3e34faf971880971c76c4c30fbe3385da5bae"
+  },
+  {
+    "entry_id": "9b408ea6-ea02-4545-acc6-271c927726ac",
+    "timestamp": "2026-07-24T20:24:11.290974+00:00",
+    "previous_hash": "cd89f25c59cc2beb2b9a8bc98ab3e34faf971880971c76c4c30fbe3385da5bae",
+    "constitution_hash": "80b41f0010745cbb13b4052b4e2c954e611d864a3aef12b307c561afac0b9c85",
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "C:\\Users\\mstar\\AppData\\Local\\Temp\\claude\\C--Users-mstar-Bench\\4ca95f08-2ec6-46fe-8214-a351746982ac\\scratchpad\\prbody3.md",
+      "tool": "Write",
+      "diff_summary": {
+        "file_path": "C:\\Users\\mstar\\AppData\\Local\\Temp\\claude\\C--Users-mstar-Bench\\4ca95f08-2ec6-46fe-8214-a351746982ac\\scratchpad\\prbody3.md",
+        "change_type": "create",
+        "redacted": true,
+        "note": "Diff body omitted: file lies outside this ledger's project. Path and verdict are retained; the change itself was adjudicated in full."
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-002",
+          "severity": "OBSERVATION",
+          "location": "file_path: C:\\Users\\mstar\\AppData\\Local\\Temp\\claude\\...\\scratchpad\\prbody3.md",
+          "evidence": "The file being created lives in a Windows Temp scratchpad directory outside the Bench repository tree, not under bench/ or any tracked project path.",
+          "reasoning": "C-002 concerns task-boundary scope. This is a single markdown file (a PR description draft) with no stated task boundary to check it against. Not a violation, but worth flagging that the file is not part of the governed codebase itself and its content narrates changes that are not shown in this diff (ledger retirement, constitution amendment to C-008, hook routing fix, new test file, CI workflow edits, SECURITY.md). None of those actual code/config changes are present for the Challenger to inspect in this diff."
+        },
+        {
+          "constraint_id": "C-008",
+          "severity": "OBSERVATION",
+          "location": "Section 3 ('C-008 amended, chain retired')",
+          "evidence": "\"The retirement then ran: retired entries : 2471 ... tip hash ... anchor entry ...\" and \"The auditor check C-008 prescribes was run against the result: the archive verifies valid at 2471 entries...\"",
+          "reasoning": "The document asserts a ledger retirement satisfying all C-008(a)-(d) elements occurred, but this diff contains no ledger files, anchor entry, archive, or amended bench.json for independent verification. This is expected for a PR-body-only diff and is not itself a violation, but the Oracle should note that this diff alone provides no verifiable evidence of the retirement's compliance -- it is narrative only. If a companion diff with the actual ledger/constitution changes is not part of this same governed review, that verification gap should be tracked."
+        },
+        {
+          "constraint_id": "C-006",
+          "severity": "OBSERVATION",
+          "location": "Section 3, hash values",
+          "evidence": "\"tip hash : 2176516fec72f66da131096438cd318d8453409f87dec30107a312beef7a4c8d\"",
+          "reasoning": "These are SHA-256-style hash digests (ledger tip/entry hashes), not credentials or secrets. Flagged only to confirm they were reviewed and correctly excluded from C-006 concern -- no hardcoded secret is present."
+        }
+      ],
+      "_tokens": {
+        "input": 14896,
+        "output": 1975
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "REBUT",
+          "argument": "Correctly scoped as non-violation, but I'd push back on even calling this an 'observation worth flagging.' The file is a PR body draft for a session that is explicitly narrating out-of-band work (ledger retirement, C-008 amendment, hook routing fix, CI hardening) as already-completed and separately governed. A PR description is documentation of prior governed work, not itself a code change that introduces logic, dependencies, or scope creep. Holding a markdown narrative to C-002's 'task boundary' rule as if it were a code diff stretches the constraint past its rationale, which targets unbounded code changes, not descriptive prose about changes made elsewhere.",
+          "evidence": "The file's own content is written entirely in the retrospective/narrative voice ('Bench governed every change here and rejected four of them') describing commits and verdicts that happened in prior, separately-hashed pipeline runs -- this diff is the write-up, not the governed action itself."
+        },
+        {
+          "finding_index": 1,
+          "position": "CONCEDE",
+          "argument": "This is a fair and important observation, and I won't pretend otherwise. The Challenger is right that this diff, taken in isolation, contains zero verifiable artifacts for the retirement it describes: no bench.json v2 with an amended C-008(a)-(d) text, no anchor entry, no archived chain file, no verify_chain output. If the Oracle is being asked to rule on this PR-body file as though it were also attesting to the correctness of the underlying retirement, that would be verification theater -- exactly what C-005's rationale warns against for a different constraint, and the spirit applies here too. The proper read is narrow: this diff creates one markdown file, and the only thing it can be judged on is whether that markdown file itself violates a constraint (it doesn't -- no secrets, no scope violation, no code). The retirement's actual compliance with C-008 must have been (and per the document's own account, was) adjudicated in its own pipeline run against the real ledger/constitution diffs. If those companion diffs weren't run through Bench, that's a real gap -- but it's a gap in process, not evidence that this markdown file is non-compliant.",
+          "evidence": "The document itself distinguishes the retirement's verification from this write-up: 'The auditor check C-008 prescribes was run against the result' is stated as a completed, separate act, not something this diff is asking the Oracle to certify."
+        },
+        {
+          "finding_index": 2,
+          "position": "CONCEDE",
+          "argument": "Agreed outright -- these are hex-encoded SHA-256 digests of ledger state, not credentials, API keys, or secrets. They grant no access to anything and are meaningless without the archived chain file they reference. C-006 is not implicated. I concede this finding as correctly resolved by the Challenger's own analysis (they flagged it only to confirm the negative, which is the right level of diligence).",
+          "evidence": "'tip hash : 2176516fec72f66da131096438cd318d8453409f87dec30107a312beef7a4c8d' -- a 64-character hex string, format-consistent with SHA-256 ledger hashing already used elsewhere in the Bench pipeline (ledger/chain.py hash-chaining), not a secret value."
+        }
+      ],
+      "summary": "The Challenger found no actual violations -- only observations that this single-file markdown creation is out of the governed code tree, narrates prior work not shown in this diff, and contains hash digests rather than secrets -- so this change is sound as a standalone artifact, with the one legitimate caveat being that the retirement it describes must be verified via its own companion diff rather than taken on faith from this write-up.",
+      "_tokens": {
+        "input": 15784,
+        "output": 1722
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The proposed change creates a single markdown file (a PR-body draft) in a scratchpad directory. It introduces no code, no imports, no type annotations, no error-handling logic, and no modification to ledger or pipeline files. The Challenger raised three items, all explicitly at OBSERVATION severity, and identified no actual violations. The Defender rebutted the first as an over-application of C-002 to narrative prose and conceded the other two as correctly-resolved negatives. I concur. Evaluating the change against the whole constitution: C-001, C-003, C-004 have no applicable surface in a prose markdown file. C-006 is satisfied (the 64-char hex strings are SHA-256 ledger digests, not credentials, per Challenger finding index 2 and Defender concession). C-002 is not violated: this file is a documentation artifact narrating separately-governed work, not a code change introducing unbounded scope. C-008 is not implicated by THIS diff because it contains no ledger file, anchor entry, archive, or amended bench.json; the retirement it describes is narrated as already-completed in a prior pipeline run. C-007 is not implicated because this markdown does not alter challenger, defender, oracle, ledger, or constitution code. The change does not violate the declared constitution.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No catch blocks or error-handling logic in a prose markdown file."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Per Challenger finding 0 and Defender rebuttal: this is a PR-body narrative describing separately-governed work, not a code change introducing scope creep. C-002's rationale targets unbounded code changes, which are absent here."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependency declarations in a markdown file."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No function signatures or type annotations present."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "Challenger finding 2 and Defender concession: the hash values are SHA-256 ledger digests, not secrets or credentials."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "This diff does not modify challenger, defender, oracle, ledger, or constitution code; it is a narrative document about such changes made in prior runs."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Per Challenger finding 1 and Defender concession: this diff contains no ledger entries, anchor, archive, or bench.json changes. The retirement is narrated as completed and verified in a separate pipeline run, not asserted or performed by this diff."
+        }
+      ],
+      "advisories": [
+        "This verdict certifies only that the markdown PR-body file itself is constitutionally compliant. It does NOT attest to the correctness of the underlying ledger retirement, the C-008 amendment to constitution v2, the hook routing fix, the new test, or the CI changes it narrates. Per the Challenger's finding 1 and the Defender's concession, those actual code/config/ledger diffs must be (and per the document's account, were) independently adjudicated through their own governed pipeline runs.",
+        "If the companion diffs for the ledger retirement and C-008 amendment were NOT each run through Bench governance, that is a process gap that should be tracked separately. The auditor's C-008 check (verify_chain against the archive, matching tip hash and entry count to the anchor) should be confirmable against the actual archived chain file, not just this narrative."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 17008,
+        "output": 1645
+      }
+    },
+    "entry_hash": "0945c9698e2145e9bd6814b0902ca33e9d944d9e59d733e43d718bb11e442fc3"
+  },
+  {
+    "entry_id": "4d2a3b61-ece4-4452-ab56-63f4b3982885",
+    "timestamp": "2026-07-24T20:24:28.268769+00:00",
+    "previous_hash": "0945c9698e2145e9bd6814b0902ca33e9d944d9e59d733e43d718bb11e442fc3",
+    "constitution_hash": "80b41f0010745cbb13b4052b4e2c954e611d864a3aef12b307c561afac0b9c85",
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "C:\\Users\\mstar\\AppData\\Local\\Temp\\claude\\C--Users-mstar-Bench\\4ca95f08-2ec6-46fe-8214-a351746982ac\\scratchpad\\prbody3.md",
+      "tool": "Write",
+      "diff_summary": {
+        "file_path": "C:\\Users\\mstar\\AppData\\Local\\Temp\\claude\\C--Users-mstar-Bench\\4ca95f08-2ec6-46fe-8214-a351746982ac\\scratchpad\\prbody3.md",
+        "change_type": "create",
+        "redacted": true,
+        "note": "Diff body omitted: file lies outside this ledger's project. Path and verdict are retained; the change itself was adjudicated in full."
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-002",
+          "severity": "OBSERVATION",
+          "location": "file_path: C:\\Users\\mstar\\AppData\\Local\\Temp\\claude\\...\\scratchpad\\prbody3.md",
+          "evidence": "\"file_path\": \"C:\\\\Users\\\\mstar\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-mstar-Bench\\\\...\\\\scratchpad\\\\prbody3.md\"",
+          "reasoning": "The file is created outside the Bench repository, in a session-scoped temp scratchpad. It's not part of the tracked codebase and does not modify pipeline/ledger/constitution files, so this is not a scope violation, but it's worth noting the change touches nothing inside the governed project tree."
+        },
+        {
+          "constraint_id": "C-008",
+          "severity": "OBSERVATION",
+          "location": "Section 3, retirement summary block",
+          "evidence": "\"retired entries : 2471 ... tip hash : 2176... anchor entry : 7a06ce4f...\"",
+          "reasoning": "This PR body narrates a ledger retirement (tip hash, anchor entry, verify_chain result) as already-completed fact. Since this diff is only the text file itself, the Oracle cannot independently confirm from this change alone that the retirement met all C-008(a)-(d) requirements (human-initiated decision, pre-move archive verification, anchor entry contents, retention). The claims appear consistent with C-008's amended text, but they are asserted narrative, not verifiable artifacts, in this specific diff."
+        }
+      ],
+      "_tokens": {
+        "input": 14896,
+        "output": 1805
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "CONCEDE",
+          "argument": "The Challenger correctly notes this file sits outside the governed project tree in a session-scoped temp scratchpad, but they themselves classify it as an OBSERVATION and explicitly say 'this is not a scope violation.' I agree with that classification. C-002 exists to prevent scope creep within a task boundary (e.g., a task to modify challenger.py quietly touching oracle.py). A PR body markdown file has no bearing on the codebase and touches no pipeline/ledger/constitution files, so there is no scope boundary being crept past. Nothing to rebut since no violation is asserted.",
+          "evidence": "The finding's own severity is OBSERVATION and its reasoning states outright 'this is not a scope violation.'"
+        },
+        {
+          "finding_index": 1,
+          "position": "CONCEDE",
+          "argument": "This is the sharper finding and it holds up: the diff is a single markdown file of narrative prose, not the underlying commits (chain.py routing fix, redaction logic, the C-008 amendment in bench.json, the retirement script, or the archived ledger itself). An Oracle reviewing only this diff has no artifact to run verify_chain against, no anchor entry JSON to inspect, and no script to confirm the human-gate behavior described. The tip hash, entry count, and anchor entry ID are asserted text, not attached evidence in this change.",
+          "evidence": "Section 3's block ('retired entries : 2471 ... tip hash : 2176...') is pasted prose output in a markdown file; the diff contains no ledger files, anchor entry, or script, so C-008(a)-(d) cannot be independently confirmed from this diff alone."
+        }
+      ],
+      "summary": "The PR body is accurate about its own nature (a documentation artifact, not the governed code), and both Challenger observations are fair: it is out-of-tree and unactionable under C-002, and its retirement claims are narrative assertions this diff alone cannot verify, though the underlying commits it describes should be held to C-008's checklist when reviewed separately.",
+      "_tokens": {
+        "input": 31945,
+        "output": 1612
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The proposed change is the creation of a single markdown file (a PR body) in a session-scoped temp scratchpad outside the governed Bench repository tree. It contains only narrative prose describing prior, separately-governed changes. The Challenger raised two OBSERVATIONS (not violations): (1) under C-002, the file sits outside the governed project tree, which the Challenger itself states 'is not a scope violation'; and (2) under C-008, the retirement described in Section 3 is narrated as completed fact but cannot be independently verified from this diff alone, since the diff contains no ledger artifacts, anchor entry JSON, or retirement script. The Defender CONCEDED both, correctly noting no violation is asserted. I concur. C-002 governs scope creep within a task boundary; a documentation artifact touching no pipeline/ledger/constitution files creeps past no boundary. C-008 governs code that modifies/deletes/retires ledger entries; this markdown file executes no such action, it merely reports one that (per the narrative) was already carried out under the amended C-008 and separately governed. The retirement's compliance with C-008(a)-(d) is the concern of the actual retirement-script and ledger-anchor commits, which must be held to that checklist when they are reviewed as their own changes, not this prose file. Reviewing the full constitution independently: no error handling exists to swallow (C-001 N/A), no imports or dependencies are added (C-003 N/A), no type annotations exist to weaken (C-004 N/A), no new executable logic requiring tests (C-005 N/A), and no secrets appear (the credential-scan discussion in the text confirms fixture-only data, C-006 satisfied). C-007 is not engaged because this file is prose and does not alter the pipeline. No veto-severity constraint is clearly violated.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No catch blocks or error handling in a markdown document."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "File is a PR-body doc outside the governed tree; Challenger raised as OBSERVATION and expressly stated it is not a scope violation. Defender conceded."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependency declarations in a documentation file."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No function signatures or type annotations present."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new executable logic introduced by this change."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "No credentials in the file; the text documents a scan that found only fixture data requiring no rotation."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Prose document does not modify challenger, defender, oracle, ledger, or constitution logic."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "This diff modifies/deletes no ledger entries. It narrates a retirement performed by separate commits; C-008(a)-(d) verification applies to those commits, not to this documentation file. Challenger observation and Defender concession align."
+        }
+      ],
+      "advisories": [
+        "The retirement described in Section 3 (tip hash, anchor entry, verify_chain result, human-gate behavior) is asserted narrative in this diff. When the underlying commits (chain.py routing, redaction logic, the C-008 amendment in bench.json, the retirement script, and the archived ledger) are reviewed as their own changes, they must be independently held to the full C-008(a)-(d) checklist: pre-move archive verification with valid=true, an anchor entry recording tip/genesis hash, entry count, timestamps, verbatim archive path and reason, an explicit non-agent human decision, and indefinite retention.",
+        "If constitution version was incremented to v2 for the C-008 amendment (per project rule 15), confirm that amendment was itself governed and recorded, since the constitution shown here is already v2."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 16207,
+        "output": 1607
+      }
+    },
+    "entry_hash": "309cab25ab697975642b6d069dc39d0d65cb84ce17c25b6cca177cf58c78f209"
+  },
+  {
+    "entry_id": "7b6fd232-98e1-4add-a00e-d03648ff2a56",
+    "timestamp": "2026-07-24T20:27:11.162694+00:00",
+    "previous_hash": "309cab25ab697975642b6d069dc39d0d65cb84ce17c25b6cca177cf58c78f209",
+    "constitution_hash": "80b41f0010745cbb13b4052b4e2c954e611d864a3aef12b307c561afac0b9c85",
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "C:\\Users\\mstar\\AppData\\Local\\Temp\\claude\\C--Users-mstar-Bench\\4ca95f08-2ec6-46fe-8214-a351746982ac\\scratchpad\\bench-security-summary.html",
+      "tool": "Write",
+      "diff_summary": {
+        "file_path": "C:\\Users\\mstar\\AppData\\Local\\Temp\\claude\\C--Users-mstar-Bench\\4ca95f08-2ec6-46fe-8214-a351746982ac\\scratchpad\\bench-security-summary.html",
+        "change_type": "create",
+        "truncation": {
+          "original_lines": 362,
+          "truncated_lines": 73,
+          "preserved": "first50+signatures+exception_handlers+last20"
+        },
+        "redacted": true,
+        "note": "Diff body omitted: file lies outside this ledger's project. Path and verdict are retained; the change itself was adjudicated in full."
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-002",
+          "severity": "OBSERVATION",
+          "location": "file_path: C:\\Users\\mstar\\AppData\\Local\\Temp\\claude\\...\\scratchpad\\bench-security-summary.html",
+          "evidence": "\"file_path\": \"...\\\\Temp\\\\claude\\\\...\\\\scratchpad\\\\bench-security-summary.html\", \"change_type\": \"create\"",
+          "reasoning": "This file is created entirely outside the Bench repository (in the user's Temp scratchpad directory), so it cannot violate the pipeline/ledger/constitution structure and is not itself governed code. No stated task description was provided alongside this diff to confirm it's an expected deliverable (e.g., a review summary for the human), so scope cannot be fully verified. This is not a clear violation since scratchpad artifacts for human-facing summaries are a normal and reasonable agent output, but it's worth the Oracle noting the file lives outside any declared task boundary."
+        },
+        {
+          "constraint_id": "C-006",
+          "severity": "OBSERVATION",
+          "location": "content: cloner/traffic statistics and PR link",
+          "evidence": "\"56 unique cloners pulled this repo in the preceding 14 days\" and link to \"https://github.com/Nuralyn/Bench/pull/13\"",
+          "reasoning": "No credentials or secrets present, this is not a violation. Noting only that the document surfaces repo traffic/analytics data and a real PR URL in a static HTML file that could be shared or hosted; not a constitutional issue but worth the author's awareness if this file is ever published externally."
+        }
+      ],
+      "_tokens": {
+        "input": 13292,
+        "output": 1660
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "REBUT",
+          "argument": "C-002 governs scope creep within a task's stated code-change boundary (e.g., 'modify challenger.py' shouldn't touch oracle.py). This file is not code, it's not in the Bench repository, and it's not part of any governed source tree (pipeline/, ledger/, hooks/, cli/, utils/, tests/, bench.json). It's a static HTML summary written to the user's OS Temp directory, functionally equivalent to a chat response rendered as a file. C-002's rationale is 'unbounded changes are ungovernable' in the context of the codebase Bench actually governs; a human-facing recap document living outside that tree doesn't create the kind of drift the constraint exists to catch. The Challenger's own reasoning concludes 'this is not a clear violation' -- I'd go further and say it isn't a plausible one, since there's no repository scope for it to have crept outside of.",
+          "evidence": "file_path is under C:\\Users\\mstar\\AppData\\Local\\Temp\\claude\\...\\scratchpad\\, entirely outside C:\\Users\\mstar\\Bench. change_type is 'create' of a single self-contained HTML file with no imports, no code, no references into the pipeline."
+        },
+        {
+          "finding_index": 1,
+          "position": "REBUT",
+          "argument": "C-006's rule is explicit and narrow: 'No API keys, passwords, tokens, or credentials may appear in source code.' Cloner counts, a branch name, and a public GitHub PR URL are none of those things -- they're the kind of status metadata any release note or standup summary would include, and the PR link is presumably already public on GitHub itself. The Challenger correctly labels this 'not a violation' and only raises it as an authorial-awareness note about external publication, which is a reasonable editorial comment but has no constitutional weight under C-006 as written. Stretching 'no hardcoded secrets' to cover traffic analytics would make the constraint mean something it doesn't say.",
+          "evidence": "The flagged content is '56 unique cloners pulled this repo in the preceding 14 days' and a link to https://github.com/Nuralyn/Bench/pull/13 -- both non-sensitive, non-credential status facts about a repo the author controls."
+        }
+      ],
+      "summary": "Both findings are self-acknowledged non-violations (Challenger's own reasoning says so) raised as observations rather than veto-grade issues, and neither constraint plausibly extends to a static, out-of-repo HTML summary with no code, credentials, or pipeline surface area.",
+      "_tokens": {
+        "input": 13921,
+        "output": 1716
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The proposed change is a self-contained static HTML summary document written to the user's OS Temp scratchpad directory (C:\\Users\\mstar\\AppData\\Local\\Temp\\claude\\...\\scratchpad\\), entirely outside the governed Bench source tree (pipeline/, ledger/, hooks/, cli/, utils/, tests/, bench.json). It contains no executable code, no imports, no type annotations, and no interaction with the pipeline or ledger. On C-002: the Challenger explicitly rated this an OBSERVATION and concluded it 'is not a clear violation'; the Defender's rebuttal correctly notes there is no repository scope for the file to have crept outside of, since it is a human-facing recap functionally equivalent to a chat response rendered as a file. C-002's rationale (unbounded changes to governed code being ungovernable) does not apply to an out-of-tree artifact. On C-006: the Challenger again rated this an OBSERVATION and 'not a violation'; the Defender's rebuttal is sound that cloner counts, a branch name, and a public GitHub PR URL are not API keys, passwords, tokens, or credentials as the constraint's narrow text requires. I independently checked C-001 (no catch blocks present), C-003 (no imports/dependencies), C-004 (no type annotations to weaken), C-007 (no modification to challenger/defender/oracle/ledger/constitution code, despite the document narrating past governance events), and C-008 (no ledger modification, append, or retirement performed by this file). None are engaged. No veto-severity constraint is violated.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "HTML document contains no error-handling logic or catch blocks."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "File lives outside the governed Bench tree in a Temp scratchpad; Challenger rated OBSERVATION and Defender established there is no in-repo scope to cross. Not a plausible violation."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependencies introduced; static HTML with inline CSS."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No function signatures or type annotations present."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new code logic or branches requiring test coverage."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "Content flagged (cloner counts, branch name, public PR URL) contains no credentials. Challenger rated 'not a violation'; Defender rebuttal accurate to the constraint's narrow text."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Document narrates prior governance work but modifies no pipeline, ledger, or constitution code."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger entry is modified, appended, reordered, or retired by this file."
+        }
+      ],
+      "advisories": [
+        "Per both the Challenger's C-006 observation and its own footer, this document surfaces repo traffic analytics ('56 unique cloners... in the preceding 14 days'), the accepted-risk note about 264 foreign entries in git history, and a PR link. If this HTML is ever hosted or shared externally, review whether the internal risk-acceptance narrative and traffic metrics are intended for that audience.",
+        "The document text itself references a pre-existing unused-variable lint error at tests/test_hook.py:371 and notes Ruff is not in CI. This is out of scope for the present change but worth tracking against the user's standing pre-ship lint/type-check checklist."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 14778,
+        "output": 1747
+      }
+    },
+    "entry_hash": "c164dd8d8b8c8df543596ca2f3aca037b3401d17302ce477a14ab71a2a7c231e"
+  },
+  {
+    "entry_id": "54ffd9db-cf31-41d6-8b92-3326a6d1ccf1",
+    "timestamp": "2026-07-24T20:27:35.060173+00:00",
+    "previous_hash": "c164dd8d8b8c8df543596ca2f3aca037b3401d17302ce477a14ab71a2a7c231e",
+    "constitution_hash": "80b41f0010745cbb13b4052b4e2c954e611d864a3aef12b307c561afac0b9c85",
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "C:\\Users\\mstar\\AppData\\Local\\Temp\\claude\\C--Users-mstar-Bench\\4ca95f08-2ec6-46fe-8214-a351746982ac\\scratchpad\\bench-security-summary.html",
+      "tool": "Write",
+      "diff_summary": {
+        "file_path": "C:\\Users\\mstar\\AppData\\Local\\Temp\\claude\\C--Users-mstar-Bench\\4ca95f08-2ec6-46fe-8214-a351746982ac\\scratchpad\\bench-security-summary.html",
+        "change_type": "create",
+        "truncation": {
+          "original_lines": 362,
+          "truncated_lines": 73,
+          "preserved": "first50+signatures+exception_handlers+last20"
+        },
+        "redacted": true,
+        "note": "Diff body omitted: file lies outside this ledger's project. Path and verdict are retained; the change itself was adjudicated in full."
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-002",
+          "severity": "OBSERVATION",
+          "location": "file_path: C:\\Users\\mstar\\AppData\\Local\\Temp\\claude\\...\\scratchpad\\bench-security-summary.html",
+          "evidence": "\"file_path\": \"C:\\\\Users\\\\mstar\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-mstar-Bench\\\\...\\\\scratchpad\\\\bench-security-summary.html\"",
+          "reasoning": "This file lives entirely outside the repository structure described in CLAUDE.md (bench/pipeline, ledger, hooks, cli, utils, tests) and outside any location listed in the project layout. Without a stated task description it's not possible to confirm this scratchpad HTML report is within an approved task boundary versus an incidental artifact. Not flagged higher than OBSERVATION because a temp-scratchpad summary report is a plausible, low-risk deliverable (e.g. a human-readable recap requested by the user) and nothing in the diff suggests it touches or replaces any governed file."
+        },
+        {
+          "constraint_id": "C-007",
+          "severity": "OBSERVATION",
+          "location": "file content (rendered HTML text)",
+          "evidence": "\"a missing <code>Path</code> import, an unverified import in the viewer, and an irreversible C-008 hazard in one of my tests that would have written synthetic entries into the real append-only chain\" / \"264 foreign entries remain reachable in git history\"",
+          "reasoning": "The file does not itself modify pipeline/ledger/hooks code, so C-007 is not implicated as a code-level violation. Flagging only as an observation: this HTML summarizes specific, granular security findings about the governance pipeline (missing imports, a near-miss C-008 hazard, an unresolved 264-entry foreign-data exposure) in a standalone document outside the repo. If this artifact is intended for external/public sharing (e.g. attached to PR #13 or posted publicly), that's a disclosure judgment call for the author, not a constitutional breach \u2014 no constraint here governs documentation content or publication of audit findings."
+        }
+      ],
+      "_tokens": {
+        "input": 13292,
+        "output": 2961
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "REBUT",
+          "argument": "The file path itself is the strongest evidence against a scope violation, not for one: it resolves to a Windows temp directory (AppData\\Local\\Temp\\claude\\...\\scratchpad\\), explicitly labeled 'scratchpad'. This is not a file landing in bench/pipeline, bench/ledger, bench/hooks, bench/cli, or bench/utils \u2014 it never enters the governed repository tree at all. C-002 exists to stop scope creep INTO the codebase ('modify challenger.py' shouldn't touch oracle.py). A human-readable recap document written to an ephemeral scratch location, describing work already done, is the opposite failure mode: it's output, not codebase modification. The Challenger itself scored this OBSERVATION, the lowest tier, and explicitly concluded 'nothing in the diff suggests it touches or replaces any governed file' \u2014 that's a concession the finding doesn't rise to an actual boundary breach.",
+          "evidence": "file_path begins 'C:\\\\Users\\\\mstar\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\...\\\\scratchpad\\\\bench-security-summary.html' \u2014 a temp scratchpad path, not any path under the bench/ project structure listed in CLAUDE.md."
+        },
+        {
+          "finding_index": 1,
+          "position": "REBUT",
+          "argument": "I agree with the Challenger's own conclusion here and go further: this isn't just under-severity, it's outside C-007's scope entirely. C-007 governs 'changes to the governance pipeline itself' \u2014 actual edits to challenger.py, defender.py, oracle.py, constitution.py, ledger/*, or hooks/*. This diff creates a static HTML file that narrates (in past tense, as a summary) security findings from separate, already-governed work on PR #13. It does not modify pipeline behavior, does not touch enforcement logic, does not disable logging, and does not bypass verification \u2014 it describes those things. No constraint in bench.json regulates documentation content or where audit summaries get written. The disclosure-risk question the Challenger raises (should the 264-foreign-entries detail be public) is a legitimate editorial judgment call for the author, but the Constitution has no clause addressing publication of findings, and stretching C-007 to cover 'a document that talks about the pipeline' would make it apply to this very Defender response.",
+          "evidence": "Challenger's own reasoning: 'The file does not itself modify pipeline/ledger/hooks code, so C-007 is not implicated as a code-level violation' and '...that's a disclosure judgment call for the author, not a constitutional breach \u2014 no constraint here governs documentation content or publication of audit findings.'"
+        }
+      ],
+      "summary": "This change creates a static, non-repository scratchpad HTML summary that neither modifies governed code nor touches the pipeline it describes, so despite two OBSERVATION-level notes the Challenger itself concedes are not violations, the change is sound and constitutionally clear.",
+      "_tokens": {
+        "input": 14108,
+        "output": 2479
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The proposed change creates a static HTML summary document at a Windows temp scratchpad path (AppData\\Local\\Temp\\claude\\...\\scratchpad\\bench-security-summary.html) that never enters the governed bench/ repository tree (pipeline, ledger, hooks, cli, utils, tests). The Challenger raised only two OBSERVATION-tier notes and explicitly conceded neither rises to a violation. On C-002, the Defender correctly argues the file is output/artifact, not codebase modification, and the Challenger itself stated 'nothing in the diff suggests it touches or replaces any governed file.' On C-007, both parties agree the HTML narrates prior findings in past tense but does not modify challenger/defender/oracle/constitution/ledger/hook code, disable logging, bypass verification, or weaken enforcement; the Defender's point that stretching C-007 to cover 'a document that talks about the pipeline' would recursively implicate this very verdict is sound. Reviewing the full constitution independently: the file contains no catch blocks (C-001 N/A), no imports or dependency declarations (C-003 N/A), no type annotations (C-004 N/A), no secrets or credentials (C-006 N/A), and does not modify, delete, reorder, or append to any ledger entry (C-008 N/A) despite discussing ledger topics in prose. No veto-severity constraint is clearly violated and no Defender rebuttal is inadequate.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error-handling code in a static HTML document."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "File is a temp scratchpad artifact outside the governed repo tree; Challenger scored OBSERVATION and conceded no governed file is touched; Defender's output-not-modification argument holds."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependency manifest changes."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No function signatures or type annotations."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "No API keys, passwords, tokens, or credentials present in content."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "The HTML describes pipeline findings in past tense but does not modify enforcement logic, logging, or verification; no constraint governs documentation content or publication."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger entry is modified, deleted, reordered, or appended; ledger topics are only discussed in prose."
+        }
+      ],
+      "advisories": [
+        "The document discloses granular security details about the governance pipeline (a missing Path import, an unverified viewer import, a near-miss C-008 test hazard, and 264 foreign ledger entries reachable in git history with cloner counts). If this artifact is attached to a public PR or shared externally, that disclosure is an editorial/security judgment for the author. No constitutional constraint governs it, but the author should confirm intended audience before publishing.",
+        "The content references a pre-existing unused-variable lint error at tests/test_hook.py:371. This is noted in the document as untouched pre-existing debt and is consistent with surgical-change discipline; no action required for this change."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 15145,
+        "output": 1506
+      }
+    },
+    "entry_hash": "644b2fb3f6091643a9048bbf84c9f1e6f079c612e09acbaa9c6c49276bb52aac"
+  },
+  {
+    "entry_id": "fdae0fe2-3430-4267-a26a-5d6e52eeff1d",
+    "timestamp": "2026-07-24T20:36:07.591720+00:00",
+    "previous_hash": "644b2fb3f6091643a9048bbf84c9f1e6f079c612e09acbaa9c6c49276bb52aac",
+    "constitution_hash": "80b41f0010745cbb13b4052b4e2c954e611d864a3aef12b307c561afac0b9c85",
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "C:\\Users\\mstar\\.claude\\projects\\C--Users-mstar-Bench\\memory\\bench-ledger-cross-project-contamination.md",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "C:\\Users\\mstar\\.claude\\projects\\C--Users-mstar-Bench\\memory\\bench-ledger-cross-project-contamination.md",
+        "change_type": "modify",
+        "redacted": true,
+        "note": "Diff body omitted: file lies outside this ledger's project. Path and verdict are retained; the change itself was adjudicated in full."
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 10126,
+        "output": 1246
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The proposed change modifies a single memory/documentation markdown file (bench-ledger-cross-project-contamination.md) located outside the governed Bench source tree. It is prose documenting an already-completed resolution (PR #13, constitution version 2, chain retirement). No source code, no ledger entries, no pipeline files, no constitution file, and no dependency manifests are touched. The Challenger returned CLEAR with no findings and the Defender confirmed CLEAR. I independently evaluated the change against the full constitution and concur. C-001, C-003, C-004, C-006 are not applicable because no executable code, imports, type annotations, or credentials are involved. C-007 is not applicable because no pipeline enforcement/verification/logging component is altered; this file is a narrative note. C-008 is satisfied in spirit and letter: the change does not modify, delete, reorder, or excise any ledger entry; it merely narrates a retirement that the text itself describes as having satisfied the amended C-008 requirements (human decision, verify_chain-validated archive, anchor recording tip/genesis/count/timestamps/path/reason, indefinite retention). Documenting a completed retirement is not itself a ledger operation. C-002 scope is satisfied: the edit is a single coherent old_string/new_string replacement confined to the section describing the resolution, with no unrelated collateral changes.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No code or catch blocks; documentation-only change."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Single-section edit to one memory file; no out-of-boundary or collateral modifications."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependency manifest changes."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No type annotations affected; markdown prose only."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new logic introduced; documentation carries no test obligation."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "No secrets or credentials present; only local filesystem archive paths."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No governance pipeline component altered; this is an external memory note."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "SATISFIED",
+          "note": "No ledger entry modified, removed, or reordered. Text narrates a completed retirement and affirms the amended C-008 requirements were met."
+        }
+      ],
+      "advisories": [
+        "The note states the retired chain lives at C:\\Users\\mstar\\.bench-archive\\. Per C-008(d) this archive must be retained indefinitely at exactly that recorded path; ensure the anchor entry in the successor ledger records the identical verbatim path for auditor verification.",
+        "The note references constitution version 2 and a bounded retirement clause; this aligns with the supplied constitution (version 2). Keep this memory in sync if C-008 is ever amended again."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 10166,
+        "output": 1505
+      }
+    },
+    "entry_hash": "52c570409d0c8f8569706f36a9a4f7a7c899399391df1a0c9dc3b50f4c268e30"
+  },
+  {
+    "entry_id": "b3214fee-6003-4c22-bb85-da818fecc7df",
+    "timestamp": "2026-07-24T20:36:14.257481+00:00",
+    "previous_hash": "52c570409d0c8f8569706f36a9a4f7a7c899399391df1a0c9dc3b50f4c268e30",
+    "constitution_hash": "80b41f0010745cbb13b4052b4e2c954e611d864a3aef12b307c561afac0b9c85",
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "C:\\Users\\mstar\\.claude\\projects\\C--Users-mstar-Bench\\memory\\bench-ledger-cross-project-contamination.md",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "C:\\Users\\mstar\\.claude\\projects\\C--Users-mstar-Bench\\memory\\bench-ledger-cross-project-contamination.md",
+        "change_type": "modify",
+        "redacted": true,
+        "note": "Diff body omitted: file lies outside this ledger's project. Path and verdict are retained; the change itself was adjudicated in full."
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [
+        {
+          "constraint_id": "C-008",
+          "severity": "OBSERVATION",
+          "location": "memory/bench-ledger-cross-project-contamination.md (new_string)",
+          "evidence": "\"a successor anchored\" / \"The 2,471-entry chain was retired to C:\\Users\\mstar\\.bench-archive\\\"",
+          "reasoning": "This is a documentation/memory note describing a retirement event, not code that performs a retirement. It doesn't itself execute or modify the ledger, so C-008's veto conditions (which govern actions on ledger entries) aren't triggered by this diff. Flagging only because the described retirement should be independently verifiable (anchor entry with tip/genesis hash, entry count, timestamps, archive path) against the actual ledger/anchor commit, not just this prose summary."
+        },
+        {
+          "constraint_id": "C-002",
+          "severity": "OBSERVATION",
+          "location": "file_path",
+          "evidence": "C:\\Users\\mstar\\.claude\\projects\\C--Users-mstar-Bench\\memory\\bench-ledger-cross-project-contamination.md",
+          "reasoning": "The edited file is a personal memory/knowledge-base note outside the Bench repository proper (not in pipeline/, ledger/, hooks/, or cli/). It is not governed pipeline code, so C-007's stricter scrutiny of pipeline/ledger/hooks changes does not apply here; noted only for completeness."
+        }
+      ],
+      "_tokens": {
+        "input": 10126,
+        "output": 2147
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The proposed change edits a personal memory/knowledge-base note (memory/bench-ledger-cross-project-contamination.md) that documents a resolved incident. It is prose describing a retirement event, not executable code that modifies, deletes, reorders, or appends ledger entries. Per Challenger's C-008 observation, the veto conditions of C-008 govern actions taken on ledger entries; a narrative summary does not itself perform any such action, so the constraint is not triggered by this diff. The change is confined to a single documentation file outside pipeline/, ledger/, hooks/, and cli/, so C-007's heightened scrutiny of governance-pipeline code does not apply (Challenger C-002/C-007 observation). No new imports (C-003 N/A), no code with type annotations (C-004 N/A), no error-handling logic (C-001 N/A), no secrets (C-006 N/A), no new logic requiring tests (C-005 N/A). The Defender confirmed CLEAR with no rebuttals needed. The document is also consistent with constitution version 2, which now contains the bounded chain-retirement clause it references.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error-handling code is introduced; this is a documentation edit."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is confined to a single memory note file, consistent with a documentation-update task boundary (Challenger observation)."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependencies added."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No function signatures or type annotations touched."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new executable logic; testing constraint does not apply to prose. The note itself references tests/test_ledger_hygiene.py as the actual guard."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "No credentials or secrets present; only a local archive path is recorded, which is not a secret."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "File is a personal memory note, not governance-pipeline code (Challenger observation)."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "SATISFIED",
+          "note": "The diff is a narrative record of a retirement event, not code acting on ledger entries. It does not modify, delete, reorder, or excise any entry. C-008's action-governing conditions are not triggered."
+        }
+      ],
+      "advisories": [
+        "The prose asserts a compliant retirement (2,471-entry chain retired to C:\\Users\\mstar\\.bench-archive\\, successor anchored, C-008 amended to version 2). These are documentation claims. An auditor should independently confirm the actual anchor entry records the retired chain's tip hash, genesis hash, entry count, first/last timestamps, verbatim archive path, and reason, and that verify_chain returns valid=true against the archive, per C-008(b)-(d). This diff does not and cannot substitute for that independent verification.",
+        "The note records a local filesystem path (C:\\Users\\mstar\\.bench-archive\\). If this memory file is ever committed to a shared repo, be aware it leaks a user-specific local path; not a constraint violation, just a hygiene note."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 10678,
+        "output": 1432
+      }
+    },
+    "entry_hash": "6d9c9b4896dee0b7d9f8a59e631942a344b4b74985960ebc768d44ac89731462"
+  },
+  {
+    "entry_id": "7ca9d972-e2e5-4101-a674-05e59f1cdb85",
+    "timestamp": "2026-07-24T20:36:58.809955+00:00",
+    "previous_hash": "6d9c9b4896dee0b7d9f8a59e631942a344b4b74985960ebc768d44ac89731462",
+    "constitution_hash": "80b41f0010745cbb13b4052b4e2c954e611d864a3aef12b307c561afac0b9c85",
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "C:\\Users\\mstar\\.claude\\projects\\C--Users-mstar-Bench\\memory\\feedback_ledger_is_source.md",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "C:\\Users\\mstar\\.claude\\projects\\C--Users-mstar-Bench\\memory\\feedback_ledger_is_source.md",
+        "change_type": "modify",
+        "redacted": true,
+        "note": "Diff body omitted: file lies outside this ledger's project. Path and verdict are retained; the change itself was adjudicated in full."
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 9880,
+        "output": 1093
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change modifies a personal memory markdown file (feedback_ledger_is_source.md) that documents a lesson about ledger hygiene. It contains no code, no imports, no error-handling logic, and no ledger mutation. The Challenger returned CLEAR with no findings and the Defender confirmed CLEAR. Evaluating against the constitution independently: C-001, C-003, C-004, C-006 are not applicable because this is prose documentation with no code paths, dependencies, type annotations, or secrets. C-007 is not triggered because the file is documentation outside pipeline/, ledger/, and hooks/, and the edit does not alter any enforcement mechanism. C-008 is not violated; on the contrary, the revised prose accurately restates the C-008 (version 2) retirement requirements (human decision, verified archive, anchor entry recording the retired chain's tip hash) and correctly reiterates that individual entries are never excised. The change strengthens documentary alignment with the constitution rather than weakening it. C-002 scope is satisfied: the edit is confined to the single stated file and its subject matter.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No code or catch blocks in a prose memory file."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is confined to the single documentation file and on-topic content."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependencies introduced."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No type annotations involved."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "No secrets or credentials present."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "File is documentation outside the governance pipeline directories; enforcement is unaffected."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "SATISFIED",
+          "note": "Prose accurately restates the version-2 C-008 retirement requirements and affirms that entries are never excised; no ledger data is mutated."
+        }
+      ],
+      "advisories": [
+        "The updated text references `python -m unittest tests.test_ledger_hygiene` as a pre-commit check; ensure that test module actually exists so the documented guidance stays accurate."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 9920,
+        "output": 1127
+      }
+    },
+    "entry_hash": "114df88a16efb9dde04f785aa2a0e4d181657eaaa7985ec319420ad0e73e016f"
+  },
+  {
+    "entry_id": "d0abff84-bb1d-4927-8e94-2e482e820ab7",
+    "timestamp": "2026-07-24T20:38:21.448291+00:00",
+    "previous_hash": "114df88a16efb9dde04f785aa2a0e4d181657eaaa7985ec319420ad0e73e016f",
+    "constitution_hash": "80b41f0010745cbb13b4052b4e2c954e611d864a3aef12b307c561afac0b9c85",
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "C:\\Users\\mstar\\.claude\\projects\\C--Users-mstar-Bench\\memory\\feedback_ledger_is_source.md",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "C:\\Users\\mstar\\.claude\\projects\\C--Users-mstar-Bench\\memory\\feedback_ledger_is_source.md",
+        "change_type": "modify",
+        "redacted": true,
+        "note": "Diff body omitted: file lies outside this ledger's project. Path and verdict are retained; the change itself was adjudicated in full."
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-008",
+          "severity": "CONCERN",
+          "location": "feedback_ledger_is_source.md (new_string, retirement description)",
+          "evidence": "\"the constitutional route is whole-chain retirement under C-008 as amended in constitution version 2, which requires a human decision, a verified archive, and an anchor entry recording the retired chain's tip hash.\"",
+          "reasoning": "The actual C-008 text requires ALL of: (a) explicit human decision recorded in the anchor entry, (b) archive verified via verify_chain BEFORE the original is moved, (c) an anchor entry recording tip hash, genesis hash, entry count, first/last timestamps, the verbatim archive path, and the reason for retirement, and (d) indefinite retention at that path. This memory note's summary drops genesis hash, entry count, timestamps, archive path, and reason. If this memory is later relied on verbatim as the retirement procedure, an agent could perform an incomplete retirement that satisfies the note but violates the actual constitutional requirement."
+        },
+        {
+          "constraint_id": "C-005",
+          "severity": "OBSERVATION",
+          "location": "feedback_ledger_is_source.md (new_string, pre-commit check line)",
+          "evidence": "\"`python -m unittest tests.test_ledger_hygiene` is the cheap pre-commit check.\"",
+          "reasoning": "This asserts the existence of a specific test module as an actionable process step. No context or diff evidence confirms tests/test_ledger_hygiene.py exists in the Bench repo. If the referenced test doesn't exist, this memory entry gives future agents a false sense of a verification safety net and no actual coverage, which runs counter to the spirit of C-005 (verification over assumption) even though this file itself is documentation, not new logic."
+        },
+        {
+          "constraint_id": "C-008",
+          "severity": "OBSERVATION",
+          "location": "feedback_ledger_is_source.md (new_string, opening paragraph)",
+          "evidence": "\"That specific contamination is fixed and committing has resumed, so the main rule applies normally again.\"",
+          "reasoning": "This is an unverified factual claim embedded in institutional memory that will govern future autopilot commit behavior for the ledger (an evidence chain protected by C-008). If the contamination fix or resumed-committing status is not independently verifiable at the time this note is consulted, the note could cause a future agent to commit an unread ledger on the assumption the issue is resolved, reintroducing the exact risk the original caveat existed to prevent."
+        }
+      ],
+      "_tokens": {
+        "input": 9880,
+        "output": 2697
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "MITIGATE",
+          "argument": "The Challenger is right that the note's paraphrase of the retirement procedure is abbreviated relative to the full C-008(a)-(d) checklist. But two things limit the practical risk. First, this file performs no ledger action at all; it is a memory note that points at 'the constitutional route... under C-008 as amended in constitution version 2' rather than purporting to be a standalone, exhaustive runbook. The authoritative text (bench.json itself) is the actual source of truth and is what any agent would need to consult to execute a retirement. Second, C-008(a) independently requires 'an explicit human decision, never an automated or agent-initiated one' before any retirement can occur -- so even a future agent that read only this abbreviated summary could not lawfully perform a retirement solo; a human has to be in the loop regardless of how complete the note is. That said, the finding is legitimate documentation-quality feedback: the note would be safer if it listed all five required anchor-entry fields (or explicitly said 'see bench.json for the full checklist') rather than the compressed three-item version. I'd recommend tightening the wording rather than treating this as a governance violation.",
+          "evidence": "New text: 'the constitutional route is whole-chain retirement under C-008 as amended in constitution version 2, which requires a human decision, a verified archive, and an anchor entry recording the retired chain's tip hash.' Full C-008 text requires (a) human decision recorded in the anchor entry, (b) pre-move verification, (c) an anchor entry with tip hash, genesis hash, entry count, timestamps, archive path, and reason, (d) indefinite retention -- and (a) alone already forecloses agent-only execution."
+        },
+        {
+          "finding_index": 1,
+          "position": "MITIGATE",
+          "argument": "The Challenger's caution is reasonable as a general hygiene point, but C-005 governs 'new functions or branches of logic,' and this diff is a markdown memory note, not code -- there is no new logic here to test. Whether tests/test_ledger_hygiene.py actually exists is a factual question I can't independently verify from the diff either, so I won't assert it does. But the practical risk is bounded: if the referenced test module doesn't exist, the failure mode is simply that `python -m unittest tests.test_ledger_hygiene` errors out with 'No module named...' the very next time someone runs it, which is self-correcting and immediately visible -- not a silent false sense of safety that persists undetected. It's a claim worth verifying before this memory entry is trusted, but it's not a constitutional violation of C-005 as written.",
+          "evidence": "C-005 rule: 'New functions or branches of logic must have corresponding test cases.' No new function/branch is introduced by this diff; it only adds a reference to an externally-existing (or not) test command."
+        },
+        {
+          "finding_index": 2,
+          "position": "REBUT",
+          "argument": "This claim is not an unfounded assertion dropped into institutional memory -- it's corroborated by material already established in this same session's context. The linked companion memory entry, 'Bench ledger cross-project contamination,' explicitly states the fix: 'the global hook wrote every project's diffs into Bench's public ledger; fixed by resolve_ledger_path.' And the project's own CLAUDE.md independently documents that the fix shipped: 'Ledger destination is project-scoped via `ledger.chain.resolve_ledger_path()`... Readers... resolve through the same function, so the auditor never inspects a different file than the writer appends to.' Three independent artifacts (this note, the cross-referenced memory entry, and the checked-in project documentation) agree on the same fact. Treating this as an unverifiable, risky claim overlooks that corroborating evidence, which is exactly the kind of cross-check the wisdom system is designed to provide.",
+          "evidence": "MEMORY.md: 'Bench ledger cross-project contamination... fixed by resolve_ledger_path, and why the contaminated chain now stays uncommitted.' CLAUDE.md: 'Ledger destination is project-scoped via `ledger.chain.resolve_ledger_path()`... so the auditor never inspects a different file than the writer appends to.'"
+        }
+      ],
+      "summary": "The diff is a documentation-only update to institutional memory that correctly tightens (rather than weakens) prior guidance, and while its retirement-procedure summary is incomplete and worth expanding, none of the findings amount to an actual C-008 violation since no ledger action occurs and human-gating remains intact regardless of the note's brevity.",
+      "_tokens": {
+        "input": 10814,
+        "output": 4737
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "This is a documentation-only modification to an institutional-memory markdown note. It performs no ledger action, adds no code, introduces no dependency, and touches no governance pipeline logic. The Challenger raised three findings, all at CONCERN/OBSERVATION severity, and none rises to a clear violation of a veto-severity constraint. On finding 0 (C-008), the Defender's MITIGATE is persuasive: the note explicitly defers to 'C-008 as amended in constitution version 2' as the authoritative source rather than presenting itself as an exhaustive runbook, and C-008(a) independently mandates an explicit human decision before any retirement, so an incomplete summary cannot enable an unlawful agent-only retirement. The note also does not modify, reorder, or delete any ledger entry, which is the actual conduct C-008 prohibits. On finding 1 (C-005), the constraint governs 'new functions or branches of logic'; a markdown note adds none, and a missing test module fails loudly and self-correctingly rather than silently, so C-005 is NOT_APPLICABLE. On finding 2 (C-008/verification), the Defender's REBUT is well-supported: the resumed-committing claim is corroborated by the cross-referenced contamination memory entry and by the checked-in CLAUDE.md documenting resolve_ledger_path, so the factual assertion is not an unverified risk. The change tightens prior guidance rather than weakening it, keeps the C-008-derived prohibition on entry excision intact, and correctly preserves human-gating.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-008",
+          "disposition": "SATISFIED",
+          "note": "No ledger entry is modified, deleted, reordered, or overwritten. The note references the retirement procedure but explicitly defers to bench.json as authoritative and preserves the C-008(a) human-decision gate, per Defender rebuttal 0."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "NOT_APPLICABLE",
+          "note": "The diff adds no new function or logic branch; C-005 governs code, not a markdown memory note, per Defender rebuttal 1."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No pipeline component (challenger, defender, oracle, ledger, constitution) is modified. This is a memory file outside the pipeline."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is confined to a single memory file and stays within the stated documentation-update task boundary."
+        }
+      ],
+      "advisories": [
+        "The retirement-procedure summary is abbreviated: it names only tip hash, a human decision, and a verified archive, omitting the genesis hash, entry count, first/last timestamps, verbatim archive path, reason, and indefinite-retention requirements that C-008 actually mandates (Challenger finding 0). Recommend expanding it or adding an explicit 'see bench.json for the full C-008 checklist' pointer so the note cannot be relied on as a complete runbook.",
+        "The note asserts `python -m unittest tests.test_ledger_hygiene` as a pre-commit check (Challenger finding 1). Confirm that tests/test_ledger_hygiene.py actually exists in the repo before this memory is trusted; if absent, the reference should be removed or the test created.",
+        "The 'committing has resumed' claim (Challenger finding 2) is corroborated by CLAUDE.md and the linked contamination memory, but re-verify the ledger contents remain uncontaminated before any actual ledger commit, consistent with the note's own core caution to 'check what the ledger contains before committing it.'"
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 12345,
+        "output": 1640
+      }
+    },
+    "entry_hash": "0308597b0312c5aa593185164dddfa0240e5b26b4cde24d2aa5cac4e909417df"
+  },
+  {
+    "entry_id": "d3e876c7-4f95-4b0e-8a3d-2054febeed8d",
+    "timestamp": "2026-07-24T20:38:48.362512+00:00",
+    "previous_hash": "0308597b0312c5aa593185164dddfa0240e5b26b4cde24d2aa5cac4e909417df",
+    "constitution_hash": "80b41f0010745cbb13b4052b4e2c954e611d864a3aef12b307c561afac0b9c85",
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "C:\\Users\\mstar\\.claude\\projects\\C--Users-mstar-Bench\\memory\\feedback_ledger_is_source.md",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "C:\\Users\\mstar\\.claude\\projects\\C--Users-mstar-Bench\\memory\\feedback_ledger_is_source.md",
+        "change_type": "modify",
+        "redacted": true,
+        "note": "Diff body omitted: file lies outside this ledger's project. Path and verdict are retained; the change itself was adjudicated in full."
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 9563,
+        "output": 19
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change modifies a personal memory markdown file (feedback_ledger_is_source.md), inserting one clarifying sentence that directs readers to consult C-008 in bench.json for the full retirement checklist rather than treating the summary as a runbook. Both the Challenger (status CLEAR, no findings) and Defender (CONFIRM_CLEAR) found no issues. Evaluating the change independently against the full constitution: it touches no code, so C-001 (error handling), C-003 (dependencies), C-004 (type safety), C-005 (testing), and C-006 (secrets) are not applicable. C-002 (scope) is satisfied: the edit is a single, contained documentation clarification with no collateral file changes. C-007 (governance pipeline integrity) is not applicable because a memory doc is not part of the challenger/defender/oracle/ledger/constitution machinery, and the edit does not weaken enforcement. C-008 (ledger immutability) is satisfied and in fact reinforced: the added text explicitly steers readers toward the authoritative C-008 checklist for chain retirement, strengthening rather than diluting the immutability discipline; no ledger entry is modified, deleted, or reordered.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Documentation-only edit; no error-handling code involved."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Single contained sentence addition to one memory file; no scope creep."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependencies added."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No type annotations touched."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new logic or branches introduced."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No secrets or credentials present."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Memory doc is not part of the governance pipeline; enforcement unaffected."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "SATISFIED",
+          "note": "No ledger entries altered; edit directs readers to the authoritative C-008 retirement checklist, reinforcing immutability discipline."
+        }
+      ],
+      "advisories": [],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 9602,
+        "output": 1041
+      }
+    },
+    "entry_hash": "daaf217ba98ce050cd8acbb6a2d239b0122638d9036aa6316951fe3af4bd6d2b"
+  },
+  {
+    "entry_id": "ac614b3e-0d4c-45f4-9093-4ecf12fa4589",
+    "timestamp": "2026-07-24T20:38:55.272975+00:00",
+    "previous_hash": "daaf217ba98ce050cd8acbb6a2d239b0122638d9036aa6316951fe3af4bd6d2b",
+    "constitution_hash": "80b41f0010745cbb13b4052b4e2c954e611d864a3aef12b307c561afac0b9c85",
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "C:\\Users\\mstar\\.claude\\projects\\C--Users-mstar-Bench\\memory\\feedback_ledger_is_source.md",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "C:\\Users\\mstar\\.claude\\projects\\C--Users-mstar-Bench\\memory\\feedback_ledger_is_source.md",
+        "change_type": "modify",
+        "redacted": true,
+        "note": "Diff body omitted: file lies outside this ledger's project. Path and verdict are retained; the change itself was adjudicated in full."
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 9563,
+        "output": 433
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change modifies a single memory markdown file (feedback_ledger_is_source.md), inserting one clarifying sentence that directs readers to consult C-008 in bench.json for the full chain-retirement checklist. This is pure documentation prose, not executable code or ledger data. The Challenger returned CLEAR with no findings, and the Defender confirmed CLEAR. Independently reviewing against the full constitution: C-001 (error handling), C-003 (dependencies), C-004 (type safety), and C-006 (secrets) are not applicable because no code, imports, type annotations, or credentials are involved. C-002 (scope) is satisfied: the edit is confined to the single stated file and adds only a pointer sentence consistent with the surrounding text. C-007 (governance pipeline integrity) is not applicable because the file is a memory note, not part of challenger/defender/oracle/ledger/constitution machinery, and nothing about enforcement is weakened. C-008 (ledger immutability) is not applicable because no ledger entry is modified, deleted, reordered, or overwritten; the change merely improves the accuracy of documentation ABOUT C-008 by explicitly noting the summary is not a runbook and pointing to the authoritative source. If anything, the edit strengthens fidelity to C-008 by discouraging readers from treating an abbreviated summary as the complete procedure.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error-handling code is touched; the change is documentation prose."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Edit confined to the single target markdown file; adds a pointer sentence with no scope creep."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependencies added."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No type annotations involved."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No secrets or credentials present."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Memory note, not part of the governance pipeline machinery; no enforcement weakened."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "SATISFIED",
+          "note": "No ledger entry altered; the change accurately points readers to the authoritative C-008 checklist, reinforcing rather than undermining ledger governance."
+        }
+      ],
+      "advisories": [],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 9602,
+        "output": 1070
+      }
+    },
+    "entry_hash": "acc2b17009aff044133efce4a95eedae209b771e4aea743232c1eb0c095a3cbd"
   }
 ]
