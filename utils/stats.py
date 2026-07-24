@@ -9,6 +9,8 @@ callers own all presentation.
 import sys
 from typing import Any
 
+from ledger.chain import ANCHOR_VERDICT
+
 
 def entry_has_pipeline_error(entry: dict) -> bool:
     """True if the entry recorded a pipeline error.
@@ -69,6 +71,7 @@ def compute_ledger_stats(entries: list[dict]) -> dict:
     passed: int = 0
     vetoed: int = 0
     pipeline_errors: int = 0
+    anchors: int = 0
     citation_counts: dict[str, int] = {}
 
     for entry in entries:
@@ -79,7 +82,11 @@ def compute_ledger_stats(entries: list[dict]) -> dict:
         if entry_has_pipeline_error(entry):
             pipeline_errors += 1
 
-        if verdict == "PASS":
+        if verdict == ANCHOR_VERDICT:
+            # Chain-retirement markers are ledger bookkeeping, not governed
+            # changes. Counting them as adjudications would skew pass rates.
+            anchors += 1
+        elif verdict == "PASS":
             passed += 1
         elif verdict == "VETO":
             vetoed += 1
@@ -110,5 +117,7 @@ def compute_ledger_stats(entries: list[dict]) -> dict:
         "passed": passed,
         "vetoed": vetoed,
         "pipeline_errors": pipeline_errors,
+        "anchors": anchors,
+        "adjudicated": total - anchors,
         "most_cited": most_cited,
     }
