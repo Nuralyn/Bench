@@ -1,6 +1,6 @@
 {
   "constitution": "bench-v1",
-  "version": 4,
+  "version": 5,
   "author": "Nuralyn LLC",
   "created": "2026-04-21T00:00:00Z",
   "description": "Constitutional constraints for the Bench governance pipeline",
@@ -17,7 +17,7 @@
       "id": "C-002",
       "name": "Scope Boundary Enforcement",
       "scope": "scope-control",
-      "rule": "Changes must not modify files outside the stated task boundary. If the task says 'modify challenger.py', changes to oracle.py are a violation unless explicitly justified in the task description.",
+      "rule": "Changes must stay within one coherent scope, judged from the evidence the pipeline receives: the diff itself and the repository context it lands in. Bundling unrelated edits into a single change is a violation, and where the repository states a task boundary (for example in CLAUDE.md), edits outside it are a violation unless justified there. The absence of a stated task description is not itself a violation: the hook payload carries the tool input, not the prompt, so an author has no in-band way to supply one and must not be vetoed for its absence alone.",
       "severity": "veto",
       "rationale": "Scope creep in AI-generated code is the primary trust failure mode. Unbounded changes are ungovernable."
     },
