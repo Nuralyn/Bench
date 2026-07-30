@@ -24,7 +24,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-_BENCH_ROOT: Path = Path(__file__).resolve().parent.parent
+from utils.project import BENCH_ROOT, project_root
+
+# Ledger routing, out-of-project classification, and constitution resolution
+# must agree on which project a run belongs to; if they could disagree, a
+# change could be judged against one project's constitution while being
+# recorded in another project's ledger. utils.project is the single definition
+# all three resolve through. This alias preserves the existing internal name.
+_BENCH_ROOT: Path = BENCH_ROOT
 _DEFAULT_LEDGER_PATH: str = str(_BENCH_ROOT / "ledger" / "bench-ledger.json")
 _PROJECT_LEDGER_DIRNAME: str = ".bench"
 META_FILENAME: str = "ledger-meta.json"
@@ -49,23 +56,13 @@ def _project_root() -> Path:
     against a different project's boundary. A working directory anywhere
     inside the Bench repo counts as Bench governing itself, which is why
     editing ``utils/api.py`` while sitting in ``tests/`` is still in-project.
-    """
-    try:
-        cwd: Path = Path.cwd().resolve()
-    except OSError as exc:
-        # A deleted or unreadable CWD cannot be recovered here. Fall back to
-        # Bench's own root so the verdict is still recorded somewhere rather
-        # than lost (C-001: no silent swallowing).
-        print(
-            f"[bench ledger] cannot resolve working directory ({exc}); "
-            f"treating Bench's own repo as the project root",
-            file=sys.stderr,
-        )
-        return _BENCH_ROOT
 
-    if cwd == _BENCH_ROOT or _BENCH_ROOT in cwd.parents:
-        return _BENCH_ROOT
-    return cwd
+    Delegates to ``utils.project.project_root``, which the constitution
+    resolver also uses, so the two can never drift apart. The behavior is
+    unchanged, including the loud fallback to Bench's own root when the
+    working directory cannot be resolved (C-001).
+    """
+    return project_root()
 
 
 def resolve_ledger_path() -> str:
@@ -312,6 +309,13 @@ def append_entry(
         "timestamp": timestamp,
         "previous_hash": previous_hash,
         "constitution_hash": pipeline_result.get("constitution_hash", ""),
+        # Which files produced that hash. When a project layer is stacked on
+        # Bench's core, the hash chains two raw file hashes and is not itself
+        # any file's digest, so a hash alone would not tell an auditor which
+        # constitutions actually ruled. Absent (empty) on entries written
+        # before layering existed, and on core-only runs it simply names the
+        # single core file.
+        "constitution_sources": pipeline_result.get("constitution_sources", []),
         "verdict": pipeline_result.get("verdict"),
         "pipeline_error": bool(pipeline_result.get("pipeline_error", False)),
         "change": {

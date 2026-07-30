@@ -91,8 +91,18 @@ non-Anthropic model families remain out of scope.
 ### Absolute
 
 1. Every file change made through Claude Code's Write/Edit/MultiEdit tools is
-   governed. No exceptions and no bypasses on that path. One category sits
-   outside it and cannot be brought in: a bot-authored dependency PR, where
+   governed. No exceptions and no bypasses on that path. Other tool paths are
+   not governed at all, which is a boundary to state rather than a gap to
+   assume closed. Files written through Bash (redirection, `tee`, `sed -i`, a
+   heredoc) and through any MCP server's tools never reach the PreToolUse hook,
+   so they carry no verdict and no ledger entry. Do not add Bash to the matcher
+   to try to close this: `utils.diff.build_diff_info` returns no payload for
+   those tools, so the Challenger rejects the input and every such call
+   hard-fails into a VETO, denying ordinary shell work outright. Audit an MCP
+   server's package before registering it in a governed project — that raises
+   confidence in one version at one point in time, and it is not governance.
+   A further category sits outside it and cannot be brought in: a bot-authored
+   dependency PR, where
    Dependabot edits requirements.txt on GitHub, never reaches the PreToolUse
    hook, so it merges without a verdict or a ledger entry. Merge those by
    deliberate human decision after reading the diff, and do not enable
@@ -147,6 +157,21 @@ The constitution lives in bench.json. Current constraints:
 - **C-006**: No hardcoded secrets (veto)
 - **C-007**: Governance pipeline integrity (veto)
 - **C-008**: Ledger immutability (veto)
+
+These are the core, and they are a floor. When Bench governs another project,
+`pipeline.constitution.load_governing_constitution()` stacks that project's
+`<project>/bench.json` on top: the project may add constraints in the reserved
+`P-` namespace and raise a core severity via `severity_overrides`, and may not
+remove, downgrade, restate, or redefine anything in `C-`. Attempts to do so
+raise and fail closed rather than being ignored. Governing Bench itself uses the
+core alone. `BENCH_CONSTITUTION_PATH` overrides which layer is stacked.
+
+Readers resolve through that same function — `python -m cli constitution` prints
+the merged result and its sources — so the auditor never displays a different
+constitution than the pipeline enforced. Each ledger entry records
+`constitution_sources` (layer, path, and raw hash per file), and the entry's
+`constitution_hash` chains those raw hashes rather than digesting a merged
+re-serialization.
 
 ## API Configuration
 
