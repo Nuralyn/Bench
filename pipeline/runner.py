@@ -32,20 +32,16 @@ Optimization:
 
 import sys
 import traceback
-from pathlib import Path
 from typing import Any
 
 from ledger.chain import append_entry
 from pipeline.challenger import run_challenger
 from pipeline.constitution import (
     ConstitutionError,
-    load_constitution_snapshot,
+    load_governing_constitution,
 )
 from pipeline.defender import run_defender
 from pipeline.oracle import run_oracle
-
-_BENCH_ROOT: Path = Path(__file__).resolve().parent.parent
-_CONSTITUTION_PATH: str = str(_BENCH_ROOT / "bench.json")
 
 
 def run_governance_pipeline(
@@ -64,9 +60,22 @@ def run_governance_pipeline(
     accumulated: dict[str, int] = {"input": 0, "output": 0}
 
     try:
-        constitution, constitution_hash = load_constitution_snapshot(
-            _CONSTITUTION_PATH
-        )
+        # NOT a rename: load_constitution_snapshot still exists and is still
+        # the single-file loader. load_governing_constitution wraps it, adding
+        # the optional per-project layer stacked on Bench's core floor, and
+        # returns the contributing files' paths and raw hashes for the receipt.
+        #
+        # Snapshot semantics are unchanged and Rule 4 still holds: this is the
+        # same single call at the same point in the run, before any stage
+        # executes. It reads each contributing file exactly once, and the
+        # resulting dict is passed by reference to Challenger, Defender, and
+        # Oracle alike, so all three stages see one frozen version. Nothing
+        # re-reads the constitution mid-run.
+        (
+            constitution,
+            constitution_hash,
+            constitution_sources,
+        ) = load_governing_constitution()
     except ConstitutionError as e:
         return _finalize(
             {
@@ -107,6 +116,7 @@ def run_governance_pipeline(
                 ),
                 "challenger": challenger_result,
                 "constitution_hash": constitution_hash,
+                "constitution_sources": constitution_sources,
                 "pipeline_error": True,
                 "_tokens": accumulated,
             },
@@ -144,6 +154,7 @@ def run_governance_pipeline(
                     "challenger": challenger_result,
                     "defender": defender_result,
                     "constitution_hash": constitution_hash,
+                    "constitution_sources": constitution_sources,
                     "pipeline_error": True,
                     "_tokens": accumulated,
                 },
@@ -177,6 +188,7 @@ def run_governance_pipeline(
                 "defender": defender_result,
                 "oracle": oracle_result,
                 "constitution_hash": constitution_hash,
+                "constitution_sources": constitution_sources,
                 "pipeline_error": True,
                 "_tokens": accumulated,
             },
@@ -195,6 +207,7 @@ def run_governance_pipeline(
             "defender": defender_result,
             "oracle": oracle_result,
             "constitution_hash": constitution_hash,
+            "constitution_sources": constitution_sources,
             "_tokens": accumulated,
         },
         tool_name,

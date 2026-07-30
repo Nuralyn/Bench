@@ -184,8 +184,12 @@ class CmdConstitutionTests(unittest.TestCase):
             ],
         }
         with patch(
-            "cli.commands.load_constitution_snapshot",
-            return_value=(constitution, "deadbeef"),
+            "cli.commands.load_governing_constitution",
+            return_value=(
+                constitution,
+                "deadbeef",
+                [{"layer": "core", "path": "bench.json", "sha256": "deadbeef"}],
+            ),
         ):
             with redirect_stdout(out):
                 code: int = cmd_constitution()
@@ -195,11 +199,73 @@ class CmdConstitutionTests(unittest.TestCase):
         self.assertIn("deadbeef", text)
         self.assertIn("C-001", text)
         self.assertIn("[VETO", text)
+        self.assertIn("core", text)
+
+    def test_constitution_shows_project_layer_and_raised_severity(self) -> None:
+        """The auditor must surface what a project layer added or raised.
+
+        Displaying the core alone would show a different constitution than the
+        pipeline enforces, which is the divergence this command guards against.
+        """
+        out = io.StringIO()
+        constitution: dict = {
+            "constitution": "Bench+demo",
+            "version": "1.0",
+            "constraints": [
+                {
+                    "id": "C-005",
+                    "name": "Test Coverage",
+                    "severity": "veto",
+                    "rule": "New logic carries tests.",
+                    "severity_raised_by_project": True,
+                },
+                {
+                    "id": "P-001",
+                    "name": "No Raw SQL",
+                    "severity": "veto",
+                    "rule": "Use the query builder.",
+                },
+            ],
+        }
+        sources: list[dict] = [
+            {"layer": "core", "path": "bench.json", "sha256": "aaaa1111"},
+            {"layer": "project", "path": "/proj/bench.json", "sha256": "bbbb2222"},
+        ]
+        with patch(
+            "cli.commands.load_governing_constitution",
+            return_value=(constitution, "merged99", sources),
+        ):
+            with redirect_stdout(out):
+                code: int = cmd_constitution()
+
+        self.assertEqual(code, 0)
+        text: str = out.getvalue()
+        self.assertIn("project", text)
+        self.assertIn("/proj/bench.json", text)
+        self.assertIn("bbbb2222", text)
+        self.assertIn("severity raised by project layer", text)
+        self.assertIn("(project layer)", text)
+
+    def test_constitution_tolerates_malformed_sources(self) -> None:
+        """A non-dict source entry must not crash the auditor."""
+        out = io.StringIO()
+        constitution: dict = {
+            "constitution": "Bench",
+            "version": "1.0",
+            "constraints": [],
+        }
+        with patch(
+            "cli.commands.load_governing_constitution",
+            return_value=(constitution, "deadbeef", ["not-a-dict", None]),
+        ):
+            with redirect_stdout(out):
+                code: int = cmd_constitution()
+        self.assertEqual(code, 0)
 
     def test_load_failure_exits_one(self) -> None:
         err = io.StringIO()
         with patch(
-            "cli.commands.load_constitution_snapshot",
+            "cli.commands.load_governing_constitution",
             side_effect=ConstitutionError("missing"),
         ):
             with redirect_stderr(err):
