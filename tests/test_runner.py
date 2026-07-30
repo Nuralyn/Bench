@@ -21,9 +21,10 @@ from pipeline.constitution import ConstitutionError  # noqa: E402
 from pipeline.runner import run_governance_pipeline  # noqa: E402
 
 
-_MOCK_CONSTITUTION: tuple[dict, str] = (
+_MOCK_CONSTITUTION: tuple[dict, str, list[dict]] = (
     {"constraints": [{"id": "C-001", "name": "Test", "rule": "...", "severity": "veto"}]},
     "abc123hash",
+    [{"layer": "core", "path": "bench.json", "sha256": "abc123hash"}],
 )
 
 _DIFF: dict = {"file_path": "test.py", "change_type": "edit"}
@@ -70,7 +71,7 @@ def _pipeline_error_stage() -> dict:
 @patch("pipeline.runner.run_oracle")
 @patch("pipeline.runner.run_defender")
 @patch("pipeline.runner.run_challenger")
-@patch("pipeline.runner.load_constitution_snapshot")
+@patch("pipeline.runner.load_governing_constitution")
 class HappyPathTests(unittest.TestCase):
     def test_pass_with_clear_challenger(
         self, mock_const: MagicMock, mock_chall: MagicMock,
@@ -143,7 +144,7 @@ class HappyPathTests(unittest.TestCase):
 @patch("pipeline.runner.run_oracle")
 @patch("pipeline.runner.run_defender")
 @patch("pipeline.runner.run_challenger")
-@patch("pipeline.runner.load_constitution_snapshot")
+@patch("pipeline.runner.load_governing_constitution")
 class FailClosedTests(unittest.TestCase):
     def test_constitution_load_failure_fails_closed(
         self, mock_const: MagicMock, mock_chall: MagicMock,
@@ -204,7 +205,7 @@ class FailClosedTests(unittest.TestCase):
 @patch("pipeline.runner.run_oracle")
 @patch("pipeline.runner.run_defender")
 @patch("pipeline.runner.run_challenger")
-@patch("pipeline.runner.load_constitution_snapshot")
+@patch("pipeline.runner.load_governing_constitution")
 class ClearOptimizationTests(unittest.TestCase):
     def test_clear_challenger_skips_defender_call(
         self, mock_const: MagicMock, mock_chall: MagicMock,
@@ -231,7 +232,7 @@ class ClearOptimizationTests(unittest.TestCase):
 @patch("pipeline.runner.run_oracle")
 @patch("pipeline.runner.run_defender")
 @patch("pipeline.runner.run_challenger")
-@patch("pipeline.runner.load_constitution_snapshot")
+@patch("pipeline.runner.load_governing_constitution")
 class TokenAccumulationTests(unittest.TestCase):
     def test_tokens_accumulated_across_all_stages(
         self, mock_const: MagicMock, mock_chall: MagicMock,
@@ -278,7 +279,7 @@ class TokenAccumulationTests(unittest.TestCase):
 @patch("pipeline.runner.run_oracle")
 @patch("pipeline.runner.run_defender")
 @patch("pipeline.runner.run_challenger")
-@patch("pipeline.runner.load_constitution_snapshot")
+@patch("pipeline.runner.load_governing_constitution")
 class FinalizeTests(unittest.TestCase):
     def test_change_context_attached_to_result(
         self, mock_const: MagicMock, mock_chall: MagicMock,
