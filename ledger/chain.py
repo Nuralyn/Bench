@@ -309,6 +309,13 @@ def append_entry(
         "timestamp": timestamp,
         "previous_hash": previous_hash,
         "constitution_hash": pipeline_result.get("constitution_hash", ""),
+        # Which files produced that hash. When a project layer is stacked on
+        # Bench's core, the hash chains two raw file hashes and is not itself
+        # any file's digest, so a hash alone would not tell an auditor which
+        # constitutions actually ruled. Absent (empty) on entries written
+        # before layering existed, and on core-only runs it simply names the
+        # single core file.
+        "constitution_sources": pipeline_result.get("constitution_sources", []),
         "verdict": pipeline_result.get("verdict"),
         "pipeline_error": bool(pipeline_result.get("pipeline_error", False)),
         "change": {
