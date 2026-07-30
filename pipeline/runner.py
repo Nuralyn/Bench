@@ -78,9 +78,27 @@ def _load_project_context() -> str:
     """
     path: Path = project_root() / _CONTEXT_FILENAME
     try:
+        # A governed repository is untrusted input, and git can carry a
+        # symlink. CLAUDE.md committed as a link to ../../.ssh/id_rsa would
+        # otherwise be followed by is_file() and read, shipping the target's
+        # first _MAX_CONTEXT_CHARS to a remote model on every governed edit.
+        # is_symlink() uses lstat and does not follow the link.
+        if path.is_symlink():
+            print(
+                f"[bench runner] refusing to read {path}: it is a symlink and "
+                f"may point outside the governed project; proceeding without "
+                f"repository context",
+                file=sys.stderr,
+            )
+            return ""
         if not path.is_file():
             return ""
-        text: str = path.read_text(encoding="utf-8", errors="replace")
+        # Bounded read. read_text() would decode the whole file before the cap
+        # was applied, so an oversized CLAUDE.md could exhaust memory or stall
+        # every governed edit despite the advertised limit. One extra character
+        # is enough to detect that truncation is needed.
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            text: str = handle.read(_MAX_CONTEXT_CHARS + 1)
     except OSError as exc:
         print(
             f"[bench runner] cannot read {path} ({exc}); proceeding without "
