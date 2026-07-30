@@ -8751,5 +8751,129 @@
       }
     },
     "entry_hash": "5b48f69b0ecb10f85100c1227f1bc049ef7304f866c7faa9f2fba6ed75de3e20"
+  },
+  {
+    "entry_id": "fa21bb98-e7f7-4cb8-91a1-daa4a86060d5",
+    "timestamp": "2026-07-30T19:51:34.569227+00:00",
+    "previous_hash": "5b48f69b0ecb10f85100c1227f1bc049ef7304f866c7faa9f2fba6ed75de3e20",
+    "constitution_hash": "8fe258d5a023a0ecc81f1cc6374156c8670d754529953b2b851e9ada53c60a75",
+    "constitution_sources": [
+      {
+        "layer": "core",
+        "path": "E:\\dev\\Bench\\bench.json",
+        "sha256": "8fe258d5a023a0ecc81f1cc6374156c8670d754529953b2b851e9ada53c60a75"
+      }
+    ],
+    "verdict": "VETO",
+    "pipeline_error": true,
+    "change": {
+      "file": "unknown",
+      "tool": "Bash",
+      "diff_summary": {}
+    },
+    "challenger": {
+      "status": "PIPELINE_ERROR",
+      "error": "INVALID_CHALLENGER_INPUT: diff_info is empty or not a dict",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "defender": {},
+    "oracle": {},
+    "entry_hash": "f134f277da1afdf349f67e2b5d6dec552c03f3ffb60f285b639a34aaa624507d"
+  },
+  {
+    "entry_id": "10a04e90-fe9a-44ed-a23e-28b8fe5f852e",
+    "timestamp": "2026-07-30T19:52:40.769263+00:00",
+    "previous_hash": "f134f277da1afdf349f67e2b5d6dec552c03f3ffb60f285b639a34aaa624507d",
+    "constitution_hash": "8fe258d5a023a0ecc81f1cc6374156c8670d754529953b2b851e9ada53c60a75",
+    "constitution_sources": [
+      {
+        "layer": "core",
+        "path": "E:\\dev\\Bench\\bench.json",
+        "sha256": "8fe258d5a023a0ecc81f1cc6374156c8670d754529953b2b851e9ada53c60a75"
+      }
+    ],
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "README.md",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "README.md",
+        "change_type": "modify",
+        "old_string": "Bench does not close this hole by default, and the reason is practical. Adding\n`Bash` to the matcher would route every `git status`, test run, and build through\na three-model pipeline that takes roughly two minutes per call, which makes the\ntool unusable. Projects that want the stricter posture can add `Bash` to the\nmatcher deliberately and accept that cost. Everyone else should read the\nboundary plainly: what Bench guarantees is that changes made through the\ngoverned file tools were adjudicated and recorded \u2014 not that every change to the\nrepository was.",
+        "new_string": "Bench does not close this hole, and adding `Bash` to the matcher yourself does\nnot close it either \u2014 it breaks the tool instead. `utils.diff.build_diff_info`\nproduces a payload only for `Write`, `Edit`, and `MultiEdit`; every other tool\nyields an empty dict, which the Challenger rejects as a malformed input and the\nrunner fail-closes into a VETO. The practical result is that every `git status`,\ntest run, and build is denied without ever reaching a model. Bash matching is\nunsupported today, not merely slow, and it should not be enabled.\n\nClosing the hole properly needs a meaningful diff representation for a shell\ncommand \u2014 deciding which files `sed -i`, a heredoc, or a redirect will touch\nbefore it runs. That is a real piece of work and is not done.\n\nSo read the boundary plainly: what Bench guarantees is that changes made through\nthe governed file tools were adjudicated and recorded \u2014 not that every change to\nthe repository was."
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 8158,
+        "output": 19
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change modifies README.md documentation only, revising an explanation of why Bash matching is not supported. Both Challenger (CLEAR, no findings) and Defender (CONFIRM_CLEAR) found no issues. I independently evaluated the change against the full constitution. C-002 (scope): the change is confined to a single documentation string in README.md, within a plausible documentation-editing task boundary. C-007 (governance pipeline integrity): README.md is documentation, not pipeline code (challenger/defender/oracle/ledger/constitution); the edit does not weaken enforcement, bypass verification, or disable logging \u2014 it actually documents a stricter fail-closed behavior (Bash yields empty diff -> Challenger rejects -> VETO). No error handling (C-001), dependencies (C-003), type annotations (C-004), or secrets (C-006) are touched. C-008 (ledger) is untouched. The revised text makes a factual claim about build_diff_info and runner fail-closing to VETO for non-file tools; this is a documentation assertion whose accuracy is the author's responsibility, but it does not violate any constraint.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error-handling code changed; documentation only."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change confined to a single README.md string."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependencies affected."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No type annotations touched."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No secrets introduced."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "README is not pipeline code; edit documents stricter fail-closed behavior rather than weakening enforcement."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Ledger not modified."
+        }
+      ],
+      "advisories": [
+        "The new text asserts that non-file tools yield an empty dict which the Challenger rejects and the runner fail-closes into a VETO. Verify this claim matches the actual behavior of utils.diff.build_diff_info and the runner, since documentation drift from implementation is a maintenance risk even though it is not a constitutional violation."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 8523,
+        "output": 855
+      }
+    },
+    "entry_hash": "dde7f0083891e96fce205b2cdb32288382bc72e01378580cd0a52cd04b2139c5"
   }
 ]
