@@ -9636,5 +9636,1110 @@
       }
     },
     "entry_hash": "7d890224cbc038f4de39b8a1b815f526a29bebf0619df278ccf4073db45b0e8b"
+  },
+  {
+    "entry_id": "3f874890-883d-472e-8ebd-196e950f2cf1",
+    "timestamp": "2026-07-30T21:09:39.419573+00:00",
+    "previous_hash": "7d890224cbc038f4de39b8a1b815f526a29bebf0619df278ccf4073db45b0e8b",
+    "constitution_hash": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3",
+    "constitution_sources": [
+      {
+        "layer": "core",
+        "path": "E:\\dev\\Bench\\bench.json",
+        "sha256": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3"
+      }
+    ],
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "cli\\commands.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "cli\\commands.py",
+        "change_type": "modify",
+        "old_string": "    load_constitution_snapshot,",
+        "new_string": "    load_constitution_snapshot,\n    load_governing_constitution,"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-002",
+          "severity": "OBSERVATION",
+          "location": "cli/commands.py: import block",
+          "evidence": "load_constitution_snapshot,\\n    load_governing_constitution,",
+          "reasoning": "The diff only shows an import being added with no visible call site. Cannot confirm the new import is actually used elsewhere in this change or is part of a larger coherent edit; if it turns out unused, it would be dead code introduced without justification. Not a violation on its own, but the fragment provided is insufficient to verify scope coherence."
+        },
+        {
+          "constraint_id": "C-007",
+          "severity": "OBSERVATION",
+          "location": "cli/commands.py",
+          "evidence": "load_governing_constitution",
+          "reasoning": "cli/ is not listed among the governance-sensitive directories (pipeline/, ledger/, hooks/) in CLAUDE.md, so C-007's heightened scrutiny does not strictly apply here. Noting this only because the function name ('governing constitution') suggests it may interact with constitution-loading semantics; worth confirming it doesn't duplicate or diverge from the snapshot-based loading pipeline/constitution.py already provides, which exists specifically to guarantee frozen-per-run constitution state (Rule 4)."
+        }
+      ],
+      "_tokens": {
+        "input": 8011,
+        "output": 818
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "MITIGATE",
+          "argument": "The Challenger is correct that this fragment alone can't prove the import is used, but this is an inherent limitation of reviewing a diff hunk in isolation, not evidence of an actual scope violation. Adding an import to an existing import block is the minimal, mechanical first step of wiring up a new helper function; it is exactly what a coherent single-purpose change looks like at the granularity Bench governs (one Edit call). If load_governing_constitution is never called anywhere in cli/commands.py after this and subsequent edits, that would be a legitimate C-002 or dead-code finding at that point \u2014 but this fragment, taken on its own terms, shows a single import line added, which is unremarkable and does not itself bundle unrelated edits.",
+          "evidence": "The change_type is 'modify' with old_string/new_string limited to the import list; no other code, logic, or unrelated file is touched."
+        },
+        {
+          "finding_index": 1,
+          "position": "REBUT",
+          "argument": "CLAUDE.md explicitly enumerates pipeline/, ledger/, and hooks/ as the directories that trigger C-007's heightened scrutiny; cli/ is deliberately excluded. The Challenger acknowledges this and flags it only as a naming-based suspicion. But load_governing_constitution presumably already exists in pipeline/constitution.py (or is being imported from there) \u2014 this diff doesn't define a new constitution-loading mechanism, it imports an existing one into a CLI command file, most plausibly for a read-only CLI operation like `python -m cli constitution` (a command that already exists per CLAUDE.md's CLI documentation). Importing a pre-existing, presumably already-governed function to expose constitution data via a CLI command is not itself a weakening of enforcement, a bypass of verification, or a disabling of logging \u2014 the three specific things C-007 prohibits. Speculating that a function's name alone might 'diverge from' the snapshot pipeline, without any evidence of new logic or duplicated implementation in this diff, is not a finding \u2014 it's a flag for the reviewer to check the target file, which is outside the scope of this fragment.",
+          "evidence": "The diff only adds an import statement; no function body, no snapshot logic, no pipeline/constitution.py changes are present in this change."
+        }
+      ],
+      "summary": "This is a trivial, single-line import addition with no logic changes; the Challenger's own findings are correctly labeled OBSERVATIONs rather than violations, and neither rises to a constitutional concern based on the evidence in the diff.",
+      "_tokens": {
+        "input": 8510,
+        "output": 902
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change adds a single import line (load_governing_constitution) to an existing import block in cli/commands.py. Both Challenger findings are explicitly labeled OBSERVATIONs, not violations. On C-002, the Challenger concedes the fragment is merely insufficient to fully verify scope, and the Defender correctly notes (finding_index 0) that adding an import is the minimal mechanical first step of a coherent single-purpose edit under Bench's one-Edit-call granularity; no unrelated edits are bundled. On C-007, the Challenger itself acknowledges cli/ is not among the governance-sensitive directories (pipeline/, ledger/, hooks/) that trigger heightened scrutiny, and the Defender correctly observes that importing a presumably pre-existing constitution-loading function into a CLI file neither weakens enforcement, bypasses verification, nor disables logging \u2014 the three things C-007 prohibits. No new logic, no dependency changes, no ledger interaction, no type weakening, no secrets. The change does not violate the constitution.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Single import addition to an existing block; no unrelated edits bundled. Challenger flagged only as OBSERVATION."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "SATISFIED",
+          "note": "load_governing_constitution is an internal module import, not a new external dependency; no requirements.txt change needed."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No function signatures or type annotations touched."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "cli/ is not among the governance-sensitive directories; import of an existing function does not weaken enforcement or logging."
+        }
+      ],
+      "advisories": [
+        "The import must be wired to an actual call site in a subsequent edit; if load_governing_constitution remains unused, it becomes dead code and a legitimate C-002 finding at that point.",
+        "Confirm load_governing_constitution does not duplicate or diverge from the frozen snapshot semantics of pipeline/constitution.py (Rule 4) when its usage lands."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 9695,
+        "output": 772
+      }
+    },
+    "entry_hash": "26a75a39dc5b1dc7ab6ba6da220e443084b83f9ea5faab3c0479eb8b0cde80f7"
+  },
+  {
+    "entry_id": "749576e4-8e25-4658-9ab3-09d2d161061c",
+    "timestamp": "2026-07-30T21:10:58.127933+00:00",
+    "previous_hash": "26a75a39dc5b1dc7ab6ba6da220e443084b83f9ea5faab3c0479eb8b0cde80f7",
+    "constitution_hash": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3",
+    "constitution_sources": [
+      {
+        "layer": "core",
+        "path": "E:\\dev\\Bench\\bench.json",
+        "sha256": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3"
+      }
+    ],
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "cli\\commands.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "cli\\commands.py",
+        "change_type": "modify",
+        "old_string": "def cmd_constitution() -> int:\n    \"\"\"Print the current constitution: hash, constraint list, rules.\"\"\"\n    try:\n        constitution, constitution_hash = load_constitution_snapshot()\n    except ConstitutionError as e:\n        print(f\"[bench cli] constitution load failed: {e}\", file=sys.stderr)\n        return 1\n\n    name: str = str(constitution.get(\"constitution\", \"-\"))\n    version: Any = constitution.get(\"version\", \"-\")\n    constraints: Any = constitution.get(\"constraints\", [])\n    constraint_list: list[dict] = (\n        constraints if isinstance(constraints, list) else []\n    )\n\n    print(f\"Constitution : {name} v{version}\")\n    print(f\"Hash         : {constitution_hash}\")\n    print(f\"Constraints  : {len(constraint_list)}\")\n    print(\"=\" * 40)",
+        "new_string": "def cmd_constitution() -> int:\n    \"\"\"Print the constitution governing this project: hash, constraints, rules.\n\n    Resolves through load_governing_constitution, the same loader the pipeline\n    uses, so the auditor never displays a different constitution than the one\n    enforced. Reading the core file alone would omit a project's own layer and\n    any severity it raised, which is the divergence this command exists to\n    prevent.\n    \"\"\"\n    try:\n        (\n            constitution,\n            constitution_hash,\n            sources,\n        ) = load_governing_constitution()\n    except ConstitutionError as e:\n        print(f\"[bench cli] constitution load failed: {e}\", file=sys.stderr)\n        return 1\n\n    name: str = str(constitution.get(\"constitution\", \"-\"))\n    version: Any = constitution.get(\"version\", \"-\")\n    constraints: Any = constitution.get(\"constraints\", [])\n    constraint_list: list[dict] = (\n        constraints if isinstance(constraints, list) else []\n    )\n\n    print(f\"Constitution : {name} v{version}\")\n    print(f\"Hash         : {constitution_hash}\")\n    print(f\"Constraints  : {len(constraint_list)}\")\n    for source in sources:\n        if not isinstance(source, dict):\n            continue\n        layer: str = str(source.get(\"layer\", \"-\"))\n        print(\n            f\"  {layer:8} {source.get('path', '-')}  \"\n            f\"{_short_hash(str(source.get('sha256', '')), 12)}\"\n        )\n    print(\"=\" * 40)"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-003",
+          "severity": "CONCERN",
+          "location": "cli/commands.py: cmd_constitution body",
+          "evidence": "(constitution, constitution_hash, sources) = load_governing_constitution()",
+          "reasoning": "The diff calls a new function `load_governing_constitution` (replacing `load_constitution_snapshot`) but the corresponding import statement change is not shown in the provided diff. If this import was not added/updated elsewhere, the change would fail at runtime with a NameError. Since only the old_string/new_string body is visible, it's not possible to confirm the dependency is properly declared/wired, which matters given C-003's concern with undeclared or unverified additions."
+        },
+        {
+          "constraint_id": "C-004",
+          "severity": "OBSERVATION",
+          "location": "cli/commands.py: source loop",
+          "evidence": "layer: str = str(source.get(\"layer\", \"-\"))",
+          "reasoning": "Type annotations here are correctly preserved and even added defensively (isinstance check on source, str() coercion). This is consistent with C-004's intent and is not a violation \u2014 noted only as a positive observation."
+        },
+        {
+          "constraint_id": "C-005",
+          "severity": "CONCERN",
+          "location": "cli/commands.py: cmd_constitution (new source-printing loop, new _short_hash usage)",
+          "evidence": "for source in sources: ... print(f\"  {layer:8} {source.get('path', '-')}  \" f\"{_short_hash(str(source.get('sha256', '')), 12)}\")",
+          "reasoning": "New branching logic (iterating sources, filtering non-dict entries, formatting hash) is introduced. No test file is included in this diff. C-005 is a warning-level constraint requiring test coverage or explicit justification for deferral; neither is visible here."
+        },
+        {
+          "constraint_id": "C-007",
+          "severity": "OBSERVATION",
+          "location": "cli/commands.py: cmd_constitution",
+          "evidence": "Switch from load_constitution_snapshot() to load_governing_constitution(), and printing of per-layer sources/hashes",
+          "reasoning": "cli/commands.py is not in the explicit pipeline/ledger/hooks list CLAUDE.md calls out for automatic C-007 scrutiny, but this command is part of the constitution auditing surface. The change appears to strengthen transparency (surfacing all governing sources/hashes) rather than weaken it, so this is flagged only as an observation for Oracle awareness, not a suspected violation."
+        },
+        {
+          "constraint_id": "C-002",
+          "severity": "OBSERVATION",
+          "location": "cli/commands.py: cmd_constitution docstring and body",
+          "evidence": "Full docstring rewrite plus behavioral change to loader and output format, all within a single function",
+          "reasoning": "The docstring expansion and behavior change are coherent and serve one purpose (making the CLI reflect the actual governing constitution across layers). This appears to be a single coherent scope, not scope creep, but is noted since the diff also rewrites the entire docstring rather than making a minimal comment update."
+        }
+      ],
+      "_tokens": {
+        "input": 8899,
+        "output": 2086
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "REBUT",
+          "argument": "This finding is speculative rather than evidentiary. The Challenger correctly notes that the diff's old_string/new_string window doesn't show the import line, but the same is true of the original code's `load_constitution_snapshot` and `ConstitutionError` imports, which also aren't shown yet obviously exist and work today. A rename/replacement of one loader function for another from the same module (constitution.py, per CLAUDE.md's own module map) is a same-file, same-module swap, not a new undeclared dependency in the C-003 sense of a new package or external import. C-003 exists to catch new third-party packages or modules slipping into requirements.txt unannounced -- not a call to a differently-named function in a module already imported by this file. If `load_governing_constitution` doesn't exist in constitution.py, this is a runtime bug (NameError/ImportError), not a dependency-declaration violation, and the Challenger's own framing ('would fail at runtime') concedes it's arguing a different failure mode than what C-003 governs.",
+          "evidence": "constitution.py is listed in CLAUDE.md's own architecture map as the module owning load/hash/snapshot functions for the constitution; cli/commands.py already imports from it for the prior call site."
+        },
+        {
+          "finding_index": 1,
+          "position": "CONCEDE",
+          "argument": "Agreed -- this is a positive observation, not an adverse finding. No rebuttal needed; the type annotations in the new loop are precise and consistent with C-004's intent.",
+          "evidence": "layer: str = str(source.get(\"layer\", \"-\")) -- correctly typed, with isinstance guard before use."
+        },
+        {
+          "finding_index": 2,
+          "position": "CONCEDE",
+          "argument": "This is a fair warning-level finding. The diff introduces new branching logic (iterating sources, filtering non-dict entries, formatting per-layer hash output) with no accompanying test in the shown diff. C-005 is warning severity, not veto, so this should not block the change, but the Defender does not dispute that test coverage is genuinely absent here and should be added or explicitly deferred with justification.",
+          "evidence": "for source in sources: if not isinstance(source, dict): continue ... print(...) -- new logic, no test file present in the diff."
+        },
+        {
+          "finding_index": 3,
+          "position": "CONCEDE",
+          "argument": "Correct and well-reasoned. The change is in cli/, not pipeline/, ledger/, or hooks/, so C-007's heightened scrutiny list doesn't technically apply, and substantively the change adds transparency (surfacing every governing layer and its hash) rather than removing or weakening any check. No rebuttal needed.",
+          "evidence": "The new loop prints layer, path, and a truncated sha256 for every source the loader reports, strictly more disclosure than the prior single-hash printout."
+        },
+        {
+          "finding_index": 4,
+          "position": "CONCEDE",
+          "argument": "Agreed this is not a violation. The docstring rewrite and behavioral change both serve the single purpose of making `cmd_constitution` reflect the actual multi-layer governing constitution instead of only the core file, which is one coherent scope change, not bundled unrelated edits.",
+          "evidence": "Docstring explicitly states the rationale: 'Reading the core file alone would omit a project's own layer and any severity it raised, which is the divergence this command exists to prevent' -- directly tied to the functional change in the same diff."
+        }
+      ],
+      "summary": "The change is sound and scope-coherent; the only substantive concern is the missing test coverage for the new source-printing loop (C-005, warning), while the C-003 import-visibility concern is speculative rather than evidence of an actual undeclared dependency.",
+      "_tokens": {
+        "input": 10041,
+        "output": 1636
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change modifies cmd_constitution in cli/commands.py to resolve the constitution through load_governing_constitution (the same loader the pipeline uses) and to print per-layer sources with truncated hashes. No veto-severity constraint is clearly violated. On C-003 (Challenger finding 0, CONCERN), the Defender's rebuttal is dispositive: swapping one loader function for another within a module already imported by this file is not the addition of a new package or external dependency that C-003 governs. The Challenger's own framing ('would fail at runtime with a NameError') concedes it is describing a possible runtime bug, not an undeclared dependency; the same visibility limitation applies to the pre-existing load_constitution_snapshot and _short_hash symbols, which evidently already exist in the file. This is speculative, not evidentiary, so C-003 is not triggered. On C-007 (finding 3, OBSERVATION), both parties agree the change lives in cli/ (outside the pipeline/ledger/hooks scrutiny list) and substantively increases disclosure by surfacing every governing layer and its hash rather than weakening any check \u2014 enforcement is strengthened, not degraded, so C-007 is satisfied. On C-004 (finding 1), the new code adds precise annotations with an isinstance guard before use; no precision is discarded, so C-004 is satisfied. On C-002 (finding 4), the docstring rewrite and behavioral change serve one coherent purpose \u2014 making the auditor's view match the enforced multi-layer constitution \u2014 so this is a single scope, not scope creep. The only genuine concern is C-005 (finding 2, warning severity), which both parties agree on: the new source-printing loop has no accompanying test in the diff. Because C-005 is warning severity, it does not block the change; it is recorded as an advisory.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Docstring rewrite and loader/output change serve one coherent purpose (finding 4, Defender CONCEDE): making the CLI display the actual governing constitution across layers."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Finding 0 is speculative about an unshown import. A same-module loader swap is not a new package/external dependency; C-003 governs undeclared third-party additions, not runtime NameError risk (Defender rebuttal)."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "New loop uses precise annotations with an isinstance guard and str() coercion; no precision discarded (finding 1, both parties agree)."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "VIOLATED",
+          "note": "New branching logic (source iteration, non-dict filtering, hash formatting) lacks test coverage or explicit deferral justification. Warning severity \u2014 does not block (finding 2, Defender CONCEDE)."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "Change is in cli/ (outside pipeline/ledger/hooks) and increases transparency by disclosing all governing sources and hashes rather than weakening enforcement (finding 3, both parties agree)."
+        }
+      ],
+      "advisories": [
+        "C-005 (warning): The new per-layer source-printing loop in cmd_constitution has no accompanying test. Add a test that exercises source iteration, the non-dict filter branch, and the hash-formatting output, or record an explicit deferral justification.",
+        "Confirm out-of-window symbols resolve: load_governing_constitution and _short_hash must exist/be imported in cli/commands.py. This is not a constitutional violation but a runtime-correctness check the diff window cannot verify."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 11631,
+        "output": 1620
+      }
+    },
+    "entry_hash": "5296726bd2cd923a2f19205567be8399257cd51189d87ef91bd8ee23d1a2be84"
+  },
+  {
+    "entry_id": "19ea8d90-b01a-48f5-99b9-4266ec3a092a",
+    "timestamp": "2026-07-30T21:11:53.591881+00:00",
+    "previous_hash": "5296726bd2cd923a2f19205567be8399257cd51189d87ef91bd8ee23d1a2be84",
+    "constitution_hash": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3",
+    "constitution_sources": [
+      {
+        "layer": "core",
+        "path": "E:\\dev\\Bench\\bench.json",
+        "sha256": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3"
+      }
+    ],
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "cli\\commands.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "cli\\commands.py",
+        "change_type": "modify",
+        "old_string": "    load_constitution_snapshot,\n    load_governing_constitution,",
+        "new_string": "    load_governing_constitution,"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-002",
+          "severity": "CONCERN",
+          "location": "cli/commands.py (import block)",
+          "evidence": "removal of `load_constitution_snapshot,` from the import list, leaving only `load_governing_constitution,`",
+          "reasoning": "No file context was provided beyond the import lines, so it cannot be confirmed whether `load_constitution_snapshot` is unused elsewhere in cli/commands.py. If any function in the file still calls `load_constitution_snapshot(...)`, this edit introduces a NameError at runtime. This is a correctness/scope concern rather than a confirmed violation, since the diff alone doesn't prove the removal is safe."
+        },
+        {
+          "constraint_id": "C-007",
+          "severity": "OBSERVATION",
+          "location": "cli/commands.py",
+          "evidence": "Import change touches a function used by pipeline/constitution.py (`load_constitution_snapshot`)",
+          "reasoning": "cli/commands.py itself is not in pipeline/, ledger/, or hooks/, so C-007's stated scope doesn't directly apply, but the removed symbol originates from the constitution-loading module. Worth noting in case the CLI relies on snapshot semantics (frozen-per-run loading) versus live reload via `load_governing_constitution`, which could have governance implications if CLI commands are expected to reflect a consistent snapshot rather than hot-reloaded state."
+        }
+      ],
+      "_tokens": {
+        "input": 8009,
+        "output": 864
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "MITIGATE",
+          "argument": "This is a legitimate correctness concern in principle \u2014 an unused-import removal is only safe if the symbol truly has no remaining call sites in the file. However, the Challenger's own finding acknowledges the diff alone can't confirm or deny this, and the burden of proof for a veto-worthy claim should require positive evidence of breakage, not merely the absence of evidence of safety. This is a single-line import removal, the most common and mechanically verifiable class of cleanup edit (an unused-import lint fix). If `load_constitution_snapshot` were still called elsewhere in cli/commands.py, that would be a straightforward NameError caught immediately by running any CLI command that touches the affected code path, and by static tooling (flake8/pyflakes) before it ever reached this pipeline. Absent concrete evidence that a call site remains, this should be treated as a plausible, low-risk cleanup rather than a confirmed defect.",
+          "evidence": "The diff shows only the import line changing, consistent with removing a dependency after its last use was refactored out. No other lines in the diff reference load_constitution_snapshot."
+        },
+        {
+          "finding_index": 1,
+          "position": "REBUT",
+          "argument": "The Challenger correctly notes that cli/commands.py is not itself in pipeline/, ledger/, or hooks/, meaning C-007's explicit scope does not apply \u2014 and then raises a hypothetical governance concern anyway. This stretches C-007 past its literal boundary. C-007 governs 'changes to the governance pipeline itself,' explicitly enumerating challenger, defender, oracle, ledger, and constitution modules. The CLI is a downstream consumer of pipeline/constitution.py, not the pipeline itself; removing an unused import from a CLI helper does not weaken enforcement, bypass verification, or disable logging as required to trigger C-007. If the CLI's use of `load_governing_constitution` versus `load_constitution_snapshot` were semantically consequential (e.g., a CLI command that must reflect a frozen per-run snapshot), that would be a C-002/correctness issue tied to intended CLI behavior, not a pipeline-integrity violation. As presented, this finding is speculative and self-admittedly outside C-007's stated scope.",
+          "evidence": "Constitution text: 'Changes to the governance pipeline itself (challenger, defender, oracle, ledger, constitution) must not weaken enforcement...' \u2014 cli/ is not listed, and the Challenger itself states 'C-007's stated scope doesn't directly apply.'"
+        }
+      ],
+      "summary": "The change is a minor, plausible import cleanup; the only real risk is an unverified but easily-checked possibility of a leftover call site, which is a mitigable correctness concern rather than a constitutional violation, and the C-007 finding is speculative and outside that constraint's explicit scope.",
+      "_tokens": {
+        "input": 8557,
+        "output": 1018
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change is a single-line removal of an unused import (`load_constitution_snapshot`) from cli/commands.py, leaving `load_governing_constitution`. The Challenger raised two items, neither rising to a confirmed veto-severity violation. On C-002, the Challenger explicitly frames the correctness risk as a CONCERN and admits the diff alone cannot prove a remaining call site exists ('a correctness/scope concern rather than a confirmed violation'). The Defender's MITIGATE position correctly notes the burden of proof for a binding veto requires positive evidence of breakage, not absence of evidence of safety; no line in the diff references load_constitution_snapshot beyond its removal, consistent with a routine unused-import cleanup. Under C-002 a single-scope import cleanup is coherent and bounded. On C-007, the Challenger itself concedes 'C-007's stated scope doesn't directly apply' because cli/commands.py is not in pipeline/, ledger/, or hooks/, and the Defender's REBUTTAL is sound: removing an unused import from a downstream CLI consumer does not weaken enforcement, bypass verification, or disable logging. I independently reviewed the remaining constraints: no error handling is touched (C-001), no dependencies added (C-003), no type annotations changed (C-004), no secrets (C-006), and the ledger is untouched (C-008). No veto trigger is clearly and adequately established.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No catch blocks or error handling touched by an import-line removal."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Single coherent scope: an unused-import cleanup. Challenger's NameError concern is unconfirmed and, per the Defender, requires positive evidence of a remaining call site to be a violation, which is absent."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "The change removes an import; it adds no dependency."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No type annotations added, removed, or weakened."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No secrets or credentials involved."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "cli/commands.py is not part of the enumerated governance pipeline (pipeline/, ledger/, hooks/). The Challenger conceded scope does not apply and the removal does not weaken enforcement, bypass verification, or disable logging."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger entries modified, deleted, or reordered."
+        }
+      ],
+      "advisories": [
+        "Verify that no remaining call site in cli/commands.py references load_constitution_snapshot. A leftover reference would raise a NameError at runtime. This is mechanically checkable with pyflakes/flake8 or by exercising the affected CLI command before commit.",
+        "If any CLI command is expected to reflect a frozen per-run constitution snapshot rather than a hot-reloaded governing constitution, confirm that dropping load_constitution_snapshot does not change the intended semantics (a C-002/correctness consideration, not a violation as presented)."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 9855,
+        "output": 1333
+      }
+    },
+    "entry_hash": "169c56a41b5806ecd2bba3dcfed007601ae4c9e6c9f3dea2661a526b442538d0"
+  },
+  {
+    "entry_id": "cdb6d9f4-2cf1-401e-a3f2-b89af123ce2d",
+    "timestamp": "2026-07-30T21:12:43.904806+00:00",
+    "previous_hash": "169c56a41b5806ecd2bba3dcfed007601ae4c9e6c9f3dea2661a526b442538d0",
+    "constitution_hash": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3",
+    "constitution_sources": [
+      {
+        "layer": "core",
+        "path": "E:\\dev\\Bench\\bench.json",
+        "sha256": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3"
+      }
+    ],
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "cli\\commands.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "cli\\commands.py",
+        "change_type": "modify",
+        "old_string": "        print()\n        print(f\"  {cid}  [{severity:7}]  {cname}\")\n        print(f\"           {rule}\")",
+        "new_string": "        origin: str = \"\"\n        if constraint.get(\"severity_raised_by_project\"):\n            origin = \"  (severity raised by project layer)\"\n        elif cid.startswith(\"P-\"):\n            origin = \"  (project layer)\"\n        print()\n        print(f\"  {cid}  [{severity:7}]  {cname}{origin}\")\n        print(f\"           {rule}\")"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-005",
+          "severity": "OBSERVATION",
+          "location": "cli/commands.py (new origin annotation logic)",
+          "evidence": "if constraint.get(\"severity_raised_by_project\"): ... elif cid.startswith(\"P-\"): origin = \"  (project layer)\"",
+          "reasoning": "This introduces new conditional branches (two new code paths) for the constraint-listing output. No accompanying test change is present in the diff. C-005 is a warning-level constraint, so this is worth flagging but not blocking, and may be justified elsewhere in the codebase's test suite."
+        },
+        {
+          "constraint_id": "C-002",
+          "severity": "OBSERVATION",
+          "location": "cli/commands.py",
+          "evidence": "cid.startswith(\"P-\")",
+          "reasoning": "The change assumes a 'project layer' constraint concept (P-prefixed IDs, severity_raised_by_project field) that isn't visible in the provided constitution snapshot (which only contains C-XXX entries). This is likely part of a larger, previously-introduced feature and this diff appears to be a coherent, narrow follow-on (display formatting only), so scope looks fine, but it's noted since the supporting data model isn't shown in this context."
+        }
+      ],
+      "_tokens": {
+        "input": 8165,
+        "output": 1016
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "MITIGATE",
+          "argument": "This is a two-line display-formatting change: it computes a string annotation and appends it to an existing print statement. There is no new business logic, no new data transformation, and no new failure mode\u2014just a conditional string label for CLI output. The 'branches' are trivial if/elif string selection, not logic worth a dedicated test case. C-005 is a warning, not a veto, and its own text calls for tests on 'new logic'\u2014display strings in a CLI listing command are a borderline case at best. Existing CLI display commands in this codebase (e.g. severity/name formatting on the same print line) are not shown to have dedicated unit tests either, suggesting this matches established test-coverage practice for cli/commands.py's print helpers.",
+          "evidence": "The diff only touches print() formatting inside what is presumably a constraint-listing loop; no new function, no new return path, no new state is introduced."
+        },
+        {
+          "finding_index": 1,
+          "position": "REBUT",
+          "argument": "The Challenger correctly identifies that 'P-' prefixed IDs and severity_raised_by_project aren't defined in this constitution snapshot, but concludes scope is fine anyway \u2014 that's the correct conclusion, so this is effectively a non-finding dressed as an observation. This diff is read-only display logic (a CLI print helper reading constraint dict fields with .get() and .startswith()), not a definition of the project-layer feature itself. Reading fields that may or may not be present via dict.get() is defensive, not scope-expanding \u2014 if severity_raised_by_project is absent, the code simply skips that branch. This diff doesn't invent the P- layer concept; it only prepares the display path to handle it if present elsewhere in the system. Nothing here violates C-002's requirement that changes stay within one coherent scope: the entire diff is confined to a single print statement.",
+          "evidence": "old_string and new_string are scoped entirely to a single print() call; no new imports, no new functions, no changes to data model or constitution loading are present in the diff."
+        }
+      ],
+      "summary": "The change is a minimal, self-contained CLI display enhancement with no logic risk, type-safety impact, or scope violation; the Challenger's own findings concede as much and amount to non-blocking observations.",
+      "_tokens": {
+        "input": 8659,
+        "output": 799
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change is a self-contained CLI display enhancement scoped entirely to a single print() statement in cli/commands.py. It computes an 'origin' string annotation and appends it to existing output. The Challenger raised only two OBSERVATION-level findings (C-005 and C-002), both of which the Defender adequately addressed. On C-005 (warning severity, non-blocking), the added if/elif is trivial string selection for CLI output, not new business logic or a new failure mode; even if considered new logic, C-005 is a warning and cannot compel a veto. On C-002, both the Challenger and Defender agree scope is fine: the diff reads pre-existing dict fields defensively via .get() and .startswith() and does not invent or define the project-layer data model, keeping the change within one coherent scope. Reviewing the change against the full constitution: C-001 (no new catch blocks), C-003 (no new imports), C-004 (the new variable is properly annotated 'origin: str = \"\"', strengthening not weakening type safety), C-006 (no secrets), C-007 (cli/commands.py is not a governance pipeline file per the constraint's enumerated targets), and C-008 (no ledger mutation) are all satisfied.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No exception handling introduced or modified."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change confined to a single print() statement; reads existing fields defensively via .get()/.startswith() without defining new data model. Both Challenger and Defender concur scope is coherent."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new imports or dependencies added."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "New local variable carries an explicit annotation ('origin: str'); no existing annotations weakened."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "SATISFIED",
+          "note": "Warning-level. Added branches are trivial string selection for CLI display; Defender notes existing print helpers in this file lack dedicated tests, matching established practice. Non-blocking."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No credentials or secrets present."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "cli/commands.py is not a governance pipeline file (challenger, defender, oracle, ledger, constitution) named in the constraint."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger entries modified, deleted, or overwritten."
+        }
+      ],
+      "advisories": [
+        "The added branches depend on 'severity_raised_by_project' fields and 'P-' prefixed constraint IDs which are not present in the current constitution snapshot. Confirm the project-layer feature that populates these is fully wired elsewhere so the display path is exercised as intended."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 9739,
+        "output": 1215
+      }
+    },
+    "entry_hash": "5292a1483c05d99481acb92acc63a2e7dd521c6c49c60de1b1e908fc4e06b080"
+  },
+  {
+    "entry_id": "432f785a-1a5f-478c-a316-808bdbf151c4",
+    "timestamp": "2026-07-30T21:13:48.569384+00:00",
+    "previous_hash": "5292a1483c05d99481acb92acc63a2e7dd521c6c49c60de1b1e908fc4e06b080",
+    "constitution_hash": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3",
+    "constitution_sources": [
+      {
+        "layer": "core",
+        "path": "E:\\dev\\Bench\\bench.json",
+        "sha256": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3"
+      }
+    ],
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "tests\\test_commands.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "tests\\test_commands.py",
+        "change_type": "modify",
+        "old_string": "            \"cli.commands.load_constitution_snapshot\",",
+        "new_string": "            \"cli.commands.load_governing_constitution\","
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-002",
+          "severity": "OBSERVATION",
+          "location": "tests\\test_commands.py: mock patch target string",
+          "evidence": "\"cli.commands.load_constitution_snapshot\" -> \"cli.commands.load_governing_constitution\"",
+          "reasoning": "This diff only shows the test-side rename of a patched symbol. No corresponding change to cli/commands.py (or wherever load_constitution_snapshot/load_governing_constitution is defined) is included in this payload, so it cannot be verified from this diff alone that the source function was actually renamed to match. If the source still exports load_constitution_snapshot, this test will fail to patch the correct target (mock.patch would silently succeed on a nonexistent-but-creatable attribute or raise AttributeError depending on usage). This is not evidence of a scope violation itself, just a note that the change is incomplete/unverifiable in isolation."
+        }
+      ],
+      "_tokens": {
+        "input": 8016,
+        "output": 736
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "MITIGATE",
+          "argument": "The Challenger is correct that this diff, in isolation, does not prove the source-side rename occurred \u2014 but that's an artifact of the payload being a single-file, single-hunk diff, not evidence of an actual defect. Per CLAUDE.md rule 14 ('One change per tool call. Do not batch unrelated changes into a single Write/Edit operation'), a rename that spans a source file and its test file is legitimately submitted as two separate governed edits. This is the test-side half. If the corresponding source-side rename in cli/commands.py has already landed (or lands as a companion PreToolUse-governed edit), the mock patch target is correct and the test will pass; if it hasn't landed yet, the test will fail loudly on the next run (AttributeError from mock.patch against a nonexistent attribute, not a silent pass) \u2014 which is a normal, visible CI failure mode, not a silent-swallowing or governance violation under C-001 or C-002. The Challenger explicitly frames this as an OBSERVATION rather than a violation of any specific constraint, and even acknowledges it isn't evidence of a scope violation. There's no constraint that requires a single diff to prove its own external consistency with files outside the diff.",
+          "evidence": "CLAUDE.md rule 14 sanctions splitting a coherent rename into separate single-file tool calls; mock.patch fails with AttributeError (visible, not silent) when the target doesn't exist, so the failure mode the Challenger raises is self-correcting and observable rather than a hidden defect."
+        }
+      ],
+      "summary": "The change is a minimal, correctly-scoped test-file edit whose only flagged issue is an unverifiable cross-file consistency question that the Challenger itself concedes is not a constraint violation.",
+      "_tokens": {
+        "input": 8389,
+        "output": 641
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change is a one-line rename of a mock patch target in a test file, from \"cli.commands.load_constitution_snapshot\" to \"cli.commands.load_governing_constitution\". The Challenger raised a single OBSERVATION (not a violation) under C-002, noting only that cross-file consistency with the source definition cannot be verified from this isolated diff. The Defender correctly points out that CLAUDE.md rule 14 sanctions splitting a coherent rename into separate single-file governed edits, and that the failure mode raised (mock.patch against a nonexistent attribute) surfaces as a visible AttributeError in CI, not a silent failure \u2014 so C-001 is not implicated. Evaluating against the constitution as a whole: this is a test-side identifier rename with no new imports (C-003 N/A), no type annotation changes (C-004 N/A), no secrets (C-006 N/A), and no ledger touch (C-008 N/A). C-007 does not apply \u2014 test_commands.py is not part of the governance pipeline enforcement path (challenger/defender/oracle/ledger/constitution); it is a test of CLI commands. The change stays within a single coherent scope (C-002 SATISFIED). No veto-severity constraint is clearly violated.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "SATISFIED",
+          "note": "No catch blocks touched; the raised failure mode (AttributeError) is visible, not silent."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Single-file, single-hunk test rename is one coherent scope. Cross-file consistency is an unverifiable observation, not a scope violation, as the Challenger itself concedes."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependencies added."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No type annotations changed."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No secrets or credentials involved."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "test_commands.py is a CLI test, not part of the governance enforcement pipeline; enforcement is not weakened."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger entries touched."
+        }
+      ],
+      "advisories": [
+        "Ensure the corresponding source-side rename of load_constitution_snapshot to load_governing_constitution in cli/commands.py has landed or lands as a companion governed edit; otherwise this test will fail loudly (AttributeError) on the next run."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 9305,
+        "output": 942
+      }
+    },
+    "entry_hash": "5f9d1ff4cf79187086aac075b9758059dfd762336ae242489cc2087298f5cf87"
+  },
+  {
+    "entry_id": "ff3d29e7-3932-4133-86ac-be1840727f65",
+    "timestamp": "2026-07-30T21:14:08.694472+00:00",
+    "previous_hash": "5f9d1ff4cf79187086aac075b9758059dfd762336ae242489cc2087298f5cf87",
+    "constitution_hash": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3",
+    "constitution_sources": [
+      {
+        "layer": "core",
+        "path": "E:\\dev\\Bench\\bench.json",
+        "sha256": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3"
+      }
+    ],
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "tests\\test_commands.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "tests\\test_commands.py",
+        "change_type": "modify",
+        "old_string": "            return_value=(constitution, \"deadbeef\"),",
+        "new_string": "            return_value=(\n                constitution,\n                \"deadbeef\",\n                [{\"layer\": \"core\", \"path\": \"bench.json\", \"sha256\": \"deadbeef\"}],\n            ),"
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 8074,
+        "output": 19
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "This is a test file modification updating a mock's return_value to include a third tuple element (a layer manifest list) matching a presumably updated function signature. The Challenger returned CLEAR and the Defender confirmed. Reviewing against the full constitution: C-001 is NOT_APPLICABLE (no error handling changes). C-002 is SATISFIED \u2014 the change is a single coherent update to one test's mock return value. C-003 is SATISFIED \u2014 no new imports or dependencies. C-004 is SATISFIED \u2014 no type annotations removed or weakened; the added dict literal is inline test data. C-006 is SATISFIED \u2014 the 'deadbeef' string is a test hash fixture, not a credential. C-007 is NOT_APPLICABLE \u2014 this is a test file, not a pipeline/ledger/constitution file, and the change updates test expectations rather than weakening enforcement. C-008 is NOT_APPLICABLE \u2014 no ledger modification. The change is a minimal surgical update to keep a test's mock in sync with an expanded return signature.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error handling code involved."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Single coherent edit to one test mock return value."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "SATISFIED",
+          "note": "No new imports or dependencies."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "No type annotations weakened; only test data literal added."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "'deadbeef' is a test hash fixture, not a secret."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Test file, not a governance pipeline file; enforcement not weakened."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger interaction."
+        }
+      ],
+      "advisories": [
+        "This change assumes the underlying function now returns a 3-tuple with a layer manifest as the third element. Ensure the production code change driving this test update passed through governance as well."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 8439,
+        "output": 768
+      }
+    },
+    "entry_hash": "b49ec5609c523ded927ef1156e59f9a33f78f32db2e36aa5b11c8c4bb84e6870"
+  },
+  {
+    "entry_id": "585a41a2-6607-426f-b860-6927e6a56e72",
+    "timestamp": "2026-07-30T21:14:43.258280+00:00",
+    "previous_hash": "b49ec5609c523ded927ef1156e59f9a33f78f32db2e36aa5b11c8c4bb84e6870",
+    "constitution_hash": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3",
+    "constitution_sources": [
+      {
+        "layer": "core",
+        "path": "E:\\dev\\Bench\\bench.json",
+        "sha256": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3"
+      }
+    ],
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "tests\\test_commands.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "tests\\test_commands.py",
+        "change_type": "modify",
+        "old_string": "        self.assertIn(\"Bench v1.0\", text)\n        self.assertIn(\"deadbeef\", text)\n        self.assertIn(\"C-001\", text)",
+        "new_string": "        self.assertIn(\"Bench v1.0\", text)\n        self.assertIn(\"deadbeef\", text)\n        self.assertIn(\"C-001\", text)\n        self.assertIn(\"core\", text)\n\n    def test_constitution_shows_project_layer_and_raised_severity(self) -> None:\n        \"\"\"The auditor must surface what a project layer added or raised.\n\n        Displaying the core alone would show a different constitution than the\n        pipeline enforces, which is the divergence this command guards against.\n        \"\"\"\n        out: StringIO = StringIO()\n        constitution: dict = {\n            \"constitution\": \"Bench+demo\",\n            \"version\": \"1.0\",\n            \"constraints\": [\n                {\n                    \"id\": \"C-005\",\n                    \"name\": \"Test Coverage\",\n                    \"severity\": \"veto\",\n                    \"rule\": \"New logic carries tests.\",\n                    \"severity_raised_by_project\": True,\n                },\n                {\n                    \"id\": \"P-001\",\n                    \"name\": \"No Raw SQL\",\n                    \"severity\": \"veto\",\n                    \"rule\": \"Use the query builder.\",\n                },\n            ],\n        }\n        sources: list[dict] = [\n            {\"layer\": \"core\", \"path\": \"bench.json\", \"sha256\": \"aaaa1111\"},\n            {\"layer\": \"project\", \"path\": \"/proj/bench.json\", \"sha256\": \"bbbb2222\"},\n        ]\n        with patch(\n            \"cli.commands.load_governing_constitution\",\n            return_value=(constitution, \"merged99\", sources),\n        ):\n            with redirect_stdout(out):\n                code: int = cmd_constitution()\n\n        self.assertEqual(code, 0)\n        text: str = out.getvalue()\n        self.assertIn(\"project\", text)\n        self.assertIn(\"/proj/bench.json\", text)\n        self.assertIn(\"bbbb2222\", text)\n        self.assertIn(\"severity raised by project layer\", text)\n        self.assertIn(\"(project layer)\", text)\n\n    def test_constitution_tolerates_malformed_sources(self) -> None:\n        \"\"\"A non-dict source entry must not crash the auditor.\"\"\"\n        out: StringIO = StringIO()\n        constitution: dict = {\n            \"constitution\": \"Bench\",\n            \"version\": \"1.0\",\n            \"constraints\": [],\n        }\n        with patch(\n            \"cli.commands.load_governing_constitution\",\n            return_value=(constitution, \"deadbeef\", [\"not-a-dict\", None]),\n        ):\n            with redirect_stdout(out):\n                code: int = cmd_constitution()\n        self.assertEqual(code, 0)"
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 9079,
+        "output": 19
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change adds test cases to tests/test_commands.py verifying that cmd_constitution surfaces project-layer additions, raised severities, and tolerates malformed source entries. Both Challenger (CLEAR) and Defender (CONFIRM_CLEAR) found no issues. Independent review confirms: this is a test-only file, not a pipeline file under C-007 scope (pipeline/, ledger/, hooks/, constitution), so C-007 is not applicable. The tests use patch/redirect_stdout/StringIO which are stdlib/existing test imports, so C-003 is satisfied assuming no new import lines were added (the diff shows uses of patch, StringIO, redirect_stdout consistent with existing test infrastructure). Type annotations are present on all new locals and function signatures (-> None, dict, list[dict], StringIO, int), satisfying C-004. The malformed-sources test actually strengthens error-handling verification rather than swallowing errors, consistent with C-001. No secrets (C-006). Scope is coherent: all additions relate to testing cmd_constitution's layer-display behavior (C-002). These changes ADD test coverage, aligning with C-005.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Test code adds assertions; no catch blocks introduced."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "All new tests target cmd_constitution layer/severity display, one coherent scope."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "SATISFIED",
+          "note": "Uses patch, StringIO, redirect_stdout \u2014 standard test imports already present in file; no new dependency evident in diff."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "New signatures and locals carry explicit annotations; dict/list[dict] usage is idiomatic and permitted."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "SATISFIED",
+          "note": "Change increases test coverage for cmd_constitution branches."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Test hashes like 'bbbb2222' are fixtures, not credentials."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "tests/ is not pipeline, ledger, hooks, or constitution; enforcement unaffected."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger interaction."
+        }
+      ],
+      "advisories": [
+        "Verify that patch, StringIO, and redirect_stdout are already imported at the top of test_commands.py; if any is newly required, ensure it is a stdlib import (unittest.mock, io, contextlib) which needs no requirements.txt entry."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 9444,
+        "output": 986
+      }
+    },
+    "entry_hash": "b328e3389ec79896d87c5a039fcd1023f73ae842d81ac9b89520da84ad335c56"
+  },
+  {
+    "entry_id": "bb99afa6-3253-421d-a1a2-0efffdfdb135",
+    "timestamp": "2026-07-30T21:15:28.484068+00:00",
+    "previous_hash": "b328e3389ec79896d87c5a039fcd1023f73ae842d81ac9b89520da84ad335c56",
+    "constitution_hash": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3",
+    "constitution_sources": [
+      {
+        "layer": "core",
+        "path": "E:\\dev\\Bench\\bench.json",
+        "sha256": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3"
+      }
+    ],
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "tests\\test_commands.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "tests\\test_commands.py",
+        "change_type": "modify",
+        "old_string": "        out: StringIO = StringIO()\n        constitution: dict = {",
+        "new_string": "        out = io.StringIO()\n        constitution: dict = {"
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 8022,
+        "output": 19
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change is a single-scope edit within a test file, swapping a bare `StringIO()` call for the `io.StringIO()` fully-qualified form and dropping the redundant local annotation `out: StringIO`. The Challenger returned CLEAR and the Defender confirmed. I independently reviewed the diff against the full constitution. C-002 is satisfied: this is one coherent, cosmetic change confined to test_commands.py with no bundled unrelated edits. C-003 is not implicated: `io` is a Python standard-library module requiring no requirements.txt entry. C-004 targets function signature annotations (parameter/return); the removed annotation is a local variable binding whose type is directly inferable from `io.StringIO()`, so no signature precision was discarded. C-001, C-006, C-007, and C-008 have no bearing \u2014 no error handling, secrets, pipeline files, or ledger entries are touched.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Single cosmetic change confined to one test file; no scope creep."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "`io` is stdlib; the qualified `io.StringIO` reference adds no new dependency."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "Removed annotation is a local variable, not a parameter/return; type is inferable from io.StringIO()."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Change is in tests/, not in pipeline, ledger, or constitution files."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger entries touched."
+        }
+      ],
+      "advisories": [
+        "The edit relies on `io` being imported at module scope; if the file previously used `from io import StringIO` without importing `io` itself, this would raise NameError. Verify `import io` exists in test_commands.py."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 8387,
+        "output": 1151
+      }
+    },
+    "entry_hash": "d12080c1a89244b7f5c27f92260c87912c71a1a85fbada1b2428d2cdbbdb2cf0"
+  },
+  {
+    "entry_id": "285b1117-0608-4366-9530-a66d426aa669",
+    "timestamp": "2026-07-30T21:16:36.835064+00:00",
+    "previous_hash": "d12080c1a89244b7f5c27f92260c87912c71a1a85fbada1b2428d2cdbbdb2cf0",
+    "constitution_hash": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3",
+    "constitution_sources": [
+      {
+        "layer": "core",
+        "path": "E:\\dev\\Bench\\bench.json",
+        "sha256": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3"
+      }
+    ],
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "tests\\test_commands.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "tests\\test_commands.py",
+        "change_type": "modify",
+        "old_string": "        self.assertEqual(code, 0)\n        self.assertIn(\"[VETO\", text)\n\n    def test_load_failure_exits_one(self) -> None:",
+        "new_string": "        self.assertEqual(code, 0)\n\n    def test_load_failure_exits_one(self) -> None:"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-005",
+          "severity": "CONCERN",
+          "location": "tests\\test_commands.py",
+          "evidence": "removed line: self.assertIn(\"[VETO\", text)",
+          "reasoning": "The diff removes an assertion that verified the VETO marker appears in output text, weakening what the test actually checks. Without seeing the surrounding test body or the reason for removal, this reduces verification coverage for behavior that was presumably being tested (VETO message formatting/content). C-005 requires test coverage for logic; removing an existing assertion without an explicit justification in the diff is a reduction in coverage of that logic path."
+        },
+        {
+          "constraint_id": "C-002",
+          "severity": "OBSERVATION",
+          "location": "tests\\test_commands.py",
+          "evidence": "Entire diff is a single assertion removal with no accompanying explanation",
+          "reasoning": "No context is given for why this assertion is being removed (e.g., because the underlying behavior changed elsewhere, or the assertion was flaky/incorrect). If this edit is isolated with no corresponding production-code change that justifies it, it's worth confirming the removal traces to a legitimate reason rather than being an unexplained coverage reduction."
+        }
+      ],
+      "_tokens": {
+        "input": 8073,
+        "output": 715
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "MITIGATE",
+          "argument": "The finding is speculative rather than substantiated. C-005 targets missing coverage for *new* logic/branches, not the removal of a single assertion line from an existing test whose other assertions (assertEqual(code, 0)) remain intact and still verify the core behavior under test (exit code). Without visibility into the rest of the test body or the production code it exercises, the Challenger cannot establish that this removal actually drops coverage of a still-live behavior versus removing an assertion that no longer applies (e.g. the test may have been renamed/repurposed, or the VETO-marker check may have been redundant with another test, or the code path that emitted '[VETO' text was itself removed/relocated elsewhere and is covered by a dedicated VETO-formatting test). The diff snippet alone does not show a corresponding behavior removal, but it also does not prove one is absent \u2014 the burden of a CONCERN finding on a single-line test diff should be tied to observable evidence, and here the evidence is thin.",
+          "evidence": "Only the assertion `self.assertIn(\"[VETO\", text)` was removed; `self.assertEqual(code, 0)` \u2014 the primary assertion of that test \u2014 is untouched. This is consistent with narrowing an over-broad assertion rather than deleting the test's core check."
+        },
+        {
+          "finding_index": 1,
+          "position": "REBUT",
+          "argument": "This is an OBSERVATION, not a substantiated violation, and by the Challenger's own hedging language ('worth confirming') it concedes it cannot establish a violation. C-002 is about bundling unrelated edits into one change or violating a stated task boundary \u2014 a single-line test edit is definitionally in-scope of itself; there is no bundling here at all. The constitution is explicit that the absence of a stated task description is not itself a violation, since the hook payload carries only tool input, not surrounding intent. Asking for justification the pipeline structurally cannot receive is asking the diff to prove a negative it has no channel to prove.",
+          "evidence": "Constraint C-002 text: 'The absence of a stated task description is not itself a violation... an author has no in-band way to supply one and must not be vetoed for its absence alone.' The diff is a single, self-contained, minimal edit \u2014 the opposite of scope creep."
+        }
+      ],
+      "summary": "The change is a minimal, single-assertion test edit; C-002 does not apply given the constitution's explicit carve-out for missing task context, and the C-005 concern is plausible but unproven without more visibility into whether the removed assertion still corresponds to live production behavior.",
+      "_tokens": {
+        "input": 8551,
+        "output": 909
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change removes a single assertion (self.assertIn(\"[VETO\", text)) from a test in tests\\test_commands.py. I evaluated this against the full constitution. C-005 (Test Coverage) is a warning-severity constraint, not veto, so even if the Challenger's concern were fully substantiated it could not trigger a veto. The Defender correctly notes that C-005 targets missing coverage for new logic/branches, not the removal of an existing assertion; the primary assertion (assertEqual(code, 0)) remains intact. C-002 (Scope) does not apply: a single self-contained assertion removal is definitionally within its own scope, and the constitution explicitly carves out that absence of a stated task description is not a violation. The Challenger's own C-002 finding is an OBSERVATION and its C-005 finding is a CONCERN \u2014 neither rises to a substantiated veto-level violation. C-007 warrants scrutiny because governance-adjacent tests matter, but this file is in tests/, not pipeline/ledger/hooks, and the edit does not weaken enforcement logic, bypass verification, or disable logging \u2014 it only trims one assertion in a test that still verifies exit code. No other veto constraint (C-001, C-003, C-004, C-006, C-008) is implicated by this diff.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error-handling code touched."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Single self-contained edit; constitution's carve-out for absent task description applies (per Defender rebuttal 1)."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependencies changed."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No type annotations altered."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "SATISFIED",
+          "note": "Warning severity; removal of one assertion from an existing test whose core assertion (exit code) remains does not constitute missing coverage of new logic. Cannot trigger veto regardless."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No secrets present."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "Test file, not pipeline/ledger/hooks; does not weaken enforcement, bypass verification, or disable logging."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger code touched."
+        }
+      ],
+      "advisories": [
+        "The removed assertion (self.assertIn(\"[VETO\", text)) reduced verification of VETO marker formatting. Confirm this behavior is covered by another dedicated test, or that the removal traces to a legitimate behavior change, so VETO output formatting does not silently regress (Challenger C-005 concern)."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 9747,
+        "output": 1022
+      }
+    },
+    "entry_hash": "1faccb0d5ae49a8e22f0e95f392500edc02110d316d0d46e099b2ac1b76a36f3"
+  },
+  {
+    "entry_id": "782b8049-f619-4621-a38d-beea60023dda",
+    "timestamp": "2026-07-30T21:16:56.559563+00:00",
+    "previous_hash": "1faccb0d5ae49a8e22f0e95f392500edc02110d316d0d46e099b2ac1b76a36f3",
+    "constitution_hash": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3",
+    "constitution_sources": [
+      {
+        "layer": "core",
+        "path": "E:\\dev\\Bench\\bench.json",
+        "sha256": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3"
+      }
+    ],
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "tests\\test_commands.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "tests\\test_commands.py",
+        "change_type": "modify",
+        "old_string": "        self.assertIn(\"C-001\", text)\n        self.assertIn(\"core\", text)",
+        "new_string": "        self.assertIn(\"C-001\", text)\n        self.assertIn(\"[VETO\", text)\n        self.assertIn(\"core\", text)"
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 8065,
+        "output": 19
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change adds a single assertion to an existing test in tests/test_commands.py, verifying that rendered output includes the '[VETO' marker alongside existing 'C-001' and 'core' assertions. This is a test-only, additive change with a coherent scope (C-002 SATISFIED). It introduces no imports or dependencies (C-003 NOT_APPLICABLE), no type annotation changes (C-004 NOT_APPLICABLE), no catch blocks (C-001 NOT_APPLICABLE), and no secrets (C-006 NOT_APPLICABLE). The file is under tests/, not pipeline/, ledger/, or hooks/, so C-007 governance-integrity concerns do not apply; the change strengthens rather than weakens verification by adding an assertion. No ledger entries are touched (C-008 NOT_APPLICABLE). Both Challenger (CLEAR) and Defender (CONFIRM_CLEAR) found no issues, and my independent review of the full constitution confirms no violations.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error-handling code is introduced; the change adds a test assertion only."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Single coherent scope: adds one assertion to an existing test verifying VETO marker rendering."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new imports or dependencies."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No type annotations added, removed, or weakened."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No secrets or credentials present."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Change is in tests/, not a pipeline file; it strengthens test coverage rather than weakening enforcement."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger entries modified, deleted, or appended."
+        }
+      ],
+      "advisories": [],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 8430,
+        "output": 874
+      }
+    },
+    "entry_hash": "92b873dbdced8662bdbf2ca5662ec3db79e8d70f34e989f86deafc8f1cea1640"
   }
 ]
