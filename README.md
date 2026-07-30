@@ -313,15 +313,26 @@ The remedy is to put the justification in the repository: declare provenance,
 the task boundary, and — for anything that adds a tool surface — what you
 audited and what you found. Your project's `CLAUDE.md` is the natural home.
 
-Be aware of *why* that reaches the pipeline, because it is provider-dependent.
-On `BENCH_PROVIDER=claude_code` the judge is a `claude -p` subprocess that
-inherits the governed project as its working directory, so Claude Code loads
-that project's `CLAUDE.md` into the judge's context. Verified directly: asked
-whether it could see the file, the judge quoted it back. On the `anthropic` and
-`openrouter` paths there is no such subprocess — each stage receives only the
-system prompt and the constructed user content, and the `file_context` argument
-the stages accept is never populated by `pipeline/runner.py`. On those providers
-the pipeline genuinely sees the diff and the constitution and nothing else.
+`pipeline/runner.py` reads that file once per run — alongside the constitution
+snapshot, so every stage judges against the same evidence — and passes it to the
+Challenger, the Defender, and the Oracle alike, on every provider.
+
+This used to depend on the backend. On `BENCH_PROVIDER=claude_code` each stage
+is a `claude -p` subprocess that inherits the governed project as its working
+directory, so Claude Code loaded that project's `CLAUDE.md` for free, while the
+`anthropic` and `openrouter` paths had no subprocess and saw only the diff and
+the constitution. Identical changes could be judged against different evidence
+because of a transport choice. The runner now supplies it explicitly, so
+governance does not vary by provider.
+
+Two properties worth knowing. The content is passed to the judge framed as
+untrusted repository input that cannot waive, weaken, or add constraints — your
+`CLAUDE.md` informs how scope is judged, it does not amend the constitution.
+And it is capped, with the framing always ahead of the content, so an oversized
+or hostile file is truncated rather than allowed to crowd out its own framing.
+If the file exists but cannot be read, the failure is reported to stderr and
+adjudication continues without it, so an unreadable `CLAUDE.md` cannot become a
+denial vector.
 
 This is not a workaround so much as the better outcome. In a project governed by
 Bench, an `.mcp.json` that had been vetoed passed on resubmission after exactly
