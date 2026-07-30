@@ -13204,5 +13204,342 @@
       }
     },
     "entry_hash": "cfadba4bee74ee839b8ab29618674d2db59eeb574b1ecf8e727e9d7fb4366abe"
+  },
+  {
+    "entry_id": "497d2d15-6112-4d94-ba0e-e3b5490318ac",
+    "timestamp": "2026-07-30T23:18:36.038938+00:00",
+    "previous_hash": "cfadba4bee74ee839b8ab29618674d2db59eeb574b1ecf8e727e9d7fb4366abe",
+    "constitution_hash": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3",
+    "constitution_sources": [
+      {
+        "layer": "core",
+        "path": "E:\\dev\\Bench\\bench.json",
+        "sha256": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3"
+      }
+    ],
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "C:\\Users\\Designer\\.claude\\plans\\fancy-inventing-kitten.md",
+      "tool": "Write",
+      "diff_summary": {
+        "file_path": "C:\\Users\\Designer\\.claude\\plans\\fancy-inventing-kitten.md",
+        "change_type": "create",
+        "redacted": true,
+        "note": "Diff body omitted: file lies outside this ledger's project. Path and verdict are retained; the change itself was adjudicated in full."
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 14318,
+        "output": 19
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The proposed change is the creation of a single markdown design/plan document (`fancy-inventing-kitten.md`) under the user's `.claude/plans/` directory. It contains no executable code, no imports, no type annotations, no error-handling blocks, no credentials, and it neither modifies the governance pipeline nor touches any ledger entry. The Challenger returned CLEAR with no findings and the Defender confirmed. Evaluating the change against the constitution as a whole and not merely the cited constraints: every veto-severity constraint is either satisfied or not applicable to a documentation artifact. The plan is a single coherent scope (C-002 SATISFIED). It is worth noting that the plan *describes* future work that would directly engage C-007 (governance pipeline integrity) and C-008 (ledger immutability), but a description of intent is not an enforcement change; the actual code that implements this design must itself pass governance when proposed, and this verdict does not pre-approve it.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No catch blocks or error-handling code in a markdown plan."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "The change is a single, internally coherent design document; no unrelated edits are bundled."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependency manifests added."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No function signatures or type annotations present."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new executable logic; the document itself enumerates a planned test suite (tests/test_ledger_dag.py)."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "No secrets, keys, or credentials present."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "This artifact is a plan under .claude/plans/, not a change to challenger/defender/oracle/ledger/constitution code. It proposes future pipeline work but does not itself alter enforcement, verification, or logging."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger entry is modified, deleted, reordered, or overwritten by creating this document."
+        }
+      ],
+      "advisories": [
+        "When the described implementation is actually proposed, it will engage C-008 directly. The plan's step to remove bench-ledger.json after migration must, at implementation time, satisfy that per-entry files are byte-identical, verify_chain passes before and after, and no existing entry is edited or reordered. Removing the aggregate JSON array file is a distinct action from retiring a chain; the implementation should be explicit that this is a format re-layout preserving every entry, not a retirement, and should confirm the git-history retention argument holds against C-008's actual text.",
+        "The multi-parent DAG redesign changes how verify.py and the hash chain are validated. Because C-007 and C-008 govern exactly this subject matter, the implementing diffs will receive strict scrutiny; the plan's own recommendation to land format/migration/docs as separate commits is sound and should be followed so each commit can be independently governed.",
+        "The plan asserts a pre-existing corruption-reset hazard found 'by reading, not executing.' The document correctly flags that it must be reproduced before being relied upon; do not encode the claimed behavior into docs or tests until verified.",
+        "This PASS certifies only the creation of the design document. It is not an approval of the future code changes it describes, each of which must pass governance on its own evidence."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 14683,
+        "output": 2069
+      }
+    },
+    "entry_hash": "040e7e7efa0e79fa29bee1eed1dea00a1faf95af577d65af22644c8357526493"
+  },
+  {
+    "entry_id": "9d475f1f-2a3a-4864-980f-54c364c4c6cc",
+    "timestamp": "2026-07-30T23:20:23.135878+00:00",
+    "previous_hash": "040e7e7efa0e79fa29bee1eed1dea00a1faf95af577d65af22644c8357526493",
+    "constitution_hash": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3",
+    "constitution_sources": [
+      {
+        "layer": "core",
+        "path": "E:\\dev\\Bench\\bench.json",
+        "sha256": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3"
+      }
+    ],
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "C:\\Users\\Designer\\.claude\\plans\\fancy-inventing-kitten.md",
+      "tool": "Write",
+      "diff_summary": {
+        "file_path": "C:\\Users\\Designer\\.claude\\plans\\fancy-inventing-kitten.md",
+        "change_type": "create",
+        "redacted": true,
+        "note": "Diff body omitted: file lies outside this ledger's project. Path and verdict are retained; the change itself was adjudicated in full."
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 14361,
+        "output": 19
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The proposed change is the creation of a planning/design document (a markdown file under .claude/plans/). It contains no executable code, modifies no ledger entries, adds no dependencies, and contains no credentials. The Challenger returned CLEAR and the Defender confirmed. Evaluating the document against the constitution as a whole: C-008 (Ledger Immutability) is the most relevant constraint given the subject matter, and the document is explicitly architected to honor it \u2014 it freezes the existing bench-ledger.json in place, never rewriting, reordering, or deleting any entry, and routes all new records to per-entry files (design sections C-008 discussion and Design 1-3). It correctly reads C-008 as ruling out a migrate-and-delete approach and chooses the non-mutating alternative. C-007 (Governance Pipeline Integrity) is implicated because the plan describes future edits to ledger/chain.py and ledger/verify.py, but as a plan document it makes no such edits itself; moreover the described verifier changes strengthen rather than weaken enforcement (hash recomputation, parent resolution, single-genesis, orphan rejection, cycle impossibility) and explicitly preserve auditor independence. No constraint is violated by the act of creating this document.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error-handling code is introduced; this is a design document."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Single coherent scope: a design plan for making the ledger survive parallel branches. It explicitly defers chain-retirement tooling and compaction as out of scope."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependencies are added; the plan notes reuse of existing helpers."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No type annotations are added, removed, or weakened; load_ledger is described as retaining its list[dict] signature."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "SATISFIED",
+          "note": "The plan explicitly enumerates new and extended tests (tests/test_ledger_dag.py plus extensions to test_chain and test_verify) and an acceptance test."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No secrets or credentials appear."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "This document does not itself modify pipeline files. The verification changes it describes strengthen the DAG checks and explicitly preserve verify.py's independence from the write path."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "SATISFIED",
+          "note": "The plan freezes the existing ledger array and appends new content-addressed entry files; no existing entry is edited, reordered, or removed, so immutability is preserved by construction."
+        }
+      ],
+      "advisories": [
+        "This is a plan, not an implementation. Each subsequent code change to ledger/chain.py, ledger/verify.py, and cli/commands.py must pass its own governance run under C-007 and C-008; a PASS here certifies only the plan document, not the eventual code.",
+        "When implemented, ensure the multi-parent 'previous_hash' format and the DAG verifier do not inadvertently relax any hash-linkage check the current positional verifier enforces (C-007). The plan's stated checks look additive, but the diff of verify.py must be scrutinized directly.",
+        "The 'pre-existing hazard' described (load_ledger returning [] on corruption, then append_entry overwriting the file) should be reproduced and, if confirmed, treated carefully so that any fix does not itself overwrite a ledger file in violation of C-008."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 14726,
+        "output": 1892
+      }
+    },
+    "entry_hash": "85334f67fbc63205f17cb0a270bf83f0fdaad158c76470a20a53e77035f1ae26"
+  },
+  {
+    "entry_id": "69e2db8b-dfe8-41af-b313-5998779f2ef1",
+    "timestamp": "2026-07-30T23:46:03.504892+00:00",
+    "previous_hash": "85334f67fbc63205f17cb0a270bf83f0fdaad158c76470a20a53e77035f1ae26",
+    "constitution_hash": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3",
+    "constitution_sources": [
+      {
+        "layer": "core",
+        "path": "E:\\dev\\Bench\\bench.json",
+        "sha256": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3"
+      }
+    ],
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "C:\\Users\\Designer\\.claude\\plans\\fancy-inventing-kitten.md",
+      "tool": "Write",
+      "diff_summary": {
+        "file_path": "C:\\Users\\Designer\\.claude\\plans\\fancy-inventing-kitten.md",
+        "change_type": "create",
+        "truncation": {
+          "original_lines": 366,
+          "truncated_lines": 73,
+          "preserved": "first50+signatures+exception_handlers+last20"
+        },
+        "redacted": true,
+        "note": "Diff body omitted: file lies outside this ledger's project. Path and verdict are retained; the change itself was adjudicated in full."
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-008",
+          "severity": "OBSERVATION",
+          "location": "content: 'Established by reading the code' section, 'A list-valued previous_hash is covered automatically'",
+          "evidence": "\"A list-valued `previous_hash` is covered automatically \u2014 no hashing change.\" ... \"Goal: two branches can each record verdicts, `git merge` succeeds with no conflict, and the merged ledger verifies.\"",
+          "reasoning": "This is a planning document, not an implementation, so C-008 is not yet violated. However, the plan proposes changing the ledger's fundamental linkage model (previous_hash from scalar to list, enabling merge of divergent chains). Any future implementation of this plan is exactly the kind of change C-007/C-008 exist to scrutinize heavily \u2014 the plan itself acknowledges this ('C-007/C-008 scrutiny is guaranteed'). Flagging now so the eventual implementing diff is checked rigorously against strict append-only, no-reordering semantics."
+        },
+        {
+          "constraint_id": "C-002",
+          "severity": "CONCERN",
+          "location": "Document preamble (blockquote) and 'Established by reading the code' bullets citing entry counts, uncommitted files, and viewer line numbers",
+          "evidence": "\"the ledger is **127 entries** ... the working tree has **uncommitted ledger receipts**, and `utils/viewer.py:776` renders `hashCopy(entry.previous_hash)` assuming a string ... Baseline confirmed: 114 PASS / 12 VETO / 1 ANCHOR.\"",
+          "reasoning": "The plan asserts specific, unverifiable factual claims about repository/ledger state (entry counts, uncommitted files, exact line numbers, pipeline pass/veto tallies) as settled fact via an external, out-of-band process ('Refined remotely via Ultraplan'). Since this document is itself governed content being reviewed, embedding confident-sounding empirical claims that the pipeline cannot independently verify at review time is a scope/provenance concern \u2014 it invites downstream stages (Defender/Oracle) to accept fabricated-sounding precision instead of independently confirming repo state. This isn't a code-behavior violation, but it is worth the Oracle noting: the claims should not be taken as verified merely because they are stated with specificity."
+        },
+        {
+          "constraint_id": "C-007",
+          "severity": "OBSERVATION",
+          "location": "Risks section: 'Resist having verify.py call load_ledger, _load_entry_files, or compute_tips'",
+          "evidence": "\"Auditor independence. Resist having `verify.py` call `load_ledger`, `_load_entry_files`, or `compute_tips`. Duplicated reading is the point.\"",
+          "reasoning": "The plan correctly identifies and intends to preserve the auditor-independence idiom relevant to C-007. This is a positive signal, not a violation, but noted as a commitment the eventual implementation must be checked against."
+        }
+      ],
+      "_tokens": {
+        "input": 10568,
+        "output": 2321
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "REBUT",
+          "argument": "The Challenger's own text concedes the operative point: this is a planning document, not an implementation, so C-008 cannot be violated by it. No ledger entry is modified, deleted, reordered, or overwritten by this diff \u2014 the diff creates a new markdown file in .claude/plans/, outside ledger/ entirely. The plan explicitly proposes to preserve append-only semantics and hash-chain integrity for the future implementation ('A list-valued previous_hash is covered automatically \u2014 no hashing change'), and dedicates an entire Risks section to flagging exactly the C-007/C-008 scrutiny the Challenger says is 'guaranteed.' Labeling forethought about a future constraint as an OBSERVATION against the current change conflates planning-stage risk awareness with an actual violation. This finding is correctly scored OBSERVATION (non-blocking) by the Challenger itself, and I'd go further: it isn't even evidence of risk in this diff, it's evidence the author did the constitutional homework before writing code.",
+          "evidence": "Diff creates only a markdown planning file; no changes to chain.py, verify.py, or bench-ledger.json occur here. The plan's own Risks section: 'C-007/C-008 scrutiny is guaranteed... Auditor independence. Resist having verify.py call load_ledger...'"
+        },
+        {
+          "finding_index": 1,
+          "position": "MITIGATE",
+          "argument": "The Challenger is right that these are empirical claims about repo state (entry counts, uncommitted files, line numbers, pass/veto tallies) that the pipeline cannot itself re-verify from the diff alone. But this is a planning artifact explicitly framed as such \u2014 it documents the author's own verification process ('re-verified against the local repo at E:\\dev\\Bench') and corrects an earlier draft's stale count, which is a transparency signal, not a fabrication attempt. C-002 governs scope boundaries \u2014 bundling unrelated edits or exceeding a stated task boundary \u2014 and nothing here bundles unrelated work; the entire content is one coherent planning document for one goal (cross-branch ledger merging). Unverifiable specificity is a legitimate epistemic caution for the Oracle to weigh, but it does not map onto C-002's actual rule about scope bundling. I'd concede this is worth a warning-level note in the verdict, but it is not a constraint violation as filed.",
+          "evidence": "C-002 rule: 'Changes must stay within one coherent scope... Bundling unrelated edits into a single change is a violation.' The plan's content is a single coherent goal statement ('two branches can each record verdicts, git merge succeeds with no conflict') with no unrelated edits bundled in."
+        },
+        {
+          "finding_index": 2,
+          "position": "CONCEDE",
+          "argument": "This finding is explicitly framed by the Challenger as a positive signal, not a violation, and I agree \u2014 the plan correctly commits to preserving auditor independence between verify.py and load_ledger/_load_entry_files/compute_tips. Nothing to rebut; it's a correct observation worth carrying into the eventual implementation review.",
+          "evidence": "Plan text: 'Auditor independence. Resist having verify.py call load_ledger, _load_entry_files, or compute_tips. Duplicated reading is the point.'"
+        }
+      ],
+      "summary": "This is a planning document with no code or ledger changes, so none of the Challenger's findings rise to an actual constraint violation; the two substantive points (future C-008 exposure and unverifiable factual claims) are appropriately non-blocking notes for the eventual implementing diff rather than defects in this change.",
+      "_tokens": {
+        "input": 11664,
+        "output": 1283
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The proposed change creates a single markdown planning document at .claude/plans/fancy-inventing-kitten.md. It contains no code, no ledger entries, and no modifications to pipeline files, chain.py, verify.py, or bench-ledger.json. Every Challenger finding is self-scored below violation threshold (two OBSERVATIONs and one CONCERN), and the Defender's rebuttals correctly establish that none map onto an actual constraint breach in this diff. On C-008 (Challenger finding 0, OBSERVATION), the Challenger itself concedes 'this is a planning document, not an implementation, so C-008 is not yet violated'; the Defender's REBUT is correct that no entry is modified, deleted, reordered, or overwritten. The plan's proposal to make previous_hash list-valued and enable cross-branch merges is precisely the kind of future change C-007/C-008 exist to scrutinize, and the plan itself flags this \u2014 but forethought is not violation. On C-002 (finding 1, CONCERN), the Defender's MITIGATE is persuasive: C-002 governs scope bundling and stated task boundaries, and the document is one coherent artifact for a single goal (cross-branch ledger merging), so no unrelated edits are bundled. The unverifiable empirical claims (entry counts, uncommitted files, tallies) are an epistemic caution, not a scope violation. On C-007 (finding 2, OBSERVATION), both parties agree the plan's commitment to auditor independence is a positive signal, not a defect.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No code, no catch blocks in this markdown planning file."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Single coherent planning document for one goal (cross-branch ledger merging); no unrelated edits bundled, consistent with Defender rebuttal to finding 1."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependency changes in a markdown file."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No type annotations altered; documentation only."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "Plan explicitly commits to preserving auditor independence (verify.py not calling load_ledger/_load_entry_files/compute_tips); no pipeline code is altered by this diff. Consistent with Challenger finding 2 and Defender CONCEDE."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger entry is modified, deleted, reordered, or overwritten; the diff creates a markdown file outside ledger/. Challenger scored this OBSERVATION and conceded no current violation."
+        }
+      ],
+      "advisories": [
+        "The plan proposes changing previous_hash from a scalar to a list to permit merging divergent chains. When this is implemented, the resulting diff must be checked rigorously against C-008's strict append-only, no-reordering, hash-chain-integrity semantics and against C-007 (it touches chain.py and verify.py). This PASS certifies only the planning document, not any future implementation.",
+        "The empirical claims embedded in the document (ledger is 127 entries, uncommitted working-tree receipts, viewer.py:776 behavior, 114 PASS / 12 VETO / 1 ANCHOR baseline) were produced by an out-of-band process ('Refined remotely via Ultraplan') and cannot be independently verified by the pipeline from this diff. Downstream implementation work should re-confirm repository state rather than treating these figures as settled fact merely because they are stated precisely (Challenger finding 1).",
+        "The document notes uncommitted ledger working-tree changes exist; while unrelated to this markdown diff, those changes should themselves be governed through the pipeline before commit per the project's self-governance rules."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 13239,
+        "output": 1612
+      }
+    },
+    "entry_hash": "a144a7edb194233e516e5e943ac0c1fec7e7a2ad5aab7e02d83a99e728b65c14"
   }
 ]
