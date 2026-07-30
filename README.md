@@ -224,6 +224,61 @@ This matters because a ledger records the full diff of every change it governs. 
 
 The corollary is worth stating: keeping a ledger out of git also removes git as its backup path. An ignored `.bench/` chain exists on one machine and nowhere else, so losing that working copy loses the audit trail with it, and a project governed from two machines accumulates two independent chains that cannot be merged — the hash chain admits no interleaving after the fact. Decide deliberately which you want: a private chain you back up by other means, or a committed one that publishes the diffs it records.
 
+### Per-Project Constitutions
+
+Bench's own constitution is a floor, not a default to be replaced. A governed
+project can add constraints of its own on top of it, and can make an existing
+constraint stricter, but it cannot weaken what the core already requires.
+
+| Working directory | Constitution |
+|---|---|
+| Inside the Bench repo | `bench.json` (core only — it *is* Bench's constitution) |
+| Any other project | core + `<project>/bench.json` when that file exists |
+| `BENCH_CONSTITUTION_PATH` set | core + that file |
+
+A project layer looks like this:
+
+```json
+{
+  "constitution": "myproject-v1",
+  "version": 1,
+  "constraints": [
+    {
+      "id": "P-001",
+      "name": "No Raw SQL",
+      "rule": "Use the query builder.",
+      "severity": "veto"
+    }
+  ],
+  "severity_overrides": { "C-005": "veto" }
+}
+```
+
+Project constraints live in the reserved `P-` namespace; `C-` belongs to the
+core and cannot be redefined. `severity_overrides` may only move a core
+constraint *up* the scale. Removing a core constraint, downgrading one,
+restating a severity unchanged, reusing a `C-` id, or overriding an id the core
+does not define are all errors, and they raise rather than being ignored — a
+silently dropped line would leave you believing you had changed a rule that is
+still in force.
+
+The two failure modes differ on purpose. **No layer** is safe: the core floor
+applies in full, which is why this design is preferable to one where a project
+file replaces the constitution and an absent file silently downgrades it. **A
+malformed or hostile layer** fails closed, because the author clearly intended
+additional constraints and Bench cannot tell which.
+
+Each ledger entry records `constitution_sources` — the layer, path, and raw hash
+of every file that ruled. The recorded hash chains those raw hashes rather than
+digesting a re-serialization, so it still reflects authored bytes. Run
+`python -m cli constitution` to see the merged result, its sources, and which
+constraints the project added or raised.
+
+One consequence worth stating plainly: if you already run Bench's hook globally,
+a `bench.json` sitting in an unrelated project root is now a constitution layer
+where it was previously inert. The floor makes that safe — a layer can only add
+— but it is not a no-op, and it will show up in that project's ledger entries.
+
 ### Declaring Scope Where the Pipeline Can See It
 
 C-002 judges whether a change stays inside its intended boundary. It is worth
