@@ -300,6 +300,18 @@ def main() -> int:
         return 0
 
     try:
+        # Claude Code pipes the payload as UTF-8, but sys.stdin decodes with the
+        # locale encoding — cp1252 on Windows. Left alone, every non-ASCII
+        # character in a governed diff is mangled BEFORE the Challenger sees it,
+        # so the pipeline adjudicates corrupted text and the ledger records that
+        # corruption as the receipt. Decode explicitly instead.
+        #
+        # Strict on purpose: undecodable bytes raise, and the except below fails
+        # closed. A payload Bench cannot read faithfully must not be adjudicated.
+        # Guarded by hasattr because the reentrancy and test paths substitute an
+        # io.StringIO for stdin, which is already text and has no reconfigure.
+        if hasattr(sys.stdin, "reconfigure"):
+            sys.stdin.reconfigure(encoding="utf-8")
         raw_stdin: str = sys.stdin.read()
         payload: Any = json.loads(raw_stdin)
         if not isinstance(payload, dict):
