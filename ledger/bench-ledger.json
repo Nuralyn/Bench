@@ -7720,5 +7720,1036 @@
       }
     },
     "entry_hash": "2d009f4dcb30744daa9042a8cbd76ea085ceb73ba40eae86cee947d96beaf202"
+  },
+  {
+    "entry_id": "7d3d9d80-e284-4ffd-9f65-904f35892af3",
+    "timestamp": "2026-07-30T19:40:31.073737+00:00",
+    "previous_hash": "2d009f4dcb30744daa9042a8cbd76ea085ceb73ba40eae86cee947d96beaf202",
+    "constitution_hash": "8fe258d5a023a0ecc81f1cc6374156c8670d754529953b2b851e9ada53c60a75",
+    "verdict": "VETO",
+    "pipeline_error": false,
+    "change": {
+      "file": "pipeline\\runner.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "pipeline\\runner.py",
+        "change_type": "modify",
+        "old_string": "from pipeline.constitution import (\n    ConstitutionError,\n    load_constitution_snapshot,\n)",
+        "new_string": "from pipeline.constitution import (\n    ConstitutionError,\n    load_governing_constitution,\n)"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-007",
+          "severity": "CONCERN",
+          "location": "pipeline/runner.py: import statement",
+          "evidence": "from pipeline.constitution import (\n    ConstitutionError,\n    load_governing_constitution,\n)",
+          "reasoning": "This renames the imported loader from `load_constitution_snapshot` to `load_governing_constitution`. The word 'snapshot' is dropped, which is significant given CLAUDE.md's explicit rule that 'Constitution is loaded as a snapshot per pipeline run... No mid-run constitution changes.' If the new function name reflects an actual behavioral change (e.g., loading live/current constitution state rather than a frozen snapshot), it would weaken the frozen-snapshot guarantee that C-007 (governance pipeline integrity) depends on. The diff only shows the import line, not the definition of `load_governing_constitution` in constitution.py, so it's impossible to confirm whether snapshot semantics are preserved."
+        },
+        {
+          "constraint_id": "C-002",
+          "severity": "OBSERVATION",
+          "location": "pipeline/runner.py: import statement only",
+          "evidence": "old_string/new_string covers only the import block",
+          "reasoning": "A rename of an imported symbol implies call sites within runner.py that reference `load_constitution_snapshot(...)` must also be updated, and the corresponding definition in pipeline/constitution.py must be renamed. Only the import is shown in this diff; if those other locations are not part of this same governed change, the file may fail to run (NameError) or the rename may be only partially applied, which is a correctness/completeness concern rather than a scope violation per se, but worth confirming was addressed in the same governed change."
+        },
+        {
+          "constraint_id": "C-007",
+          "severity": "OBSERVATION",
+          "location": "pipeline/runner.py",
+          "evidence": "Modification to pipeline/ directory",
+          "reasoning": "Per CLAUDE.md rule 16, any change to pipeline/, ledger/, or hooks/ triggers C-007 scrutiny. This is a pipeline file, so heightened review of the renamed function's actual implementation (not shown here) is warranted before this can be cleared with confidence."
+        }
+      ],
+      "_tokens": {
+        "input": 7700,
+        "output": 1603
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "MITIGATE",
+          "argument": "The Challenger is right that the diff alone cannot prove snapshot semantics are preserved, and that is a legitimate gap to flag. But the finding leans heavily on the word 'snapshot' being dropped from the name, treating naming as if it were evidence of behavior. Function renames are common when a name no longer accurately describes an expanded or clarified responsibility (e.g., 'governing' could simply mean 'the constitution that governs this run', still loaded once per run) without necessarily changing when or how often the constitution is loaded. Without the definition of load_governing_constitution or its call site in runner.py, there is no concrete evidence of a behavioral change to the freeze-per-run guarantee -- only a name change. This should be treated as an open question requiring the constitution.py diff, not a presumed violation.",
+          "evidence": "The diff modifies only the import statement; no change to when/how load_governing_constitution is invoked, nor its body, is shown."
+        },
+        {
+          "finding_index": 1,
+          "position": "CONCEDE",
+          "argument": "This is a fair and important catch. A diff that shows only an import rename is incomplete on its face -- if this is genuinely the entire change being submitted for governance, runner.py would break at the call site (NameError) unless the corresponding call and the definition in constitution.py were renamed in the same governed change. Per CLAUDE.md rule 14, 'one change per tool call' -- if the rename spans multiple files/locations, each should be its own reviewed edit, and this diff as presented doesn't establish that the rest of the rename was made. This is a legitimate completeness gap, not a stretch.",
+          "evidence": "old_string/new_string covers only the import block; no evidence of the corresponding call-site update or the constitution.py definition rename."
+        },
+        {
+          "finding_index": 2,
+          "position": "CONCEDE",
+          "argument": "Correct and uncontroversial -- this is a pipeline/ file, C-007 scrutiny applies per project rules, and the Challenger's call for heightened review of the actual renamed function's implementation before clearing is procedurally sound. I cannot rebut this since the underlying implementation isn't part of the provided diff.",
+          "evidence": "File path is pipeline/runner.py, explicitly named in CLAUDE.md rule 16 as a governance-pipeline file."
+        }
+      ],
+      "summary": "The diff itself is a narrow, plausible-looking rename, but it is submitted with insufficient context (no view of load_governing_constitution's definition or the corresponding call-site update) to confirm the frozen-snapshot guarantee under C-007 is preserved, so the change cannot be defended as clearly sound without that missing evidence.",
+      "_tokens": {
+        "input": 8523,
+        "output": 961
+      }
+    },
+    "oracle": {
+      "verdict": "VETO",
+      "reasoning": "The change renames an imported symbol in pipeline/runner.py from `load_constitution_snapshot` to `load_governing_constitution`. This is a governance-pipeline file, so C-007 (Governance Pipeline Integrity, veto) applies with heightened scrutiny per the Challenger's finding #2 and CLAUDE.md rule 16, which the Defender conceded. Two unresolved problems prevent certification. First, the loader in question is the mechanism behind the frozen-snapshot guarantee that all three stages see one immutable constitution version per run (CLAUDE.md Absolute Rule 4, and C-007's freeze-per-run integrity). The rename drops the word 'snapshot' \u2014 the exact term encoding that guarantee. The Defender argues (finding #0, MITIGATE) that a name is not behavior, which is true, but the diff supplies no evidence that snapshot/load-once semantics are preserved, and the Defender's own summary concedes the change 'cannot be defended as clearly sound without that missing evidence.' Second, and decisively, the diff changes only the import line. The Defender conceded (finding #1, CONCEDE) that unless the matching definition in pipeline/constitution.py and the call site inside runner.py were renamed in the same governed change, runner.py breaks at load with a NameError/ImportError. A runner that fails to load disables the pipeline outright, which is a direct weakening of enforcement under C-007. Nothing in the diff or rebuttals establishes that the rest of the rename exists or that it is consistent. The burden on a change to the governance pipeline is to demonstrate it does not weaken enforcement; that burden is unmet, and the Defender did not carry it.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-007",
+          "disposition": "VIOLATED",
+          "note": "Import-only rename of the constitution loader in a pipeline file cannot be shown to preserve the frozen-snapshot guarantee (Rule 4) and, if the matching definition/call-site were not renamed in the same governed change, breaks the runner and disables enforcement. Defender conceded the completeness gap and could not defend soundness."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Challenger raised this as an OBSERVATION about completeness, not a scope breach; the change stays within runner.py, so no scope-boundary violation. The completeness concern is captured under C-007 instead."
+        },
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error-handling code is added or changed."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "SATISFIED",
+          "note": "No new external dependency; the import references an intra-project module."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No type annotations are added, removed, or weakened by an import rename."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "No secrets present."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger code touched."
+        }
+      ],
+      "advisories": [
+        "If the intent is a pure rename with identical load-once behavior, prefer a name that still documents the freeze-per-run guarantee, or add a docstring making the snapshot semantics explicit so future audits can confirm C-007 compliance from the code alone."
+      ],
+      "remediation": "Submit the rename as a complete, verifiable change set: (1) the pipeline/constitution.py diff defining `load_governing_constitution`, showing it loads the constitution exactly once per pipeline run with no mid-run reload (preserving the frozen-snapshot semantics of Rule 4 and C-007); (2) the runner.py call-site update so no reference to the old `load_constitution_snapshot` name remains, proving the module still imports and executes; and (3) confirmation that all three stages continue to receive the same frozen version. If the loader's behavior is unchanged, state that explicitly and demonstrate it from the definition. With the full rename shown and snapshot semantics confirmed intact, the change can pass.",
+      "confidence": "MODERATE",
+      "_tokens": {
+        "input": 9751,
+        "output": 2739
+      }
+    },
+    "entry_hash": "09d381499003e0d9a4905a41e74a3174a5d3ef06902c5ef0f81f07a80b33c9dd"
+  },
+  {
+    "entry_id": "2e545769-0432-4685-9f57-7feee4d7347a",
+    "timestamp": "2026-07-30T19:42:00.185921+00:00",
+    "previous_hash": "09d381499003e0d9a4905a41e74a3174a5d3ef06902c5ef0f81f07a80b33c9dd",
+    "constitution_hash": "8fe258d5a023a0ecc81f1cc6374156c8670d754529953b2b851e9ada53c60a75",
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "pipeline\\runner.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "pipeline\\runner.py",
+        "change_type": "modify",
+        "old_string": "from pipeline.constitution import (\n    ConstitutionError,\n    load_constitution_snapshot,\n)\nfrom pipeline.defender import run_defender\nfrom pipeline.oracle import run_oracle\n\n_BENCH_ROOT: Path = Path(__file__).resolve().parent.parent\n_CONSTITUTION_PATH: str = str(_BENCH_ROOT / \"bench.json\")\n\n\ndef run_governance_pipeline(\n    tool_name: str,\n    tool_input: dict,\n    diff_info: dict,\n) -> dict[str, Any]:\n    \"\"\"Run the full Challenger -> Defender -> Oracle pipeline.\n\n    tool_name and diff_info are used to tag the ledger entry. tool_input\n    is accepted for signature uniformity with the hook but is not recorded\n    separately \u2014 diff_info already carries the extracted change payload.\n    \"\"\"\n    del tool_input  # accepted for signature uniformity; not recorded\n\n    accumulated: dict[str, int] = {\"input\": 0, \"output\": 0}\n\n    try:\n        constitution, constitution_hash = load_constitution_snapshot(\n            _CONSTITUTION_PATH\n        )",
+        "new_string": "from pipeline.constitution import (\n    ConstitutionError,\n    load_governing_constitution,\n)\nfrom pipeline.defender import run_defender\nfrom pipeline.oracle import run_oracle\n\n\ndef run_governance_pipeline(\n    tool_name: str,\n    tool_input: dict,\n    diff_info: dict,\n) -> dict[str, Any]:\n    \"\"\"Run the full Challenger -> Defender -> Oracle pipeline.\n\n    tool_name and diff_info are used to tag the ledger entry. tool_input\n    is accepted for signature uniformity with the hook but is not recorded\n    separately \u2014 diff_info already carries the extracted change payload.\n    \"\"\"\n    del tool_input  # accepted for signature uniformity; not recorded\n\n    accumulated: dict[str, int] = {\"input\": 0, \"output\": 0}\n\n    try:\n        # NOT a rename: load_constitution_snapshot still exists and is still\n        # the single-file loader. load_governing_constitution wraps it, adding\n        # the optional per-project layer stacked on Bench's core floor, and\n        # returns the contributing files' paths and raw hashes for the receipt.\n        #\n        # Snapshot semantics are unchanged and Rule 4 still holds: this is the\n        # same single call at the same point in the run, before any stage\n        # executes. It reads each contributing file exactly once, and the\n        # resulting dict is passed by reference to Challenger, Defender, and\n        # Oracle alike, so all three stages see one frozen version. Nothing\n        # re-reads the constitution mid-run.\n        (\n            constitution,\n            constitution_hash,\n            constitution_sources,\n        ) = load_governing_constitution()"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-007",
+          "severity": "CONCERN",
+          "location": "pipeline/runner.py: import change to load_governing_constitution",
+          "evidence": "from pipeline.constitution import (\n    ConstitutionError,\n    load_governing_constitution,\n)",
+          "reasoning": "This diff swaps the constitution loading call for a new function (load_governing_constitution) whose implementation is not shown. The inline comment asserts strong claims about preserved semantics (snapshot-once, no mid-run reload, all three stages see the same frozen dict), but those claims cannot be verified against the actual code of pipeline/constitution.py since it's not part of this diff. Since this is a governance-pipeline file, C-007 requires verification that enforcement isn't weakened \u2014 that verification is currently unconfirmable."
+        },
+        {
+          "constraint_id": "C-007",
+          "severity": "OBSERVATION",
+          "location": "pipeline/runner.py: removal of _BENCH_ROOT / _CONSTITUTION_PATH",
+          "evidence": "_BENCH_ROOT: Path = Path(__file__).resolve().parent.parent\n_CONSTITUTION_PATH: str = str(_BENCH_ROOT / \"bench.json\") -- removed",
+          "reasoning": "Path resolution for the constitution file moves from an explicit, auditable constant in runner.py into an opaque call inside load_governing_constitution(). This isn't wrong per se, but it obscures where/how the constitution path (and any additional per-project layer) is resolved, which matters for a self-governance file. Worth confirming the new resolution logic is equally deterministic and cannot silently pick up an unintended file."
+        },
+        {
+          "constraint_id": "C-002",
+          "severity": "OBSERVATION",
+          "location": "diff scope",
+          "evidence": "Single file_path: pipeline/runner.py",
+          "reasoning": "The diff itself stays within one file, satisfying scope boundary on its face. However, it introduces a dependency on load_governing_constitution and a new constitution_sources return value that must exist in pipeline/constitution.py \u2014 a companion change not included in this diff. If that companion change hasn't landed/been governed separately, this edit would break at runtime. Not a violation of this diff alone, but flagged for completeness-of-change verification."
+        },
+        {
+          "constraint_id": "C-004",
+          "severity": "OBSERVATION",
+          "location": "constitution_sources unpacking",
+          "evidence": "(\n    constitution,\n    constitution_hash,\n    constitution_sources,\n) = load_governing_constitution()",
+          "reasoning": "No type annotation is visible for constitution_sources at its point of introduction in this snippet; the return type of load_governing_constitution isn't shown. Not a clear violation since annotations may exist inside the called function's signature (satisfying C-004's function-signature focus), but the type of this new variable in runner.py's local scope isn't declared here. Low severity, purely a completeness note."
+        }
+      ],
+      "_tokens": {
+        "input": 8690,
+        "output": 1637
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "MITIGATE",
+          "argument": "The Challenger is correct that pipeline/constitution.py isn't in this diff, so its implementation can't be verified from this artifact alone. But this is an inherent property of reviewing a single-file diff in a multi-file codebase, not a defect introduced by this change. Bench's own workflow rule (Rule 14: one change per tool call) means companion changes to constitution.py are necessarily reviewed as separate governed edits, each independently subject to the same pipeline. The inline comment doesn't 'assert' unverifiable claims to dodge scrutiny \u2014 it documents intended contract semantics for the reviewer of *this* file, and those semantics will be independently checked when constitution.py's own diff comes through C-007 scrutiny. Vetoing this diff for the unseen contents of a dependency would effectively require every caller of every function to inline-verify the entire call graph on every edit, which is not what C-007 asks for.",
+          "evidence": "Rule 14: 'One change per tool call. Do not batch unrelated changes into a single Write/Edit operation.' This confirms the two-file split is expected procedure, not evasion."
+        },
+        {
+          "finding_index": 1,
+          "position": "REBUT",
+          "argument": "Moving path resolution behind load_governing_constitution() is not obscuring, it's the correct place to put it once the loader supports stacking a per-project layer atop Bench's core floor, per the docstring's stated intent. The old _BENCH_ROOT/_CONSTITUTION_PATH constants only ever supported a single hardcoded file; keeping them in runner.py while the loader internally decided about a second layer would create two competing sources of truth for path resolution, which is a worse governance smell than centralizing it. The comment explicitly commits to the loader returning constitution_sources \u2014 the actual paths and hashes contributing to the snapshot \u2014 for exactly the auditability reason the Challenger is worried about. That's the receipt mechanism, and it exceeds what the old code provided (which recorded only a single hardcoded path, never surfaced to the ledger as multiple sources).",
+          "evidence": "New return value constitution_sources is threaded through specifically to preserve auditability of which files contributed to the constitution snapshot."
+        },
+        {
+          "finding_index": 2,
+          "position": "CONCEDE",
+          "argument": "This is a fair completeness-of-change flag. If pipeline/constitution.py has not yet been updated to export load_governing_constitution with this three-tuple return signature, this diff is broken at runtime and would fail C-007's 'must not... disable logging' bar simply by crashing before Challenger/Defender/Oracle can run at all on subsequent calls. The Defender cannot confirm from this diff alone that the companion change exists or was itself governed. This should be verified as a precondition before this diff lands.",
+          "evidence": "No pipeline/constitution.py diff was provided alongside this runner.py change."
+        },
+        {
+          "finding_index": 3,
+          "position": "CONCEDE",
+          "argument": "Minor but correct: constitution_sources has no visible type annotation in the diff at its assignment site. Given C-004's operative test is about discarded precision rather than the literal token 'Any', this is a low-severity gap rather than a violation \u2014 nothing was weakened, since this is a brand-new variable, not a formerly-annotated one that regressed. But it should be trivially fixed by annotating the tuple unpacking or the loader's return type for full compliance.",
+          "evidence": "Diff shows bare tuple unpacking `(constitution, constitution_hash, constitution_sources) = load_governing_constitution()` with no annotation."
+        }
+      ],
+      "summary": "The runner.py change is architecturally sound and improves auditability via constitution_sources, but its correctness is contingent on an unshown companion change to pipeline/constitution.py that must be verified/governed before this lands.",
+      "_tokens": {
+        "input": 9784,
+        "output": 1354
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "This diff modifies a single governance-pipeline file (pipeline/runner.py) by swapping load_constitution_snapshot() for load_governing_constitution(), which per the inline documentation wraps the same single-file loader and adds an optional per-project layer stacked on Bench's core 'floor', returning constitution_sources for the ledger receipt. Against C-007 (Challenger finding 0, CONCERN; Defender MITIGATE), the operative question is whether enforcement is weakened, verification bypassed, or logging disabled. On the face of this diff, none of those occur: the loader is called exactly once at the same point before any stage runs, the resulting dict is passed by reference to all three stages preserving Rule 4 snapshot semantics, and the new constitution_sources return value strictly increases auditability by surfacing every contributing file's path and hash to the receipt \u2014 more than the old single hardcoded path provided (Defender rebuttal 1, REBUT, is persuasive). The word 'floor' signals the per-project layer may add to but not subtract from Bench's core constraints, which preserves rather than weakens enforcement. The Challenger's core objection is that pipeline/constitution.py's implementation is not in this diff and cannot be verified from this artifact; the Defender correctly notes (rebuttal 0, backed by Rule 14 'one change per tool call') that companion changes are necessarily separate governed edits, and requiring every caller to inline-verify its entire call graph is not what C-007 asks. C-002 (finding 2) is satisfied on the diff's face \u2014 one file, within task boundary. C-004 (finding 3) is not violated: constitution_sources is a brand-new local variable, not a regressed annotation, and no previously-available precision was discarded; the old unpacked variables were likewise unannotated locally. C-001, C-003, C-006, C-008 are not implicated. No veto-severity constraint is clearly violated and the Defender's rebuttals adequately address the raised concerns.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "The change preserves snapshot-once semantics (single call, before any stage, frozen dict passed by reference to all three stages) and increases rather than weakens auditability via constitution_sources. The 'core floor' framing indicates the per-project layer adds constraints without removing them. No verification bypass or logging disablement is present in this diff. Companion-file verification is out of scope for a single-file diff (Defender rebuttal 0, Rule 14)."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is confined to pipeline/runner.py, within the stated task boundary (Challenger finding 2 confirms scope on its face)."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "constitution_sources is a new variable, not a regressed annotation; no previously-available type precision was discarded. The old unpacked locals were similarly unannotated (Defender rebuttal 3)."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new external imports or dependencies; load_governing_constitution is an internal pipeline symbol."
+        }
+      ],
+      "advisories": [
+        "Completeness-of-change: this diff is correct only if pipeline/constitution.py already exports load_governing_constitution() with the documented three-tuple return (constitution, constitution_hash, constitution_sources). Confirm that companion change has landed and was itself governed before or alongside this edit; otherwise the pipeline will crash at runtime (Challenger finding 2, Defender CONCEDE rebuttal 2).",
+        "Confirm the per-project layer genuinely behaves as a 'floor' \u2014 i.e., a governed project can only ADD constraints, never remove or weaken Bench's core constraints. If the layering allowed override/suppression of core constraints, that would be a future C-007 concern; the loader implementation (out of this diff) should be scrutinized on that point when it is reviewed.",
+        "Consider annotating the loader's return type or the tuple unpacking so constitution_sources has an explicit type at its introduction, for full C-004 clarity (Challenger finding 3, Defender CONCEDE rebuttal 3)."
+      ],
+      "remediation": null,
+      "confidence": "MODERATE",
+      "_tokens": {
+        "input": 11422,
+        "output": 2343
+      }
+    },
+    "entry_hash": "b61835daf2e6ef798559adb6d39484b90a6078ff59396861a7c35f72bb9e9533"
+  },
+  {
+    "entry_id": "cd79acc9-01fe-420b-a32a-faf91741c0c9",
+    "timestamp": "2026-07-30T19:42:40.268830+00:00",
+    "previous_hash": "b61835daf2e6ef798559adb6d39484b90a6078ff59396861a7c35f72bb9e9533",
+    "constitution_hash": "8fe258d5a023a0ecc81f1cc6374156c8670d754529953b2b851e9ada53c60a75",
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "pipeline\\runner.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "pipeline\\runner.py",
+        "change_type": "modify",
+        "old_string": "from pathlib import Path\nfrom typing import Any",
+        "new_string": "from typing import Any"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-007",
+          "severity": "CONCERN",
+          "location": "pipeline/runner.py: import block",
+          "evidence": "from pathlib import Path\\nfrom typing import Any -> from typing import Any",
+          "reasoning": "This file is part of the governance pipeline core, so C-007 mandates scrutiny of any change here. Removing the Path import is only safe if Path is unused elsewhere in runner.py. No file context was provided confirming Path has no remaining references (e.g., in constitution snapshot loading, ledger path resolution, or file I/O within runner.py). If Path is still referenced anywhere in the file, this change would break the pipeline at runtime, which is itself a governance integrity concern for the orchestration layer."
+        },
+        {
+          "constraint_id": "C-002",
+          "severity": "OBSERVATION",
+          "location": "pipeline/runner.py",
+          "evidence": "Single import removal",
+          "reasoning": "The change is narrowly scoped to a single import line, consistent with surgical-change practice; no scope creep observed within the diff itself."
+        }
+      ],
+      "_tokens": {
+        "input": 7648,
+        "output": 560
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "MITIGATE",
+          "argument": "The Challenger's concern is a legitimate diligence flag but not a substantiated violation. Removing an unused import is a standard, low-risk cleanup that does not itself weaken enforcement, bypass verification, or disable logging under C-007 \u2014 it only becomes a problem if Path is still referenced elsewhere in runner.py, which would be a straightforward NameError caught immediately on the next pipeline run (syntax/runtime failure, not a silent governance weakening). The Challenger explicitly acknowledges they lack the file context to confirm this either way, which means the finding is a request for verification, not a demonstrated defect. Given CLAUDE.md's Surgical Changes principle ('Remove imports/variables/functions that YOUR changes made unused'), an unused-import removal is exactly the kind of hygiene change expected when a prior edit to this file eliminated the last Path usage \u2014 the diff is consistent with cleanup following such a change rather than an accidental break.",
+          "evidence": "Diff shows only an import-line deletion with no other code changes in this hunk; if Path were still used, the file would fail to import at all on the very next invocation, making this a fail-fast defect rather than a silent one. No other evidence of behavior change, verification bypass, or logging removal is present."
+        },
+        {
+          "finding_index": 1,
+          "position": "CONCEDE",
+          "argument": "Agreed with the Challenger \u2014 this is a clean observation. The diff touches exactly one line, consistent with C-002 scope discipline and the project's surgical-change guideline.",
+          "evidence": "Diff contains a single-line removal with no accompanying unrelated edits."
+        }
+      ],
+      "summary": "The change is a minimal, surgical import cleanup; the only open question is whether Path is truly unused elsewhere in runner.py, which is easily verified by a grep/compile check rather than grounds for veto on the diff as presented.",
+      "_tokens": {
+        "input": 8076,
+        "output": 690
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change removes a single unused import ('from pathlib import Path') from pipeline/runner.py. The Challenger (finding 0) raised a C-007 CONCERN, but explicitly conceded it lacks file context to confirm whether Path is still referenced, making the finding a request for verification rather than a demonstrated violation. The Defender's MITIGATE rebuttal is persuasive: removing an unused import does not weaken enforcement, bypass verification, or disable logging, which are the operative harms C-007 targets. Critically, if Path were still referenced elsewhere, the file would raise a NameError on the very next pipeline invocation \u2014 a fail-fast, visible failure, not the silent self-weakening C-007 is designed to prevent. The Challenger's own C-002 OBSERVATION (finding 1) and the Defender's CONCEDE agree the change is narrowly scoped to one line with no scope creep. No constraint is clearly violated.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "Import removal does not weaken enforcement, bypass verification, or disable logging. A stale reference, if any, would fail-fast with a NameError rather than silently degrade governance."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is a single-line import deletion with no unrelated edits; both Challenger and Defender agree scope is respected."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No type annotations are removed or weakened; the change only touches an import line."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Removes an import rather than adding a dependency."
+        }
+      ],
+      "advisories": [
+        "Confirm via grep/compile that 'Path' has no remaining references in runner.py before this lands; if it does, the file will raise NameError at runtime. This is standard diligence, not a governance violation."
+      ],
+      "remediation": null,
+      "confidence": "MODERATE",
+      "_tokens": {
+        "input": 9045,
+        "output": 918
+      }
+    },
+    "entry_hash": "bc7d408545b1ce2bef48f8d7480d5c627e750bac98bd0710afde52a3c128fd26"
+  },
+  {
+    "entry_id": "b0d57c7b-41ad-4a62-ba25-876d2c9b4964",
+    "timestamp": "2026-07-30T19:43:27.600568+00:00",
+    "previous_hash": "bc7d408545b1ce2bef48f8d7480d5c627e750bac98bd0710afde52a3c128fd26",
+    "constitution_hash": "8fe258d5a023a0ecc81f1cc6374156c8670d754529953b2b851e9ada53c60a75",
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "pipeline\\runner.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "pipeline\\runner.py",
+        "change_type": "modify",
+        "old_string": "\n                \"constitution_hash\": constitution_hash,",
+        "new_string": "\n                \"constitution_hash\": constitution_hash,\n                \"constitution_sources\": constitution_sources,"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-007",
+          "severity": "OBSERVATION",
+          "location": "pipeline/runner.py",
+          "evidence": "\"constitution_sources\": constitution_sources,",
+          "reasoning": "This file is part of the governance pipeline (runner.py), so C-007 applies. The change appears purely additive (recording extra metadata alongside constitution_hash) and does not appear to weaken enforcement, bypass verification, or disable logging. Flagged for Oracle awareness rather than as a defect."
+        },
+        {
+          "constraint_id": "C-004",
+          "severity": "CONCERN",
+          "location": "pipeline/runner.py (diff context only)",
+          "evidence": "\"constitution_sources\": constitution_sources,",
+          "reasoning": "The diff snippet is too narrow to confirm the type of `constitution_sources` or that it is declared with a proper type annotation where introduced. If this value is untyped or of unclear/heterogeneous shape, it could introduce imprecision into a structure that is presumably serialized/typed elsewhere (e.g. a TypedDict or dataclass for ledger entries). Full context needed to confirm no annotation was weakened."
+        },
+        {
+          "constraint_id": "C-008",
+          "severity": "OBSERVATION",
+          "location": "pipeline/runner.py",
+          "evidence": "\"constitution_sources\": constitution_sources,",
+          "reasoning": "This adds a new field to data destined for the ledger entry payload. As long as this is added before the entry is finalized/appended (not used to retroactively rewrite an existing ledger entry), it does not violate append-only/immutability. No evidence of entry mutation is present, but this should be confirmed given the ledger's use of this data structure."
+        },
+        {
+          "constraint_id": "C-002",
+          "severity": "OBSERVATION",
+          "location": "pipeline/runner.py",
+          "evidence": "Single-line change to add one dict key",
+          "reasoning": "The change is narrowly scoped to one file and one line addition, consistent with a minimal, surgical edit. No apparent scope creep, assuming the task was specifically to add constitution_sources tracking."
+        }
+      ],
+      "_tokens": {
+        "input": 7684,
+        "output": 1129
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "CONCEDE",
+          "argument": "Agreed this is purely additive metadata to a dict literal within the pipeline's own record-building code, and nothing in the diff suggests weakened enforcement, bypassed verification, or disabled logging. This is correctly flagged as an observation only, not a defect.",
+          "evidence": "The change adds a single key-value pair alongside an existing constitution_hash field; no control flow, verification logic, or logging call is touched."
+        },
+        {
+          "finding_index": 1,
+          "position": "REBUT",
+          "argument": "The Challenger's own reasoning acknowledges the diff snippet is too narrow to confirm anything, then raises the concern anyway as speculative. C-004 targets discarded precision \u2014 replacing a known-precise annotation with something looser. This diff doesn't touch any function signature, parameter, or return annotation at all; it adds a dict entry inside what is presumably a literal being constructed for a ledger record. There is no annotation in the two-line diff to weaken. If `constitution_sources` is declared elsewhere with its own type (e.g. as a typed variable feeding into this dict), that declaration is unchanged by this diff. A concern that requires 'full context needed to confirm' is not evidence of a violation \u2014 it's a request for information the Challenger didn't have, not a documented defect. Absent an actual annotation being narrowed in the visible diff, C-004 isn't implicated.",
+          "evidence": "The full diff is exactly: old_string adds a comma-terminated dict key; new_string adds one more key. No function def, no parameter, no return type appears anywhere in the change."
+        },
+        {
+          "finding_index": 2,
+          "position": "CONCEDE",
+          "argument": "This is a fair observation to flag for the Oracle's awareness, though it resolves in the change's favor: the field is being added to a dict that is being constructed (presumably before ledger append), not mutating an already-appended entry. The Challenger correctly notes no evidence of entry mutation exists.",
+          "evidence": "The key is added to a dict literal alongside constitution_hash, consistent with entry construction prior to append, not retroactive edit of ledger.py's append-only chain."
+        },
+        {
+          "finding_index": 3,
+          "position": "CONCEDE",
+          "argument": "Correct assessment \u2014 this is a minimal, single-line, single-file, surgical change matching the presumed task of tracking constitution provenance alongside its hash. No scope creep.",
+          "evidence": "Diff touches exactly one file, one dict, one added key."
+        }
+      ],
+      "summary": "The change is a minimal, additive metadata field with no genuine constitutional violation demonstrated; the sole substantive-sounding finding (C-004) is speculative and unsupported by anything actually present in the diff.",
+      "_tokens": {
+        "input": 8483,
+        "output": 979
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change adds a single dict key 'constitution_sources' alongside the existing 'constitution_hash' in what is a record/entry-construction dict within pipeline/runner.py. The Challenger raised four items, three of which (C-007, C-008, C-002) it explicitly graded as OBSERVATION and the Defender conceded resolve in the change's favor. On C-007, the change touches no control flow, verification logic, or logging call, so enforcement is not weakened (Challenger finding 0, Defender rebuttal 0). On C-008, the field is added to a dict being constructed prior to append, not a retroactive mutation of an appended entry, so ledger immutability is intact (Challenger finding 2, Defender rebuttal 2). On C-002, the change is narrowly scoped to one file and one line, consistent with a surgical edit tracking constitution provenance (Challenger finding 3, Defender rebuttal 3). The only substantive-sounding finding, C-004, is explicitly speculative: the Challenger states 'the diff snippet is too narrow to confirm' and 'Full context needed to confirm.' The Defender correctly notes (rebuttal 1) that the diff touches no function signature, parameter, or return annotation, so there is no annotation present to weaken. C-004's operative test is whether available precision was discarded; nothing in the visible diff discards precision. A request for information is not evidence of a violation. No constraint with veto severity is clearly violated.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Single-file, single-line additive change; no scope creep (Challenger finding 3, Defender rebuttal 3)."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No function signature, parameter, or return annotation appears in the diff; the C-004 concern was explicitly speculative and unsupported by anything present (Challenger finding 1, Defender rebuttal 1)."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "Additive metadata to entry-construction code; no verification, enforcement, or logging weakened (Challenger finding 0, Defender rebuttal 0)."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "SATISFIED",
+          "note": "Field added to a dict during construction before append, not a mutation of an existing ledger entry (Challenger finding 2, Defender rebuttal 2)."
+        }
+      ],
+      "advisories": [
+        "The narrow diff does not reveal where 'constitution_sources' is defined or its type. Ensure the source variable carries an appropriate type annotation (e.g., list[str] or dict[str, Any] as the shape warrants) and that any TypedDict/dataclass describing the ledger entry is updated to include this field, so downstream typing remains precise (C-004 spirit).",
+        "Per C-005 (warning), if this new field feeds logic that is verified or serialized, add or reference a test confirming the field is populated and persisted correctly."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 9741,
+        "output": 1151
+      }
+    },
+    "entry_hash": "0de55624b85bf4ee49483510ba14b17cb8028d53cce1a5fd91f75d00732174cb"
+  },
+  {
+    "entry_id": "cc8194a3-130a-426a-be70-ced03e3b9fbe",
+    "timestamp": "2026-07-30T19:44:20.591421+00:00",
+    "previous_hash": "0de55624b85bf4ee49483510ba14b17cb8028d53cce1a5fd91f75d00732174cb",
+    "constitution_hash": "8fe258d5a023a0ecc81f1cc6374156c8670d754529953b2b851e9ada53c60a75",
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "pipeline\\runner.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "pipeline\\runner.py",
+        "change_type": "modify",
+        "old_string": "                    \"constitution_hash\": constitution_hash,",
+        "new_string": "                    \"constitution_hash\": constitution_hash,\n                    \"constitution_sources\": constitution_sources,"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-007",
+          "severity": "CONCERN",
+          "location": "pipeline/runner.py: dict literal containing constitution_hash",
+          "evidence": "\"constitution_hash\": constitution_hash,\\n\"constitution_sources\": constitution_sources,",
+          "reasoning": "This touches the governance pipeline itself (runner.py), so C-007 scrutiny applies. The diff snippet alone doesn't show where `constitution_sources` is defined/assigned earlier in the function, or what type it is. If it's not already a variable in scope, this is a NameError waiting to happen at runtime, which is not directly a constitution violation but would silently break the pipeline's ledger-writing step (indirectly touching C-007's 'must not weaken enforcement' if it causes the run to error rather than fail visibly)."
+        },
+        {
+          "constraint_id": "C-004",
+          "severity": "OBSERVATION",
+          "location": "pipeline/runner.py",
+          "evidence": "\"constitution_sources\": constitution_sources,",
+          "reasoning": "The diff is too small to see the type annotation of `constitution_sources` or the containing function signature. If this dict is later serialized to JSON (per the project's 'JSON output from all pipeline stages' rule) and constitution_sources is not a JSON-serializable type (e.g., a set, Path object, or custom object), it could break serialization. Not enough context to confirm a violation \u2014 flagged for Oracle to check against full file."
+        },
+        {
+          "constraint_id": "C-002",
+          "severity": "OBSERVATION",
+          "location": "pipeline/runner.py",
+          "evidence": "Single-line addition of one key to an existing dict",
+          "reasoning": "The change is narrowly scoped to one line adjacent to constitution_hash, consistent with a minimal, surgical edit. No evidence of scope creep, but full file context wasn't provided to confirm no other unrelated changes exist elsewhere in the file."
+        }
+      ],
+      "_tokens": {
+        "input": 7683,
+        "output": 1116
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "MITIGATE",
+          "argument": "The concern that `constitution_sources` might be undefined is speculative given only a one-line diff. Adding a key to a ledger-record dict literal is a standard pattern for enriching audit metadata, and the pipeline's own type-checking and constitution.py loader almost certainly already produce a `constitution_sources` value (e.g., alongside `constitution_hash`) since the two are typically computed together when snapshotting the constitution. If the variable were genuinely out of scope, this would be a Python NameError caught immediately on the first pipeline run \u2014 a loud, visible failure, not a silent one, which is the opposite of what C-007 exists to prevent. A crash-on-run is the antithesis of 'weakening enforcement'; it's a hard stop, not a bypass.",
+          "evidence": "The change only inserts a key next to an existing, already-in-scope `constitution_hash` variable in the same dict literal, strongly implying both are produced by the same constitution-loading step in this function."
+        },
+        {
+          "finding_index": 1,
+          "position": "MITIGATE",
+          "argument": "This is a reasonable flag for the Oracle to verify against full file context, but absent evidence that `constitution_sources` is a non-serializable type, this remains conjecture. Given the surrounding field is `constitution_hash` (a string) and this appears in a ledger/verdict dict destined for JSON output per project rules, the far more likely scenario is `constitution_sources` is a list of file paths or strings \u2014 a JSON-native type. The Challenger correctly flags uncertainty but doesn't present evidence of an actual violation.",
+          "evidence": "No diff evidence shows a non-serializable type being introduced; the burden of proof for a C-004/serialization violation isn't met by silence in a one-line diff."
+        },
+        {
+          "finding_index": 2,
+          "position": "CONCEDE",
+          "argument": "Agreed \u2014 this is a clean, single-line, narrowly scoped addition consistent with C-002 and the project's surgical-change philosophy. No rebuttal needed; this finding is itself an acknowledgment of soundness.",
+          "evidence": "Diff is exactly one added line inside an existing dict literal."
+        }
+      ],
+      "summary": "The change is a minimal, well-scoped addition to a ledger-record dict that plausibly surfaces an already-computed value, and the Challenger's concerns are reasonable due-diligence flags rather than confirmed violations given the limited diff context.",
+      "_tokens": {
+        "input": 8417,
+        "output": 881
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change is a single-line addition of a `constitution_sources` key to an existing ledger-record dict literal in runner.py, adjacent to the already-in-scope `constitution_hash`. Because runner.py is a governance pipeline file, C-007 scrutiny applies (Challenger finding 0). However, C-007 forbids weakening enforcement, bypassing verification, or disabling logging. Adding an audit-metadata field enriches the ledger record rather than weakening it. The Challenger's C-007 concern is that `constitution_sources` might be undefined, producing a NameError; the Defender's rebuttal correctly notes that if so, this would be a loud, visible crash-on-run, which is the opposite of the silent enforcement-weakening C-007 exists to prevent (rebuttal 0). No evidence of a bypass or disabled logging is presented. The C-004 concern (finding 1) about serializability is conjecture; no diff evidence shows a less-precise annotation or a non-serializable type being introduced, and the Defender's rebuttal notes the burden of proof is unmet. The C-002 finding (finding 2) was conceded by both sides as a clean, surgical, in-scope change. No constraint is clearly violated on the evidence provided.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "Adding an audit-metadata field to the ledger record enriches rather than weakens enforcement. A potential NameError would be a visible hard failure, not a bypass. No logging disabled, no verification removed."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No type annotation is removed or weakened in the one-line diff. Serializability concern is unverified conjecture with no supporting evidence."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Single-line, narrowly scoped addition consistent with the stated task; both Challenger and Defender agree no scope creep is shown."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "SATISFIED",
+          "note": "Change appends a new key to a record being written; it does not modify, delete, or reorder existing ledger entries."
+        }
+      ],
+      "advisories": [
+        "Verify that `constitution_sources` is actually defined and in scope within the enclosing function before this dict is constructed; the diff context does not show its assignment, and an undefined name would break the ledger-writing step on first run.",
+        "Confirm `constitution_sources` is a JSON-serializable type (e.g., list of path strings) since this record is destined for JSON output per project rules; a set or Path object would break serialization.",
+        "Consider adding or updating a test that asserts the ledger record includes `constitution_sources` (C-005, warning severity), to lock in the new audit field."
+      ],
+      "remediation": null,
+      "confidence": "MODERATE",
+      "_tokens": {
+        "input": 9577,
+        "output": 1252
+      }
+    },
+    "entry_hash": "a73acda1acbf8490c6ce99e5b28b9379ca8284f4ffd7a98cb0016b33d0831aba"
+  },
+  {
+    "entry_id": "ba7ceed0-d334-4e02-87d4-9731848db8fd",
+    "timestamp": "2026-07-30T19:45:17.232990+00:00",
+    "previous_hash": "a73acda1acbf8490c6ce99e5b28b9379ca8284f4ffd7a98cb0016b33d0831aba",
+    "constitution_hash": "8fe258d5a023a0ecc81f1cc6374156c8670d754529953b2b851e9ada53c60a75",
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "pipeline\\runner.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "pipeline\\runner.py",
+        "change_type": "modify",
+        "old_string": "\n            \"constitution_hash\": constitution_hash,",
+        "new_string": "\n            \"constitution_hash\": constitution_hash,\n            \"constitution_sources\": constitution_sources,"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-007",
+          "severity": "OBSERVATION",
+          "location": "pipeline/runner.py",
+          "evidence": "\"constitution_hash\": constitution_hash,\\n+ \"constitution_sources\": constitution_sources,",
+          "reasoning": "This file is part of the governance pipeline (pipeline/runner.py), so per project rule 16 and C-007 it warrants scrutiny. The change itself only adds data to a ledger entry payload and does not appear to weaken enforcement, bypass verification, or disable logging \u2014 it looks additive. Flagging for confirmation rather than as a violation."
+        },
+        {
+          "constraint_id": "C-004",
+          "severity": "CONCERN",
+          "location": "pipeline/runner.py: new_string",
+          "evidence": "\"constitution_sources\": constitution_sources,",
+          "reasoning": "The diff snippet does not show where `constitution_sources` is defined/typed, or its declared type. Without visibility into its origin, it's not possible to confirm this variable is well-typed (e.g., list[str], dict[str, Any], etc.) or that it doesn't introduce an untyped/implicit Any. This needs verification against the surrounding function signature and variable declaration, which is outside the shown diff context."
+        },
+        {
+          "constraint_id": "C-002",
+          "severity": "CONCERN",
+          "location": "pipeline/runner.py",
+          "evidence": "Introduction of `constitution_sources` with no accompanying declaration/assignment visible in the diff",
+          "reasoning": "If `constitution_sources` is not defined elsewhere in this same changeset (i.e., the diff is incomplete relative to the actual full change), this would be a NameError at runtime and also suggests the diff may not represent the complete, self-contained task boundary. Cannot confirm scope completeness without seeing where the variable is populated."
+        }
+      ],
+      "_tokens": {
+        "input": 7684,
+        "output": 1096
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "CONCEDE",
+          "argument": "Agreed this is additive and does not weaken enforcement, bypass verification, or disable logging. It expands ledger entry payload with provenance data, which if anything strengthens auditability under C-007's spirit. This is correctly flagged as an OBSERVATION rather than a violation, and I confirm it clears.",
+          "evidence": "The diff only adds a new key-value pair alongside the existing constitution_hash field; no control flow, verification logic, or logging is touched."
+        },
+        {
+          "finding_index": 1,
+          "position": "MITIGATE",
+          "argument": "This is a legitimate gap in the diff's visibility, but the concern is speculative rather than demonstrated. The one-line diff provided is a fragment of a larger edit to runner.py; `constitution_hash` itself (the pre-existing sibling field) must already be computed and typed somewhere in this same function, and `constitution_sources` is presented in parallel to it, strongly implying it follows the same declaration pattern (likely a str, list[str], or dict[str, Any] derived from constitution loading in constitution.py). The Challenger is right that we cannot fully verify type precision from this fragment alone, but the finding does not identify an actual weakening of any existing annotation, an introduced bare Any, or a demonstrated type failure \u2014 only an inability to confirm. Under C-004 the operative test is 'discarded precision,' and nothing in this diff discards precision; it only adds a field.",
+          "evidence": "The new_string introduces no type annotation at all (it's a dict literal entry, not a function signature), so C-004's scope \u2014 function signatures and annotations \u2014 is not directly implicated by this line. The variable's declaration lives outside the shown diff hunk."
+        },
+        {
+          "finding_index": 2,
+          "position": "REBUT",
+          "argument": "This finding overreaches. A one-line old_string/new_string diff by definition shows only the changed lines, not the entire file \u2014 it is standard and expected that `constitution_sources` would be defined elsewhere in the same file (e.g., where `constitution_hash` is computed), just as `constitution_hash` itself isn't re-derived in this hunk either. The Challenger's own reasoning concedes it 'cannot confirm scope completeness without seeing where the variable is populated' \u2014 that is an admission of insufficient evidence, not a finding of an actual scope violation or NameError. C-002 concerns changes to files outside a stated task boundary (e.g., editing oracle.py when asked to touch challenger.py only); it does not concern whether a diff fragment is self-contained. This diff modifies exactly one file, runner.py, consistent with a task scoped to runner.py.",
+          "evidence": "The proposed change's file_path is single: pipeline/runner.py. No other files are touched. C-002's rule text is about cross-file scope creep, which does not apply here."
+        }
+      ],
+      "summary": "The change is a minimal, additive edit to a ledger payload that does not weaken governance; the only substantive uncertainty (variable typing/definition) stems from the diff being a single-hunk fragment rather than any actual defect, and should be confirmed by inspecting the full file rather than vetoed on speculation.",
+      "_tokens": {
+        "input": 8386,
+        "output": 1118
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change is a single-line, additive edit to pipeline/runner.py that inserts a new 'constitution_sources' key into a ledger entry payload alongside the existing 'constitution_hash' field. Against C-007 (Governance Pipeline Integrity), the Challenger's own finding (index 0) rates this an OBSERVATION, and the Defender concedes it is additive provenance data that touches no control flow, verification logic, or logging \u2014 if anything it strengthens auditability. I concur: no enforcement is weakened, no verification bypassed, no logging disabled, so C-007 is satisfied. Against C-004 (Type Safety), the Challenger raised a CONCERN only because the variable's declaration is not visible in the fragment; the Defender correctly notes (rebuttal index 1) that this line is a dict-literal entry, not a function signature or annotation, and introduces no bare Any and discards no existing precision \u2014 C-004's operative test ('discarded precision') is not met. Against C-002 (Scope Boundary), the Challenger's CONCERN is a speculative NameError worry, but the Defender's rebuttal (index 2) is decisive: C-002 governs cross-file scope creep, the change touches exactly one file (pipeline/runner.py), and a one-hunk diff by definition does not display sibling declarations. None of the Challenger findings rise above OBSERVATION/CONCERN, and no veto-severity constraint is clearly violated. Regarding C-008 (Ledger Immutability), which I evaluate independently: adding a field to a newly-constructed entry payload does not modify, delete, or reorder existing entries, so it is satisfied.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "Additive payload field; Challenger rated OBSERVATION, Defender conceded. No enforcement, verification, or logging weakened."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "Dict-literal entry, not a signature/annotation. No existing precision discarded, no bare Any introduced (Defender rebuttal 1)."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Single file (runner.py) modified; C-002 targets cross-file scope creep, not fragment self-containment (Defender rebuttal 2)."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "SATISFIED",
+          "note": "Adds a field to a new entry payload; does not modify, delete, reorder, or overwrite existing entries."
+        }
+      ],
+      "advisories": [
+        "Confirm that 'constitution_sources' is actually defined/computed within runner.py before this payload is constructed. The diff fragment does not show its declaration; if the variable is undefined it would raise a NameError at runtime. This is a correctness/test concern (C-005 warning territory), not a constitutional veto.",
+        "Ensure 'constitution_sources' carries appropriate typing at its declaration site (e.g., list[str] or dict[str, Any]) consistent with the constitution-loading code, to keep C-004 posture strong across the full file."
+      ],
+      "remediation": null,
+      "confidence": "MODERATE",
+      "_tokens": {
+        "input": 9792,
+        "output": 1348
+      }
+    },
+    "entry_hash": "1308bb06b99f0b7690e623032ba9feed2ddb05faddf01cb01cf46f87e3ba11d2"
+  },
+  {
+    "entry_id": "f6f1585b-0923-4512-b6d9-afc9fb9a4b97",
+    "timestamp": "2026-07-30T19:46:09.036714+00:00",
+    "previous_hash": "1308bb06b99f0b7690e623032ba9feed2ddb05faddf01cb01cf46f87e3ba11d2",
+    "constitution_hash": "8fe258d5a023a0ecc81f1cc6374156c8670d754529953b2b851e9ada53c60a75",
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "ledger\\chain.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "ledger\\chain.py",
+        "change_type": "modify",
+        "old_string": "        \"constitution_hash\": pipeline_result.get(\"constitution_hash\", \"\"),",
+        "new_string": "        \"constitution_hash\": pipeline_result.get(\"constitution_hash\", \"\"),\n        # Which files produced that hash. When a project layer is stacked on\n        # Bench's core, the hash chains two raw file hashes and is not itself\n        # any file's digest, so a hash alone would not tell an auditor which\n        # constitutions actually ruled. Absent (empty) on entries written\n        # before layering existed, and on core-only runs it simply names the\n        # single core file.\n        \"constitution_sources\": pipeline_result.get(\"constitution_sources\", []),"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-007",
+          "severity": "OBSERVATION",
+          "location": "ledger/chain.py: new_string adding constitution_sources field",
+          "evidence": "\"constitution_sources\": pipeline_result.get(\"constitution_sources\", []),",
+          "reasoning": "This file falls under governance pipeline scope, so any change is subject to scrutiny per C-007. The change is purely additive (new metadata field defaulting to empty list) and does not remove logging, weaken verification, or bypass any check. No enforcement weakening is present, but flagging per C-007's mandate to scrutinize pipeline file changes."
+        },
+        {
+          "constraint_id": "C-008",
+          "severity": "OBSERVATION",
+          "location": "ledger/chain.py: entry construction",
+          "evidence": "\"constitution_sources\": pipeline_result.get(\"constitution_sources\", []),",
+          "reasoning": "This adds a new field to newly-constructed ledger entries prior to hashing/appending, not a modification of existing entries. Appears consistent with append-only immutability, but since this affects what gets hashed into the chain, worth confirming downstream verify_chain/verify.py logic tolerates the new optional field on older entries where it is absent (the comment states it will be absent on pre-existing entries)."
+        }
+      ],
+      "_tokens": {
+        "input": 7857,
+        "output": 839
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "CONCEDE",
+          "argument": "The Challenger is correct that this file falls under C-007 scope and warrants scrutiny, but correctly classifies this as an OBSERVATION rather than a violation. The change is purely additive: a new dict key with a safe default ([]) via .get(), added to entry construction before hashing. It adds metadata, doesn't remove or weaken any existing check, logging, or verification path. There's nothing to rebut here since the Challenger already reached the right conclusion \u2014 I'm agreeing with their reasoning, not conceding a violation.",
+          "evidence": "The diff only adds a key-value pair inside dict construction using .get() with a default; no existing lines are removed or altered."
+        },
+        {
+          "constraint_id": "C-008",
+          "finding_index": 1,
+          "position": "REBUT",
+          "argument": "The Challenger's own finding acknowledges this is field-addition to entries being newly constructed, not modification of existing entries \u2014 which is exactly what C-008 permits. Their residual concern is about verify_chain compatibility with older entries lacking this field, but that's a forward-compatibility question about a different file (ledger/verify.py), not evidence of a violation in this diff. Ledger entries are typically dicts/JSON; an absent key is simply not present when read back (or read via .get() with a default), which is the same pattern already used here for constitution_hash on line one. Nothing in this diff touches historical entries, reorders them, or breaks the hash chain \u2014 the new field is added before hashing occurs, so old entries' hashes remain untouched and the chain linkage (prev_hash -> hash) is unaffected.",
+          "evidence": "The pattern `pipeline_result.get(key, default)` mirrors the existing `constitution_hash` line immediately above it, which is already established practice in this file. No modification, deletion, or reordering of existing entries occurs in this diff."
+        }
+      ],
+      "summary": "This is a minimal, additive metadata field consistent with existing patterns in the file, raising no genuine C-007 or C-008 violations, only reasonable forward-compatibility observations that don't implicate this specific diff.",
+      "_tokens": {
+        "input": 8362,
+        "output": 762
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change adds a single new metadata field 'constitution_sources' to newly-constructed ledger entries using pipeline_result.get('constitution_sources', []), mirroring the established pattern on the immediately preceding 'constitution_hash' line. Per C-007, this file is within governance pipeline scope and warrants scrutiny; the Challenger classified this as an OBSERVATION and the Defender conceded the scope while correctly noting the change is purely additive and removes no logging, verification, or enforcement (C-007 SATISFIED). Per C-008, the Challenger confirmed this adds a field to entries being newly constructed before hashing, not a modification, reorder, or deletion of existing entries; the hash chain linkage is unaffected because the field is folded into the entry prior to hash computation, and older entries remain byte-for-byte untouched (C-008 SATISFIED). The Challenger's residual forward-compatibility concern \u2014 whether verify.py tolerates the absent field on older entries \u2014 is a legitimate advisory but concerns a different file not present in this diff, so it does not constitute a violation here. No new imports are introduced (C-003 N/A), no type annotations are removed (C-004 N/A), no error handling is touched (C-001 N/A), and no secrets appear (C-006 N/A). The change is confined to the stated file (C-002 SATISFIED).",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "In-scope pipeline file, but change is purely additive metadata; no enforcement, logging, or verification weakened, per Challenger OBSERVATION and Defender concession."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "SATISFIED",
+          "note": "Field added to newly-constructed entries before hashing; no existing entry modified, reordered, or deleted; chain linkage intact, per Challenger finding and Defender rebuttal."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change confined to ledger/chain.py, the stated target."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new imports or dependencies introduced."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No type annotations added, removed, or weakened."
+        },
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error-handling code touched."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No credentials or secrets present."
+        }
+      ],
+      "advisories": [
+        "Per the Challenger's C-008 forward-compatibility note, confirm that verify.py/verify_chain and any downstream readers tolerate entries where 'constitution_sources' is absent (pre-layering entries). This is not a violation in this diff but should be verified before relying on the field.",
+        "C-005 (warning): the change is a trivial additive metadata field, but if downstream logic consumes constitution_sources, corresponding test coverage would be advisable."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 9403,
+        "output": 1168
+      }
+    },
+    "entry_hash": "4d0ef2b1b3eeea8b4110c5f98cc44183bc5f39d2c5b120725b68002fcde3b072"
+  },
+  {
+    "entry_id": "667aa102-29b0-49fe-9d26-8ac1437c2200",
+    "timestamp": "2026-07-30T19:47:15.871711+00:00",
+    "previous_hash": "4d0ef2b1b3eeea8b4110c5f98cc44183bc5f39d2c5b120725b68002fcde3b072",
+    "constitution_hash": "8fe258d5a023a0ecc81f1cc6374156c8670d754529953b2b851e9ada53c60a75",
+    "constitution_sources": [
+      {
+        "layer": "core",
+        "path": "E:\\dev\\Bench\\bench.json",
+        "sha256": "8fe258d5a023a0ecc81f1cc6374156c8670d754529953b2b851e9ada53c60a75"
+      }
+    ],
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "tests\\test_runner.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "tests\\test_runner.py",
+        "change_type": "modify",
+        "old_string": "_MOCK_CONSTITUTION: tuple[dict, str] = (\n    {\"constraints\": [{\"id\": \"C-001\", \"name\": \"Test\", \"rule\": \"...\", \"severity\": \"veto\"}]},\n    \"abc123hash\",\n)",
+        "new_string": "_MOCK_CONSTITUTION: tuple[dict, str, list[dict]] = (\n    {\"constraints\": [{\"id\": \"C-001\", \"name\": \"Test\", \"rule\": \"...\", \"severity\": \"veto\"}]},\n    \"abc123hash\",\n    [{\"layer\": \"core\", \"path\": \"bench.json\", \"sha256\": \"abc123hash\"}],\n)"
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [
+        {
+          "constraint_id": "C-002",
+          "severity": "OBSERVATION",
+          "location": "tests/test_runner.py",
+          "evidence": "_MOCK_CONSTITUTION: tuple[dict, str, list[dict]] = (..., [{\"layer\": \"core\", \"path\": \"bench.json\", \"sha256\": \"abc123hash\"}])",
+          "reasoning": "This test fixture change implies a corresponding change to the production function signature it mocks (likely constitution.py's load/snapshot return type gaining a third element for layer manifests). That source change isn't included in this diff, so scope completeness can't be fully verified from what's shown, but the test-only edit itself is within bounds and consistent with updating a fixture to match an evolving return shape."
+        }
+      ],
+      "_tokens": {
+        "input": 7883,
+        "output": 686
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change modifies a test fixture `_MOCK_CONSTITUTION` in tests/test_runner.py, widening its type annotation from `tuple[dict, str]` to `tuple[dict, str, list[dict]]` and adding a corresponding third tuple element (a layer manifest). The Challenger issued a CLEAR status with a single OBSERVATION (not a violation) under C-002, and the Defender confirmed CLEAR. Evaluating against the full constitution: C-004 (Type Safety) is satisfied and in fact strengthened \u2014 the annotation becomes more precise (`list[dict]` is added, nothing is weakened or replaced with a less precise form). C-002 (Scope) is satisfied for the edit shown: it is a test-only change confined to the stated file. C-003 is not applicable \u2014 no new imports. C-007 is not applicable \u2014 test files are not part of the challenger/defender/oracle/ledger/constitution enforcement path. C-001, C-006, C-008 are not implicated by a fixture literal. The Challenger's observation that this fixture change implies a corresponding production signature change (e.g., in constitution.py) is a valid completeness note, but a fixture aligning to an evolving return shape is not itself a constitutional violation, and I cannot veto on a change not present in this diff.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Edit is confined to tests/test_runner.py, the stated boundary. Challenger raised only an OBSERVATION about implied source changes not shown here, which is not a violation of the edit presented."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "Type annotation is strengthened, not weakened: `tuple[dict, str]` -> `tuple[dict, str, list[dict]]`. No precision discarded."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new imports or dependencies introduced."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Change is to a test file, not to the challenger/defender/oracle/ledger/constitution enforcement path."
+        },
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error-handling code involved."
+        }
+      ],
+      "advisories": [
+        "Per the Challenger's observation, this fixture now assumes a three-element return shape (with a layer manifest) from the production constitution snapshot API. Ensure the corresponding source change in constitution.py is submitted and independently governed so the fixture and production types stay consistent.",
+        "C-005 (warning): this is a fixture update rather than new logic, so no new tests are expected; verify that the tests consuming _MOCK_CONSTITUTION are updated to exercise the new third element where relevant."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 8518,
+        "output": 1151
+      }
+    },
+    "entry_hash": "97385190252e18d6c11e21469b8289137859346945198d9e6360eeeb9e031827"
+  },
+  {
+    "entry_id": "80e22a16-ffc7-4a8d-8219-b77a99ad77a3",
+    "timestamp": "2026-07-30T19:48:02.961585+00:00",
+    "previous_hash": "97385190252e18d6c11e21469b8289137859346945198d9e6360eeeb9e031827",
+    "constitution_hash": "8fe258d5a023a0ecc81f1cc6374156c8670d754529953b2b851e9ada53c60a75",
+    "constitution_sources": [
+      {
+        "layer": "core",
+        "path": "E:\\dev\\Bench\\bench.json",
+        "sha256": "8fe258d5a023a0ecc81f1cc6374156c8670d754529953b2b851e9ada53c60a75"
+      }
+    ],
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "tests\\test_runner.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "tests\\test_runner.py",
+        "change_type": "modify",
+        "old_string": "@patch(\"pipeline.runner.load_constitution_snapshot\")",
+        "new_string": "@patch(\"pipeline.runner.load_governing_constitution\")"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-002",
+          "severity": "OBSERVATION",
+          "location": "tests/test_runner.py",
+          "evidence": "@patch(\"pipeline.runner.load_constitution_snapshot\") -> @patch(\"pipeline.runner.load_governing_constitution\")",
+          "reasoning": "This diff renames the patched symbol referenced by a test, implying the underlying function in pipeline/runner.py was renamed from load_constitution_snapshot to load_governing_constitution. No corresponding change to pipeline/runner.py is included in this diff. If the source rename was made in a separate, ungoverned edit, or if it hasn't happened at all, this test will fail (AttributeError on patch target) or the two changes are being split across multiple tool calls without visibility here. Not a violation on its own, but the diff is incomplete without the paired source change for review."
+        },
+        {
+          "constraint_id": "C-007",
+          "severity": "OBSERVATION",
+          "location": "tests/test_runner.py",
+          "evidence": "patch target changed to pipeline.runner.load_governing_constitution",
+          "reasoning": "This test exercises pipeline/runner.py, part of the governance pipeline itself. Renaming what's patched suggests a rename of a constitution-loading function central to C-007's concern (constitution snapshot loading, per-run freezing). The change shown here is test-only and does not itself weaken enforcement, but the actual pipeline/runner.py edit (not shown) should be scrutinized to confirm load_governing_constitution still preserves snapshot-per-run semantics (Rule 4: 'Constitution is loaded as a snapshot per pipeline run... No mid-run constitution changes')."
+        }
+      ],
+      "_tokens": {
+        "input": 7674,
+        "output": 1025
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "MITIGATE",
+          "argument": "The Challenger is correct that this diff alone is incomplete evidence \u2014 a test-only change patching a symbol that must exist in pipeline/runner.py implies a paired rename in the source file that isn't shown here. However, per project workflow rule 14 ('One change per tool call. Do not batch unrelated changes into a single Write/Edit operation'), splitting a rename into a source-file edit and a test-file edit across separate governed tool calls is the *correct* procedure, not a violation. Each edit passes through the pipeline independently. This finding is a legitimate call for the Oracle to verify sequencing (i.e., confirm the pipeline/runner.py rename was itself governed and passed) rather than evidence of a defect in this specific diff.",
+          "evidence": "CLAUDE.md Rule 14: 'One change per tool call. Do not batch unrelated changes into a single Write/Edit operation.' This diff is a single, minimal, surgical edit consistent with that rule."
+        },
+        {
+          "finding_index": 1,
+          "position": "MITIGATE",
+          "argument": "The Challenger correctly flags that the renamed function touches pipeline/runner.py, part of the governed core, triggering C-007 scrutiny. But this specific diff is a test file update only \u2014 it patches a mock target to match an (apparently already renamed) function name. A test-only edit cannot itself weaken enforcement, bypass verification, or disable logging; it has no runtime behavior. The substantive C-007 question (does load_governing_constitution preserve per-run snapshot semantics) is a question for the diff that actually renamed/modified pipeline/runner.py, not this one. If that source diff already passed its own governance check, this finding is moot for the current change; if it didn't, the defect lies there, not here.",
+          "evidence": "The diff's old_string/new_string are both @patch decorator arguments in a test file \u2014 no production logic, no constitution-loading logic, is touched by this change."
+        }
+      ],
+      "summary": "The diff itself is a minimal, correctly-scoped test update with no independent violations; the Challenger's real concern is unresolved visibility into a companion source-file rename, which is a legitimate audit note for the Oracle but not a flaw in this specific change.",
+      "_tokens": {
+        "input": 8313,
+        "output": 802
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change is a single, surgical edit to tests/test_runner.py that renames a @patch decorator target from 'pipeline.runner.load_constitution_snapshot' to 'pipeline.runner.load_governing_constitution'. Both Challenger findings are explicitly marked as OBSERVATION severity, not violations. Per C-002 (Scope Boundary Enforcement), this diff touches only the test file and stays within a coherent task boundary; the Defender's rebuttal on finding_index 0 correctly notes that splitting a source rename and its paired test update across separate tool calls is consistent with workflow Rule 14, not scope creep. Per C-007 (Governance Pipeline Integrity), a test-only edit modifying a mock target has no runtime behavior and cannot itself weaken enforcement, bypass verification, or disable logging; the Defender's rebuttal on finding_index 1 correctly locates the substantive C-007 question (does load_governing_constitution preserve per-run snapshot semantics) in the companion pipeline/runner.py diff, not this one. No veto-severity constraint is clearly violated by this diff as presented.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is confined to tests/test_runner.py; renaming a patch target to track a source rename is within task boundary and consistent with Rule 14 (one change per tool call). Challenger flagged this as OBSERVATION only."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Test-only edit with no production or constitution-loading logic. Cannot weaken enforcement or disable logging. The snapshot-semantics question belongs to the unshown pipeline/runner.py diff, which must pass its own governance."
+        },
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error-handling code touched."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependencies added."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No type annotations altered; the change is a string literal in a decorator argument."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger interaction."
+        }
+      ],
+      "advisories": [
+        "The paired rename of load_constitution_snapshot -> load_governing_constitution in pipeline/runner.py is not visible in this diff. The Oracle can only certify this test file. An auditor should confirm that the source-file rename was itself submitted through the pipeline and passed, and that load_governing_constitution preserves snapshot-per-run freezing semantics (Absolute Rule 4). If the source rename was made outside governance or has not occurred, this test will fail with an AttributeError on the patch target.",
+        "C-005 (warning): this change updates an existing test to track a rename rather than adding new logic, so no new test coverage is required by this diff."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 9394,
+        "output": 1248
+      }
+    },
+    "entry_hash": "5b48f69b0ecb10f85100c1227f1bc049ef7304f866c7faa9f2fba6ed75de3e20"
   }
 ]
