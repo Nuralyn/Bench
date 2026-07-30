@@ -57,14 +57,21 @@ narrow gap: it is a complete bypass of the governance layer, available to any
 model or human with shell access, and it leaves no trace in the chain to show it
 was used.
 
-Bench does not close this hole by default, and the reason is practical. Adding
-`Bash` to the matcher would route every `git status`, test run, and build through
-a three-model pipeline that takes roughly two minutes per call, which makes the
-tool unusable. Projects that want the stricter posture can add `Bash` to the
-matcher deliberately and accept that cost. Everyone else should read the
-boundary plainly: what Bench guarantees is that changes made through the
-governed file tools were adjudicated and recorded — not that every change to the
-repository was.
+Bench does not close this hole, and adding `Bash` to the matcher yourself does
+not close it either — it breaks the tool instead. `utils.diff.build_diff_info`
+produces a payload only for `Write`, `Edit`, and `MultiEdit`; every other tool
+yields an empty dict, which the Challenger rejects as a malformed input and the
+runner fail-closes into a VETO. The practical result is that every `git status`,
+test run, and build is denied without ever reaching a model. Bash matching is
+unsupported today, not merely slow, and it should not be enabled.
+
+Closing the hole properly needs a meaningful diff representation for a shell
+command — deciding which files `sed -i`, a heredoc, or a redirect will touch
+before it runs. That is a real piece of work and is not done.
+
+So read the boundary plainly: what Bench guarantees is that changes made through
+the governed file tools were adjudicated and recorded — not that every change to
+the repository was.
 
 Bench governs what a model proposes through the tools it hooks, not everything
 that can reach a branch.
