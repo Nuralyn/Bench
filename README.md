@@ -149,12 +149,30 @@ cp .claude/settings.template.json /your-project/.claude/settings.json
 # script. The hook then emits no JSON, and Bench fails closed — blocking every
 # Write/Edit/MultiEdit in that project until the path is corrected.
 
-# Customize your constitution
-# The pipeline resolves the constitution to an absolute path inside THIS
-# checkout (pipeline/runner.py `_CONSTITUTION_PATH`), so it reads the same
-# bench.json no matter which project it is governing. Edit it here; copying a
-# bench.json into the governed project has no effect today.
-# Edit bench.json to add your own rules.
+# Add your project's own rules as a layer
+# Bench's core constitution always applies. Put rules specific to THIS project
+# in <project>/bench.json, which is stacked on top of the core: use the
+# reserved P- namespace for new constraints, and severity_overrides to make a
+# core constraint stricter. A layer can add and tighten, never weaken.
+# See "Per-Project Constitutions" below for the full schema and rules.
+cat > /your-project/bench.json <<'JSON'
+{
+  "constitution": "myproject-v1",
+  "version": 1,
+  "constraints": [
+    {
+      "id": "P-001",
+      "name": "No Raw SQL",
+      "rule": "Use the query builder.",
+      "severity": "veto"
+    }
+  ],
+  "severity_overrides": { "C-005": "veto" }
+}
+JSON
+
+# Edit this checkout's bench.json only for rules that should bind EVERY project
+# you govern. It is the shared floor, not the place for one project's rules.
 
 # Keep the ledger out of git BEFORE your first governed edit
 # The ledger stores the full diff of every change it governs, so committing it
