@@ -8875,5 +8875,766 @@
       }
     },
     "entry_hash": "dde7f0083891e96fce205b2cdb32288382bc72e01378580cd0a52cd04b2139c5"
+  },
+  {
+    "entry_id": "9e3cc6f1-2b53-4577-b63a-03bb3d2e7404",
+    "timestamp": "2026-07-30T20:22:23.410965+00:00",
+    "previous_hash": "dde7f0083891e96fce205b2cdb32288382bc72e01378580cd0a52cd04b2139c5",
+    "constitution_hash": "8fe258d5a023a0ecc81f1cc6374156c8670d754529953b2b851e9ada53c60a75",
+    "constitution_sources": [
+      {
+        "layer": "core",
+        "path": "E:\\dev\\Bench\\bench.json",
+        "sha256": "8fe258d5a023a0ecc81f1cc6374156c8670d754529953b2b851e9ada53c60a75"
+      }
+    ],
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "C:\\Users\\Designer\\.claude\\plans\\fancy-inventing-kitten.md",
+      "tool": "Write",
+      "diff_summary": {
+        "file_path": "C:\\Users\\Designer\\.claude\\plans\\fancy-inventing-kitten.md",
+        "change_type": "create",
+        "redacted": true,
+        "note": "Diff body omitted: file lies outside this ledger's project. Path and verdict are retained; the change itself was adjudicated in full."
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-002",
+          "severity": "OBSERVATION",
+          "location": "file_path: C:\\Users\\Designer\\.claude\\plans\\fancy-inventing-kitten.md",
+          "evidence": "The proposed change creates a planning document outside the Bench repository (E:\\dev\\Bench) entirely, in a user-scoped Claude plans directory.",
+          "reasoning": "This file is not part of the governed Bench codebase and does not itself touch pipeline/, ledger/, hooks/, or bench.json. It only proposes future edits. Since it makes no functional change to governed files, C-002's scope-boundary concern is not triggered by this diff itself, but the plan's content commits to a broad multi-file, multi-commit body of work (README, bench.json, CLAUDE.md) that should be tracked as a boundary marker for the follow-on changes it describes."
+        },
+        {
+          "constraint_id": "C-007",
+          "severity": "OBSERVATION",
+          "location": "Plan section '2. bench.json \u2014 reword C-002, bump version 4 \u2192 5'",
+          "evidence": "\"Rewrite the `rule` field so scope is judged from available evidence rather than from a task statement that cannot arrive... Keep severity: veto and keep the rationale unchanged.\"",
+          "reasoning": "This plan document itself does not modify bench.json, so C-007 is not violated by this diff. However, it explicitly anticipates that the described follow-up edit to bench.json will need to survive C-007 scrutiny, and the plan's own risk section flags this as the highest-probability veto \u2014 worth flagging now so the Oracle is aware this document sets up (but does not itself execute) a constitutionally sensitive change."
+        },
+        {
+          "constraint_id": "C-008",
+          "severity": "OBSERVATION",
+          "location": "Item 4 discussion of chain retirement (2026-07-24)",
+          "evidence": "\"The chain was retired on 2026-07-24 and the predecessor archived to C:\\Users\\mstar\\.bench-archive\\bench-ledger-2026-07-24.json \u2014 a path on a different machine, deliberately unpublished because it contained third-party source.\"",
+          "reasoning": "The plan describes a past ledger retirement as fact without this diff itself performing or verifying that the retirement satisfied all C-008 sub-requirements (human decision recorded in anchor entry, pre-move verified archive, complete anchor metadata). This document doesn't execute the retirement, so no violation occurs here, but the Oracle may want the retirement's compliance independently confirmed given how central it is to the plan's Item 4 argument (the 'unverifiable receipt' problem)."
+        }
+      ],
+      "_tokens": {
+        "input": 17366,
+        "output": 1493
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "CONCEDE",
+          "argument": "The observation is accurate but the Challenger correctly frames it as non-violating: this diff creates a planning document outside the governed repo entirely, describing future work rather than executing it. C-002's scope boundary applies to what a change touches, not to what it discusses touching later. The plan even explicitly separates its five proposed changes into distinct future commits, which is the opposite of scope creep \u2014 it's scope discipline applied in advance.",
+          "evidence": "Plan's own 'Risks' section: 'Keep them as separate commits so a veto on the constitution edit does not block the honesty fixes.' This is boundary-consciousness, not boundary violation."
+        },
+        {
+          "finding_index": 1,
+          "position": "CONCEDE",
+          "argument": "Correct and appropriately scoped as an observation rather than a finding of violation. The plan itself does not touch bench.json, so C-007 cannot fire against this diff. The Challenger is right to flag it for the Oracle's awareness of what's coming, and the plan document itself already does this self-policing work in its own 'Risks' section, showing the author anticipated the exact scrutiny the Challenger raises.",
+          "evidence": "Plan text: 'Expect C-007 scrutiny... Submit as one self-contained edit and frame it as making the constraint enforceable as written, not as weakening it.'"
+        },
+        {
+          "finding_index": 2,
+          "position": "CONCEDE",
+          "argument": "The Challenger is right that this document asserts a past retirement's compliance without this diff independently verifying it. That said, the plan doesn't rely on the retirement being valid to make its point \u2014 Item 4's argument is that the README's cited receipt (entry #13) is unverifiable and should be replaced with entries that are verifiable now, regardless of whether the 2026-07-24 retirement was itself fully compliant. If the retirement is later found non-compliant, that would be a separate, more serious finding against whatever change performed the retirement, not against this planning document.",
+          "evidence": "Item 4 concludes: 'This needs fixing regardless of whether a new example is added,' indicating the argument doesn't hinge on retirement validity."
+        }
+      ],
+      "summary": "This is a non-code planning document living outside the governed repo that proposes no immediate file changes to pipeline/, ledger/, hooks/, or bench.json, so none of the Challenger's observations rise to an actual constraint violation, and all three are best read as forward-looking flags for when the described follow-on edits are actually submitted.",
+      "_tokens": {
+        "input": 18354,
+        "output": 910
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The proposed change creates a planning/markdown document at C:\\Users\\Designer\\.claude\\plans\\fancy-inventing-kitten.md, entirely outside the governed Bench repository (E:\\dev\\Bench). It executes no functional edit to any pipeline/, ledger/, hooks/, or bench.json file; it only describes future work. The Challenger raised three items, all explicitly graded as OBSERVATION (not violations), and the Defender CONCEDED each while correctly noting none rises to a constraint violation against this diff. C-002 (scope boundary) is not triggered because the diff touches no governed file and, if anything, the plan demonstrates scope discipline by separating future work into discrete commits. C-007 (governance integrity) is not triggered because this document does not modify the constitution or any pipeline component; it merely anticipates a future bench.json reword that will be judged on its own submission. C-008 (ledger immutability) is not triggered because this diff performs no retirement, edit, or reordering of ledger entries; it only narrates a past retirement, whose compliance is out of scope for this document and would be a separate finding against whatever change performed it. I independently reviewed the remaining constraints (C-001, C-003, C-004, C-005, C-006) and found none applicable to a prose planning file with no code, imports, types, error handling, or secrets. No veto-severity constraint is clearly violated.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-002",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Diff touches only a user-scoped plan file outside the governed repo; no governed files modified. Challenger OBSERVATION, Defender CONCEDE. The plan proposes future work in separated commits, which is scope discipline, not creep."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "This document does not modify constitution or any pipeline file. The anticipated bench.json C-002 reword must be judged when actually submitted. Challenger OBSERVATION, Defender CONCEDE."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger entry is modified, deleted, reordered, or retired by this diff. The referenced 2026-07-24 retirement is narrated, not executed; its compliance is not established or required by this document."
+        },
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No code, no catch blocks in a prose markdown file."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependency declarations."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No type annotations affected."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No secrets or credentials introduced. File paths referenced are not credentials."
+        }
+      ],
+      "advisories": [
+        "The planned bench.json C-002 reword (plan section 2) is a governance-pipeline change and will face C-007 scrutiny when actually submitted; it must be argued as making the constraint enforceable in-band, not as weakening enforcement, and must bump the version field per CLAUDE.md rule 15. This PASS does not pre-approve that future edit.",
+        "The plan asserts a prior chain retirement (2026-07-24) as fact. When any change relies on that retirement, an auditor should independently confirm it satisfied all C-008 sub-requirements (recorded human decision, pre-move verified archive, complete anchor metadata, retained archive path).",
+        "This PASS certifies only that the planning document violates no constitutional constraint. Each of the five described follow-on edits (README, bench.json, CLAUDE.md) will be governed independently when submitted."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 19531,
+        "output": 1477
+      }
+    },
+    "entry_hash": "ac972f8ed281dd90cc9d718a64fa90966052174b8f64c1c455512c4831444667"
+  },
+  {
+    "entry_id": "0f5007ef-e70a-44c5-a33c-4407227fa225",
+    "timestamp": "2026-07-30T20:36:05.959974+00:00",
+    "previous_hash": "ac972f8ed281dd90cc9d718a64fa90966052174b8f64c1c455512c4831444667",
+    "constitution_hash": "8fe258d5a023a0ecc81f1cc6374156c8670d754529953b2b851e9ada53c60a75",
+    "constitution_sources": [
+      {
+        "layer": "core",
+        "path": "E:\\dev\\Bench\\bench.json",
+        "sha256": "8fe258d5a023a0ecc81f1cc6374156c8670d754529953b2b851e9ada53c60a75"
+      }
+    ],
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "README.md",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "README.md",
+        "change_type": "modify",
+        "old_string": "So read the boundary plainly: what Bench guarantees is that changes made through\nthe governed file tools were adjudicated and recorded \u2014 not that every change to\nthe repository was.",
+        "new_string": "MCP servers are the same gap, and a less visible one. Any server registered in a\nproject's `.mcp.json` is spawned by Claude Code with its own tool surface, and\nnone of those tools pass through the PreToolUse hook. A server exposing\nfile-write or shell capability bypasses Bench exactly as `Bash` does \u2014 but a\ntool named `write_file` reads as a governed primitive, where a shell command at\nleast looks like a shell command.\n\nBench already accounts for MCP in exactly one place, and it is worth being\nprecise about which. `utils/api.py` spawns the judge with `--strict-mcp-config`\nand no `--mcp-config`, dropping every MCP server so a prompt-injected diff cannot\ndrive the judge into running MCP tools. That hardens the judge's own sandbox. It\ndoes nothing for the governed project's tool surface, which is where this gap\nlives.\n\nThe mitigation available today is to audit a server's package before registering\nit in a governed project \u2014 read what it can reach, not what it advertises. Be\nhonest about what that buys: it is a point-in-time check of one version, it does\nnot survive an upgrade, and a source grep is necessary rather than sufficient. A\nserver can reach files through `os.popen`, `pty`, an asyncio subprocess,\n`Path.open`, a dynamic import, or a remote API, and many MCP servers are Node\nrather than Python. An audit raises confidence; it does not produce a guarantee,\nand it is not governance.\n\nSo read the boundary plainly: Bench governs the file-editing tools it hooks.\nShell commands and MCP server tools are outside that boundary. What Bench\nguarantees is that changes made through the governed file tools were adjudicated\nand recorded \u2014 not that every change to the repository was."
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 8299,
+        "output": 229
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change modifies README.md only, replacing and expanding a prose section that describes Bench's governance boundary. The Challenger returned CLEAR with no findings, and the Defender confirmed CLEAR. Independently reviewing against the full constitution: C-001 (error handling), C-003 (dependencies), C-004 (type safety), and C-006 (secrets) are not applicable because no code, imports, type annotations, or credentials are introduced or altered. C-002 (scope) is satisfied: the change touches a single documentation file and stays within the boundary-documentation task. C-007 (pipeline integrity) is not applicable in the enforcement sense \u2014 README.md is not part of challenger/defender/oracle/ledger/constitution code, and the text describes existing behavior rather than modifying it; if anything it clarifies the MCP/hook boundary rather than weakening it. C-008 (ledger immutability) is not applicable. C-005 (test coverage) is a warning and not triggered by a documentation-only change.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error-handling code introduced; documentation-only change."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change confined to README.md, consistent with a boundary-documentation task."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependencies added."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No type annotations changed; prose only."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "No secrets or credentials present in the added text."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "README.md is not pipeline code; text describes existing --strict-mcp-config behavior without altering enforcement."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger interaction."
+        }
+      ],
+      "advisories": [
+        "The added text asserts that utils/api.py spawns the judge with --strict-mcp-config and no --mcp-config. This is a factual claim about code behavior; ensure it stays accurate as utils/api.py evolves, or the documentation will drift from implementation."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 8664,
+        "output": 1112
+      }
+    },
+    "entry_hash": "0d67ae5a9998fb56056c2705f9f9e1ae44a3fc3a9eec9e2df9bd4411034698e4"
+  },
+  {
+    "entry_id": "d9bbad7b-9308-49ab-9fa1-98a8a58d2033",
+    "timestamp": "2026-07-30T20:37:44.033695+00:00",
+    "previous_hash": "0d67ae5a9998fb56056c2705f9f9e1ae44a3fc3a9eec9e2df9bd4411034698e4",
+    "constitution_hash": "8fe258d5a023a0ecc81f1cc6374156c8670d754529953b2b851e9ada53c60a75",
+    "constitution_sources": [
+      {
+        "layer": "core",
+        "path": "E:\\dev\\Bench\\bench.json",
+        "sha256": "8fe258d5a023a0ecc81f1cc6374156c8670d754529953b2b851e9ada53c60a75"
+      }
+    ],
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "README.md",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "README.md",
+        "change_type": "modify",
+        "old_string": "During the build, Bench vetoed a change to its own governance pipeline code\nunder constraint C-007 (governance pipeline integrity). The change would have\nreduced fallback coverage in the hook entry point. It was corrected and\nre-submitted. Ledger entry #13 is the receipt.",
+        "new_string": "Bench has repeatedly vetoed changes to its own governance pipeline under\nconstraint C-007 (governance pipeline integrity). Ledger entry #64 is a clean\nexample: a change to `pipeline/constitution.py` left a literal placeholder token\nin the file, which would have been a `SyntaxError` breaking every pipeline\nimport and disabling enforcement outright. The Oracle caught it, named it, and\nblocked it. It was corrected and re-submitted.\n\nOther C-007 vetoes in this chain: #22\u2013#25 (`bench.json`), #28\n(`ledger/chain.py`), #54 and #56 (`utils/api.py`), #77 (`pipeline/runner.py`).\nRead any of them with `python -m cli ledger`.\n\nOne note on the numbering, so it is not mysterious. This chain opens with an\n`ANCHOR` entry rather than an ordinary verdict. A predecessor chain was retired\non 2026-07-24 and archived without being published, because a globally\nregistered hook had written diffs from unrelated projects into Bench's own\nledger and that chain contained third-party source. Retiring it whole was chosen\nover editing entries, which C-008 forbids without exception. Entry numbers in\nthis README refer to the current published chain."
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-008",
+          "severity": "CONCERN",
+          "location": "README.md, new paragraph beginning 'One note on the numbering...'",
+          "evidence": "\"A predecessor chain was retired on 2026-07-24 and archived without being published... Retiring it whole was chosen over editing entries, which C-008 forbids without exception.\"",
+          "reasoning": "This is a documentation-only change, so it cannot itself violate C-008, but it asserts as historical fact that a chain retirement occurred and implies it satisfied C-008's enumerated requirements (human decision recorded in the anchor entry, pre-move archive verification, anchor entry with tip hash/genesis hash/entry count/timestamps/archive path/reason, indefinite archive retention). The diff provides no evidence the archive exists, that verify_chain was run against it, or that the anchor entry actually contains the required fields. If this claim is published without that backing having actually happened, the README becomes a false governance record, which is the exact failure mode C-008 exists to prevent. Recommend confirming the anchor entry and archived chain exist and pass verify_chain before merging this text, or softening the claim until verified."
+        },
+        {
+          "constraint_id": "C-008",
+          "severity": "OBSERVATION",
+          "location": "README.md, ledger entry references (#22-#25, #28, #54, #56, #64, #77)",
+          "evidence": "\"Other C-007 vetoes in this chain: #22\u201325 (bench.json), #28 (ledger/chain.py), #54 and #56 (utils/api.py), #77 (pipeline/runner.py).\"",
+          "reasoning": "These specific entry-number citations are checkable claims about the actual ledger. Since README accuracy isn't independently enforced by any constraint here, this is purely an observation: worth spot-checking with `python -m cli ledger` before merge so the documentation doesn't drift from the evidence chain it describes."
+        }
+      ],
+      "_tokens": {
+        "input": 8155,
+        "output": 1628
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "MITIGATE",
+          "argument": "The Challenger is correct that this is a factual claim requiring verification, but overstates the constitutional exposure. C-008 binds 'code' that modifies, deletes, or overwrites ledger entries -- it governs the retirement mechanism itself, not prose describing a retirement in a README. A false or premature claim in documentation is a documentation-accuracy problem, not a C-008 violation, since no ledger entry is touched, reordered, or deleted by this diff. That said, the finding's underlying concern is legitimate as a merge-gate: if the retirement described didn't actually happen with all five enumerated elements satisfied, publishing this text creates a credibility problem for the project even though it isn't a constitutional breach. I'd frame this as a pre-merge verification step (run `python -m cli verify` against the archive, confirm the anchor entry fields) rather than grounds for the Oracle to veto a README edit under C-008.",
+          "evidence": "C-008's rule text targets 'No code may modify, delete, or overwrite existing ledger entries' -- README.md is documentation, not pipeline/ledger/hooks code, and per Rule 16 in CLAUDE.md, C-007/C-008 scrutiny attaches to changes in pipeline/, ledger/, or hooks/, none of which this diff touches."
+        },
+        {
+          "finding_index": 1,
+          "position": "CONCEDE",
+          "argument": "This is a fair observation and I don't dispute it. The entry numbers (#22-25, #28, #54, #56, #64, #77) and the ANCHOR entry claim are all falsifiable against the actual ledger, and no constraint here compels README accuracy, so the Challenger is right to flag it as a pre-merge spot-check rather than a violation. Given the same underlying evidentiary gap as finding 0, the responsible move is to verify both claims together before this lands, since an inaccurate governance changelog undermines the exact trust story this README is trying to tell.",
+          "evidence": "The diff cites specific, checkable ledger entry numbers with no verification artifact included in the change itself."
+        }
+      ],
+      "summary": "The diff is a documentation-only change that does not itself violate any constraint, including C-008, since no ledger code or entries are touched, but both findings correctly identify that its factual claims about ledger history and chain retirement should be spot-checked against the actual ledger before merge to avoid publishing an inaccurate governance record.",
+      "_tokens": {
+        "input": 8872,
+        "output": 870
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "This is a documentation-only change to README.md. No file in pipeline/, ledger/, or hooks/ is touched, so the self-governance constraints (C-007) and ledger-immutability constraint (C-008) do not directly attach to this diff. The Challenger's finding_index 0 is explicitly filed as a CONCERN and its own text concedes 'this is a documentation-only change, so it cannot itself violate C-008.' The Defender's MITIGATE rebuttal correctly reads C-008's operative rule text ('No code may modify, delete, or overwrite existing ledger entries') as binding code that mutates entries, not prose describing a prior retirement; the diff appends no entry, edits no entry, and moves no chain. The Challenger's finding_index 1 is an OBSERVATION about the factual accuracy of cited entry numbers (#22-25, #28, #54, #56, #64, #77) and the ANCHOR entry, which the Defender CONCEDEs; both correctly note that no constraint in this constitution enforces README accuracy. I have also independently reviewed the change against the full constitution: C-001 through C-006 are not implicated by a prose edit that introduces no code, imports, type annotations, or secrets. Accordingly there is no constraint clearly violated and no veto-severity trigger. The residual issue is evidentiary, not constitutional, and I record it as an advisory.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "The change is to README.md, not to challenger/defender/oracle/ledger/constitution code. Enforcement is neither weakened nor bypassed by documentation text."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger entry is modified, deleted, reordered, or overwritten. The diff describes a prior chain retirement in prose but does not itself perform any ledger operation. Challenger CONCERN and Defender MITIGATE both agree the rule binds code, not README prose."
+        },
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error handling or catch blocks in a Markdown change."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is confined to README.md, a single file consistent with a documentation-update task boundary."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependencies introduced."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No type annotations in prose."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "No secrets or credentials present in the added text."
+        }
+      ],
+      "advisories": [
+        "Per Challenger finding_index 1 (CONCEDED by Defender): the cited ledger entry numbers (#22-25, #28, #54, #56, #64, #77) and the ANCHOR entry claim are falsifiable against the real ledger. Spot-check them with `python -m cli ledger` before relying on this text, since an inaccurate governance changelog undermines the README's trust story even though it is not a constitutional breach.",
+        "Per Challenger finding_index 0: the retirement narrative asserts a C-008-compliant chain retirement occurred on 2026-07-24 (human decision recorded in anchor entry, pre-move archive verification via verify_chain, anchor entry containing tip/genesis hashes, entry count, timestamps, archive path, reason, and indefinite retention). Confirm the anchor entry and archived chain actually exist and pass verify_chain before publishing, so the README does not become a false governance record."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 10009,
+        "output": 1494
+      }
+    },
+    "entry_hash": "bea99f97a725f3f0ad71858eb6b63ef0f1054e5ebc392a0c3d4f4f438740f195"
+  },
+  {
+    "entry_id": "240842fe-ab08-41ba-bacf-f1ce2aa114d3",
+    "timestamp": "2026-07-30T20:38:47.979517+00:00",
+    "previous_hash": "bea99f97a725f3f0ad71858eb6b63ef0f1054e5ebc392a0c3d4f4f438740f195",
+    "constitution_hash": "8fe258d5a023a0ecc81f1cc6374156c8670d754529953b2b851e9ada53c60a75",
+    "constitution_sources": [
+      {
+        "layer": "core",
+        "path": "E:\\dev\\Bench\\bench.json",
+        "sha256": "8fe258d5a023a0ecc81f1cc6374156c8670d754529953b2b851e9ada53c60a75"
+      }
+    ],
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "README.md",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "README.md",
+        "change_type": "modify",
+        "old_string": "## Models",
+        "new_string": "### Declaring Scope Where the Pipeline Can See It\n\nC-002 judges whether a change stays inside its intended boundary. It is worth\nknowing what the pipeline actually has to judge that against.\n\nThe PreToolUse payload carries the tool name and the tool's input. It does not\ncarry your prompt. Intent that exists only in the conversation is invisible to\nthe Challenger, the Defender, and the Oracle \u2014 they see a diff and a\nconstitution, and nothing about why you asked for it. On ordinary code changes\nthat is usually enough, because the reason is legible in the change itself. On\nconfig files, dotfiles, and comment-less JSON there is often nothing to read.\n\nThe remedy is to put the justification in the repository, where it is part of\nthe context the pipeline sees: declare provenance, the task boundary, and \u2014 for\nanything that adds a tool surface \u2014 what you audited and what you found. Your\nproject's `CLAUDE.md` is the natural home.\n\nThis is not a workaround so much as the better outcome. In a project governed by\nBench, an `.mcp.json` that had been vetoed passed on resubmission after exactly\nthis, with no change to the config file itself. The justification stopped being\nephemeral prompt text and became something a reviewer can read six months later,\nwhich is what a governance record is for.\n\n## Models"
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 8091,
+        "output": 19
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change adds a documentation section to README.md explaining how to declare scope so the pipeline can evaluate C-002. It is purely explanatory prose and touches no code, no imports, no ledger, no pipeline logic, and no secrets. The Challenger returned CLEAR with no findings and the Defender confirmed. My independent review of the full constitution finds no violations: C-001 (no code/catch blocks touched), C-003 (no imports or dependencies added), C-004 (no type annotations), C-006 (no secrets introduced \u2014 text references '.mcp.json' only as an illustrative example, not credentials), C-007 (README.md is not a governance pipeline file per the CLAUDE.md structure \u2014 pipeline files are pipeline/, ledger/, hooks/, bench.json), and C-008 (no ledger modification). C-002 is satisfied: the change is a single-file README documentation edit consistent with a documentation task boundary.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error-handling or catch blocks in a Markdown doc change."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Single-file edit to README.md; documentation content consistent with intended scope."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependencies added."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No type annotations in documentation prose."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "No credentials; '.mcp.json' mentioned only as an illustrative governance example."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "README.md is not a pipeline/ledger/hook/constitution file; enforcement is unaffected."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger entries modified."
+        }
+      ],
+      "advisories": [
+        "The section advises putting justifications in CLAUDE.md so the pipeline can see them; ensure this guidance stays consistent with actual pipeline behavior (payload does not carry prompt text), which the text correctly describes."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 8456,
+        "output": 795
+      }
+    },
+    "entry_hash": "67e460db9784b03ff58b9e86a7e2bbf3d9c22cc1c3e369ecfc731d1d82af9f97"
+  },
+  {
+    "entry_id": "cefc54a7-6d06-4645-9e82-d6db790aac12",
+    "timestamp": "2026-07-30T20:39:50.777386+00:00",
+    "previous_hash": "67e460db9784b03ff58b9e86a7e2bbf3d9c22cc1c3e369ecfc731d1d82af9f97",
+    "constitution_hash": "8fe258d5a023a0ecc81f1cc6374156c8670d754529953b2b851e9ada53c60a75",
+    "constitution_sources": [
+      {
+        "layer": "core",
+        "path": "E:\\dev\\Bench\\bench.json",
+        "sha256": "8fe258d5a023a0ecc81f1cc6374156c8670d754529953b2b851e9ada53c60a75"
+      }
+    ],
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "CLAUDE.md",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "CLAUDE.md",
+        "change_type": "modify",
+        "old_string": "1. Every file change made through Claude Code's Write/Edit/MultiEdit tools is\n   governed. No exceptions and no bypasses on that path. One category sits\n   outside it and cannot be brought in: a bot-authored dependency PR, where",
+        "new_string": "1. Every file change made through Claude Code's Write/Edit/MultiEdit tools is\n   governed. No exceptions and no bypasses on that path. Other tool paths are\n   not governed at all, which is a boundary to state rather than a gap to\n   assume closed. Files written through Bash (redirection, `tee`, `sed -i`, a\n   heredoc) and through any MCP server's tools never reach the PreToolUse hook,\n   so they carry no verdict and no ledger entry. Do not add Bash to the matcher\n   to try to close this: `utils.diff.build_diff_info` returns no payload for\n   those tools, so the Challenger rejects the input and every such call\n   hard-fails into a VETO, denying ordinary shell work outright. Audit an MCP\n   server's package before registering it in a governed project \u2014 that raises\n   confidence in one version at one point in time, and it is not governance.\n   A further category sits outside it and cannot be brought in: a bot-authored\n   dependency PR, where"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-002",
+          "severity": "OBSERVATION",
+          "location": "CLAUDE.md rule 1 addition",
+          "evidence": "Other tool paths are not governed at all... Files written through Bash (redirection, `tee`, `sed -i`, a heredoc) and through any MCP server's tools never reach the PreToolUse hook",
+          "reasoning": "This is a documentation-only edit to CLAUDE.md describing existing (unchanged) system behavior; no source files under pipeline/, ledger/, or hooks/ are touched, so C-007 self-governance scrutiny doesn't apply to actual enforcement code. Flagged only as an observation since scope boundary depends on the stated task, which is not shown here."
+        },
+        {
+          "constraint_id": "C-004",
+          "severity": "OBSERVATION",
+          "location": "CLAUDE.md addition re: build_diff_info",
+          "evidence": "`utils.diff.build_diff_info` returns no payload for those tools, so the Challenger rejects the input and every such call hard-fails into a VETO, denying ordinary shell work outright.",
+          "reasoning": "Not a constitutional violation, but this is a specific, falsifiable technical claim about pipeline behavior added to documentation without an accompanying code change or test to substantiate it. If inaccurate, it would mislead future maintainers/agents relying on CLAUDE.md as ground truth. Worth verifying against actual `utils/diff.py` behavior before merge."
+        }
+      ],
+      "_tokens": {
+        "input": 8047,
+        "output": 970
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "REBUT",
+          "argument": "The Challenger itself labels this an OBSERVATION, not a violation, and its own reasoning concludes C-002/C-007 scrutiny doesn't apply since no pipeline/ledger/hooks source is touched. This is a documentation-only clarification of an existing, unchanged governance boundary (Bash and MCP tool paths have never been intercepted by the PreToolUse hook, which is registered only for Write/Edit/MultiEdit). Making an existing gap explicit in prose is not scope creep against any 'stated task boundary' \u2014 there is no competing task description in evidence that this edit contradicts. If anything, this finding supports CLEAR treatment of C-002.",
+          "evidence": "The hook registration in .claude/settings.json binds to Write/Edit/MultiEdit only; this diff adds no code and changes no matcher. The new text explicitly instructs future agents NOT to add Bash to the matcher, reinforcing rather than weakening the existing boundary."
+        },
+        {
+          "finding_index": 1,
+          "position": "MITIGATE",
+          "argument": "The Challenger is right that this is a specific, falsifiable technical claim added without an inline citation or test, and CLAUDE.md instructions state they override default behavior \u2014 so accuracy matters. However, the claim is consistent with the documented pipeline architecture: challenger.py consumes diff_info produced by utils/diff.py's build_diff_info, and the CLAUDE.md architecture doc already states the hook only intercepts Write/Edit/MultiEdit; a Bash-authored file write was never passed through build_diff_info's expected shape. The claim describes a natural consequence of that existing contract (missing/malformed diff payload leading to a hard failure that surfaces as VETO under fail-closed pipeline behavior) rather than a new, unverifiable assertion. It would be stronger practice to link this claim to utils/diff.py's actual return contract or add a code comment, but the documentation is not making an implausible or unfalsifiable claim \u2014 it is falsifiable and appears correct on the codebase's stated design, and it argues against a specific risky change (naively adding Bash to the matcher) that would be worse if attempted. I'd concede this should ideally be verified against the current utils/diff.py source before merging, but that's a verification-before-merge note, not evidence the documentation itself is unsound.",
+          "evidence": "CLAUDE.md's own architecture section states 'Hook intercepts Write/Edit/MultiEdit tool calls' and 'On VETO: JSON permissionDecision deny' \u2014 the added text is a direct, internally consistent extrapolation from documented behavior, not a fabricated claim."
+        }
+      ],
+      "summary": "This is a low-risk, documentation-only clarification of an already-existing governance boundary that adds no code and touches no pipeline/ledger/hooks files, so no veto-level constraint is actually implicated, though the specific build_diff_info failure-mode claim would benefit from a source-code citation or verification note before merge.",
+      "_tokens": {
+        "input": 8615,
+        "output": 1062
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "This is a documentation-only edit to CLAUDE.md that clarifies an existing, unchanged governance boundary: that Bash and MCP tool paths are never intercepted by the PreToolUse hook (which registers only for Write/Edit/MultiEdit). No files under pipeline/, ledger/, or hooks/ are modified, and no matcher, enforcement code, or logging is altered. The Challenger raised only two OBSERVATION-level findings and no veto-level violation. On C-002 (Finding 0), the Defender correctly notes that the Challenger's own reasoning concludes scope scrutiny does not apply since no pipeline source is touched, and there is no competing task boundary in evidence that the edit contradicts; making an existing gap explicit in prose is not scope creep. On C-004 (Finding 1), both parties agree this is not a constitutional violation but a falsifiable technical claim about build_diff_info behavior added without an inline source citation; the Defender concedes verification-before-merge is advisable but shows the claim is internally consistent with the documented architecture. Reviewing against the constitution as a whole, C-007 is not merely un-violated but affirmatively supported: the new text explicitly instructs future agents NOT to add Bash to the matcher, which reinforces rather than weakens enforcement. No hardcoded secrets (C-006), no dependency changes (C-003), no error-handling code (C-001), and no ledger manipulation (C-008) are present.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Documentation-only change; no files outside a stated task boundary are modified and no competing task description is in evidence. Challenger flagged as OBSERVATION only."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No type annotations added, removed, or weakened; the finding concerns a prose technical claim, not code type safety. Both Challenger and Defender agree this is not a violation."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "No pipeline/ledger/hooks source touched. The added prose explicitly directs agents not to add Bash to the matcher, reinforcing rather than weakening enforcement."
+        },
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error-handling code introduced or modified."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependencies added."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "No secrets or credentials present in the added text."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger entries touched."
+        }
+      ],
+      "advisories": [
+        "Per Challenger Finding 1 and the Defender's MITIGATE, the specific claim that build_diff_info returns no payload for Bash/MCP tools and thus hard-fails into a VETO should be verified against the current utils/diff.py return contract before relying on it as ground truth. CLAUDE.md instructions override default behavior, so an inaccurate operational claim here could mislead future agents. Consider linking the claim to the actual code path or adding a source reference.",
+        "Since bench.json (the constitution) is not modified by this change, the version-increment workflow rule (CLAUDE.md rule 15) is not triggered."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 9961,
+        "output": 1504
+      }
+    },
+    "entry_hash": "2d313e6cd91790ee5d18250404a23dca1bc4fe1a9e27a36522dc3848790a1103"
+  },
+  {
+    "entry_id": "abcf915a-ed96-4e17-a907-46e497253dc9",
+    "timestamp": "2026-07-30T20:41:42.552293+00:00",
+    "previous_hash": "2d313e6cd91790ee5d18250404a23dca1bc4fe1a9e27a36522dc3848790a1103",
+    "constitution_hash": "8fe258d5a023a0ecc81f1cc6374156c8670d754529953b2b851e9ada53c60a75",
+    "constitution_sources": [
+      {
+        "layer": "core",
+        "path": "E:\\dev\\Bench\\bench.json",
+        "sha256": "8fe258d5a023a0ecc81f1cc6374156c8670d754529953b2b851e9ada53c60a75"
+      }
+    ],
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "bench.json",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "bench.json",
+        "change_type": "modify",
+        "old_string": "  \"version\": 4,\n  \"author\": \"Nuralyn LLC\",\n  \"created\": \"2026-04-21T00:00:00Z\",\n  \"description\": \"Constitutional constraints for the Bench governance pipeline\",\n  \"constraints\": [\n    {\n      \"id\": \"C-001\",\n      \"name\": \"No Silent Error Swallowing\",\n      \"scope\": \"error-handling\",\n      \"rule\": \"All catch blocks must log, re-throw, or return a typed error. Empty catch blocks and catch blocks that only contain comments are violations.\",\n      \"severity\": \"veto\",\n      \"rationale\": \"Silent failures compound into untraceable production bugs. A governed codebase must fail visibly.\"\n    },\n    {\n      \"id\": \"C-002\",\n      \"name\": \"Scope Boundary Enforcement\",\n      \"scope\": \"scope-control\",\n      \"rule\": \"Changes must not modify files outside the stated task boundary. If the task says 'modify challenger.py', changes to oracle.py are a violation unless explicitly justified in the task description.\",\n      \"severity\": \"veto\",",
+        "new_string": "  \"version\": 5,\n  \"author\": \"Nuralyn LLC\",\n  \"created\": \"2026-04-21T00:00:00Z\",\n  \"description\": \"Constitutional constraints for the Bench governance pipeline\",\n  \"constraints\": [\n    {\n      \"id\": \"C-001\",\n      \"name\": \"No Silent Error Swallowing\",\n      \"scope\": \"error-handling\",\n      \"rule\": \"All catch blocks must log, re-throw, or return a typed error. Empty catch blocks and catch blocks that only contain comments are violations.\",\n      \"severity\": \"veto\",\n      \"rationale\": \"Silent failures compound into untraceable production bugs. A governed codebase must fail visibly.\"\n    },\n    {\n      \"id\": \"C-002\",\n      \"name\": \"Scope Boundary Enforcement\",\n      \"scope\": \"scope-control\",\n      \"rule\": \"Changes must stay within one coherent scope, judged from the evidence the pipeline receives: the diff itself and the repository context it lands in. Bundling unrelated edits into a single change is a violation, and where the repository states a task boundary (for example in CLAUDE.md), edits outside it are a violation unless justified there. The absence of a stated task description is not itself a violation: the hook payload carries the tool input, not the prompt, so an author has no in-band way to supply one and must not be vetoed for its absence alone.\",\n      \"severity\": \"veto\","
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-007",
+          "severity": "CONCERN",
+          "location": "bench.json: C-002 rule field replacement",
+          "evidence": "\"rule\": \"Changes must not modify files outside the stated task boundary...\" replaced with \"Changes must stay within one coherent scope, judged from the evidence the pipeline receives... The absence of a stated task description is not itself a violation... and an author has no in-band way to supply one and must not be vetoed for its absence alone.\"",
+          "reasoning": "This is a change to the constitution itself, which falls within C-007's explicit scope (\"challenger, defender, oracle, ledger, constitution\"). The rewrite measurably narrows what triggers a C-002 veto: the old rule made any modification outside a stated task boundary a violation by default; the new rule adds an explicit carve-out exempting changes where no task description exists, and shifts the standard from 'stated boundary' to a softer 'coherent scope, judged from evidence.' Whether this is a legitimate fix to a genuine gap (the hook payload cannot carry a task description) or a weakening of enforcement is exactly the judgment call C-007 exists to force. The rationale offered is plausible and technically grounded (payload only carries tool input, not prompt), but the net effect is unambiguously a relaxation of a veto-severity constraint's trigger conditions, which warrants explicit Oracle scrutiny rather than being waved through as a pure clarification."
+        },
+        {
+          "constraint_id": "C-002",
+          "severity": "OBSERVATION",
+          "location": "bench.json: version field",
+          "evidence": "\"version\": 4 -> \"version\": 5",
+          "reasoning": "Workflow rule 15 requires incrementing the version field when bench.json is modified; this is correctly done, so no violation here. Noted for completeness since this is the kind of procedural check the Oracle should verify."
+        }
+      ],
+      "_tokens": {
+        "input": 8816,
+        "output": 1406
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "REBUT",
+          "argument": "The Challenger frames this as a relaxation of C-002's trigger conditions, but the old rule was not merely strict \u2014 it was structurally broken. The hook payload (per CLAUDE.md's own architecture section) carries only the tool input (file_path, old_string, new_string), never the originating prompt or task description. Under a literal reading of the old rule, 'stated task boundary' is almost never present in-band, which means every single change \u2014 including this one \u2014 would be scope-violating by default, since there is no in-band mechanism for an author to declare a boundary. That isn't rigorous enforcement; it's an unenforceable tautology that vetoes on missing information the pipeline architecturally cannot supply. This is the exact same failure pattern the constitution's own C-004 rationale describes and explicitly disclaims: 'a constraint that fires on correct code trains authors to route around governance, and that costs more than the imprecision it was meant to prevent.' The new C-002 language does not remove scope enforcement \u2014 it still vetoes bundling unrelated edits into a single change, and still vetoes exceeding a boundary stated in repo context (e.g., CLAUDE.md's explicit task-boundary language). What it removes is the false-positive trigger of vetoing solely for the absence of a prompt the system never receives. That is a bug fix restoring the rule to its intended function, not a weakening of enforcement.",
+          "evidence": "New rule text: 'Bundling unrelated edits into a single change is a violation, and where the repository states a task boundary (for example in CLAUDE.md), edits outside it are a violation unless justified there.' The affirmative enforcement obligations survive; only the absence-of-information trigger is removed."
+        },
+        {
+          "finding_index": 1,
+          "position": "CONCEDE",
+          "argument": "The Challenger correctly notes the version bump from 4 to 5 satisfies workflow rule 15. No dispute here.",
+          "evidence": "\"version\": 4 -> \"version\": 5, with no other unrelated changes bundled in."
+        }
+      ],
+      "summary": "The C-002 rewrite is a targeted, well-justified fix for an architecturally unenforceable clause rather than a genuine weakening of governance, and the version bump is procedurally correct, so the change should survive Oracle scrutiny though the C-007 concern was reasonable to raise.",
+      "_tokens": {
+        "input": 9518,
+        "output": 1265
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change modifies C-002 in the constitution, which falls squarely within C-007's scope ('challenger, defender, oracle, ledger, constitution'). The Challenger correctly flags (finding 0, CONCERN) that this narrows a veto-severity constraint's trigger conditions and demands Oracle scrutiny. I performed that scrutiny. C-007 prohibits changes that 'weaken enforcement, bypass verification, or disable logging.' The dispositive question is whether removing the absence-of-task-description trigger constitutes a weakening of genuine enforcement or the removal of an architecturally unenforceable clause. The Defender's rebuttal establishes the latter: per CLAUDE.md's architecture, the PreToolUse hook payload carries only tool input (file_path, old_string, new_string), never the originating prompt, so the old phrase 'stated task boundary' could almost never be satisfied in-band, rendering the clause a tautology that would flag virtually every change. Critically, the new language PRESERVES the substantive enforcement obligations: it still vetoes bundling unrelated edits into a single change, and still vetoes edits outside a boundary the repository states (e.g., CLAUDE.md). Only the false-positive trigger of vetoing for missing prompt information is removed. This is directly analogous to the precedent already codified in this same constitution's C-004 rationale, which disclaims constraints that 'fire on correct code' and 'train authors to route around governance.' The change is transparent, versioned, and justified in-band rather than a silent self-cannibalization, which is the harm C-007 exists to prevent. On the procedural check, workflow rule 15 requires a version increment on bench.json modification; the diff bumps version 4 to 5 (Challenger finding 1, OBSERVATION; Defender CONCEDE), satisfying it with no unrelated edits bundled.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "The C-002 rewrite is a change to the constitution and thus in C-007 scope, but per the Defender's rebuttal it does not weaken genuine enforcement: affirmative triggers (bundling unrelated edits; exceeding a repo-stated boundary) survive, and only an architecturally unenforceable absence-of-prompt trigger is removed. Transparent, versioned, justified in-band."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "The change is to C-002's own text. Judged as a change against C-002 itself: it is a single coherent scope (one constraint clause plus the required version bump), not a bundling of unrelated edits."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger entries are modified, deleted, or reordered by this change."
+        }
+      ],
+      "advisories": [
+        "The new C-002 language shifts the standard from 'stated task boundary' to 'one coherent scope, judged from the evidence the pipeline receives.' This is more evidence-grounded but also more interpretive; future Challengers/Oracles will need to exercise judgment on what constitutes 'one coherent scope' and whether unrelated edits are bundled. Monitor early rulings under the new phrasing to confirm it does not drift toward under-enforcement.",
+        "Because this relaxes a veto trigger, it is worth confirming that repository-context boundaries (e.g., CLAUDE.md task language) are actually surfaced to the pipeline stages so the surviving enforcement path is operative, not merely nominal."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 10640,
+        "output": 1771
+      }
+    },
+    "entry_hash": "ee217155153673e0900eef47b89887130543967c6488f5522ee1804e6df2bb60"
+  },
+  {
+    "entry_id": "71e1ed32-023d-43a3-aae5-e01dd5ab2f0b",
+    "timestamp": "2026-07-30T20:43:11.632721+00:00",
+    "previous_hash": "ee217155153673e0900eef47b89887130543967c6488f5522ee1804e6df2bb60",
+    "constitution_hash": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3",
+    "constitution_sources": [
+      {
+        "layer": "core",
+        "path": "E:\\dev\\Bench\\bench.json",
+        "sha256": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3"
+      }
+    ],
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "README.md",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "README.md",
+        "change_type": "modify",
+        "old_string": "The remedy is to put the justification in the repository, where it is part of\nthe context the pipeline sees: declare provenance, the task boundary, and \u2014 for\nanything that adds a tool surface \u2014 what you audited and what you found. Your\nproject's `CLAUDE.md` is the natural home.",
+        "new_string": "The remedy is to put the justification in the repository: declare provenance,\nthe task boundary, and \u2014 for anything that adds a tool surface \u2014 what you\naudited and what you found. Your project's `CLAUDE.md` is the natural home.\n\nBe aware of *why* that reaches the pipeline, because it is provider-dependent.\nOn `BENCH_PROVIDER=claude_code` the judge is a `claude -p` subprocess that\ninherits the governed project as its working directory, so Claude Code loads\nthat project's `CLAUDE.md` into the judge's context. Verified directly: asked\nwhether it could see the file, the judge quoted it back. On the `anthropic` and\n`openrouter` paths there is no such subprocess \u2014 each stage receives only the\nsystem prompt and the constructed user content, and the `file_context` argument\nthe stages accept is never populated by `pipeline/runner.py`. On those providers\nthe pipeline genuinely sees the diff and the constitution and nothing else."
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 8418,
+        "output": 19
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change modifies README.md only, adding an explanatory paragraph about how CLAUDE.md reaches the judge's context under different providers. It touches no code, adds no imports, alters no type annotations, and does not modify pipeline enforcement logic or the ledger. The Challenger returned CLEAR with no findings and the Defender confirmed CLEAR. Independently evaluating against the full constitution: C-001 (error handling) is not applicable to a prose change; C-002 (scope) is satisfied as this is a single coherent documentation edit refining one section; C-003 (dependencies) is not applicable; C-004 (type safety) is not applicable; C-006 (secrets) is satisfied, no credentials introduced; C-007 (pipeline integrity) is not triggered because README.md is documentation, not a pipeline file (pipeline/, ledger/, hooks/, or constitution), and the added text accurately describes existing behavior without weakening any enforcement; C-008 (ledger immutability) is not applicable. The documentation claims are consistent with the codebase description in CLAUDE.md (claude_code provider spawns a claude -p subprocess in the project working directory; anthropic/openrouter paths pass only system prompt and user content).",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error-handling code in a README prose change."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Single coherent edit to one README section refining an existing explanation."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependencies added."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No type annotations touched."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "No secrets or credentials introduced."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "README.md is not a governance pipeline file; the added text describes existing behavior and does not weaken enforcement."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger modification."
+        }
+      ],
+      "advisories": [
+        "The added text asserts that pipeline/runner.py never populates the file_context argument on anthropic/openrouter paths. This should remain accurate if runner.py is later changed to pass file context; the documentation would need a corresponding update to avoid drift."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 8783,
+        "output": 1153
+      }
+    },
+    "entry_hash": "7d890224cbc038f4de39b8a1b815f526a29bebf0619df278ccf4073db45b0e8b"
   }
 ]
