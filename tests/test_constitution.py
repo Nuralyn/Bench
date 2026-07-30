@@ -155,5 +155,39 @@ class GetConstraintByIdTests(unittest.TestCase):
         self.assertIsNotNone(result)
 
 
+class DefaultPathTests(unittest.TestCase):
+    """The no-argument default must not depend on the working directory.
+
+    cli/commands.py calls load_constitution_snapshot() with no argument while
+    pipeline/runner.py passes an absolute path. When the default resolved
+    against the cwd, the auditor could display a different constitution than
+    the pipeline enforced for any project outside the Bench repo.
+    """
+
+    def test_default_resolves_to_bench_root_regardless_of_cwd(self) -> None:
+        expected_path: Path = _REPO_ROOT / "bench.json"
+        _, expected_hash = load_constitution_snapshot(str(expected_path))
+
+        original_cwd: str = os.getcwd()
+        tmp: str = tempfile.mkdtemp()
+        try:
+            # A decoy constitution in the cwd: the old default would load this.
+            decoy: dict = _valid_constitution()
+            decoy["constitution"] = "decoy-should-not-be-loaded"
+            with open(
+                os.path.join(tmp, "bench.json"), "w", encoding="utf-8"
+            ) as handle:
+                json.dump(decoy, handle)
+
+            os.chdir(tmp)
+            data, actual_hash = load_constitution_snapshot()
+        finally:
+            os.chdir(original_cwd)
+            shutil.rmtree(tmp, ignore_errors=True)
+
+        self.assertEqual(actual_hash, expected_hash)
+        self.assertNotEqual(data.get("constitution"), "decoy-should-not-be-loaded")
+
+
 if __name__ == "__main__":
     unittest.main()
