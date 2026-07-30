@@ -21,7 +21,7 @@ from ledger.chain import load_ledger
 from ledger.verify import verify_chain
 from pipeline.constitution import (
     ConstitutionError,
-    load_constitution_snapshot,
+    load_governing_constitution,
 )
 from utils.stats import (
     compute_ledger_stats,
@@ -190,9 +190,20 @@ def cmd_stats() -> int:
 
 
 def cmd_constitution() -> int:
-    """Print the current constitution: hash, constraint list, rules."""
+    """Print the constitution governing this project: hash, constraints, rules.
+
+    Resolves through load_governing_constitution, the same loader the pipeline
+    uses, so the auditor never displays a different constitution than the one
+    enforced. Reading the core file alone would omit a project's own layer and
+    any severity it raised, which is the divergence this command exists to
+    prevent.
+    """
     try:
-        constitution, constitution_hash = load_constitution_snapshot()
+        (
+            constitution,
+            constitution_hash,
+            sources,
+        ) = load_governing_constitution()
     except ConstitutionError as e:
         print(f"[bench cli] constitution load failed: {e}", file=sys.stderr)
         return 1
@@ -207,6 +218,14 @@ def cmd_constitution() -> int:
     print(f"Constitution : {name} v{version}")
     print(f"Hash         : {constitution_hash}")
     print(f"Constraints  : {len(constraint_list)}")
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        layer: str = str(source.get("layer", "-"))
+        print(
+            f"  {layer:8} {source.get('path', '-')}  "
+            f"{_short_hash(str(source.get('sha256', '')), 12)}"
+        )
     print("=" * 40)
 
     for constraint in constraint_list:
@@ -218,8 +237,13 @@ def cmd_constitution() -> int:
         rule: str = str(constraint.get("rule", ""))
         if len(rule) > _RULE_PREVIEW_LEN:
             rule = rule[: _RULE_PREVIEW_LEN - 3] + "..."
+        origin: str = ""
+        if constraint.get("severity_raised_by_project"):
+            origin = "  (severity raised by project layer)"
+        elif cid.startswith("P-"):
+            origin = "  (project layer)"
         print()
-        print(f"  {cid}  [{severity:7}]  {cname}")
+        print(f"  {cid}  [{severity:7}]  {cname}{origin}")
         print(f"           {rule}")
 
     return 0
