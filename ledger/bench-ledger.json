@@ -6930,5 +6930,795 @@
       }
     },
     "entry_hash": "eb5aec5368bf11c3073f94928c19fb6a291e747dee698cbdd76379e7aa31c19e"
+  },
+  {
+    "entry_id": "b0ffde9a-bd89-465b-b1d9-395bd4721b4c",
+    "timestamp": "2026-07-30T19:29:58.154522+00:00",
+    "previous_hash": "eb5aec5368bf11c3073f94928c19fb6a291e747dee698cbdd76379e7aa31c19e",
+    "constitution_hash": "8fe258d5a023a0ecc81f1cc6374156c8670d754529953b2b851e9ada53c60a75",
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "pipeline\\constitution.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "pipeline\\constitution.py",
+        "change_type": "modify",
+        "old_string": "class ConstitutionSchemaError(ConstitutionError):\n    \"\"\"Raised when the constitution JSON is missing required fields or types.\"\"\"",
+        "new_string": "class ConstitutionSchemaError(ConstitutionError):\n    \"\"\"Raised when the constitution JSON is missing required fields or types.\"\"\"\n\n\nclass ConstitutionFloorError(ConstitutionError):\n    \"\"\"Raised when a project layer tries to weaken Bench's core constraints.\n\n    A governed project may extend the constitution, never erode it: it can add\n    its own constraints and raise a core severity, but it cannot remove a core\n    constraint, downgrade one, or reword a core rule. An attempt to do so is a\n    hard failure rather than a silently ignored line, so an author is never\n    left believing they changed a rule that is in fact still in force.\n    \"\"\""
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 7928,
+        "output": 29
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change is a pure additive definition: a new exception class `ConstitutionFloorError` subclassing the existing `ConstitutionError`, containing only a docstring and no executable logic. The Challenger returned CLEAR with no findings and the Defender confirmed. My independent review of the full constitution confirms no violations. C-002 (scope) is satisfied because the edit is confined to constitution.py, a governance pipeline file, consistent with a constitution-related task. C-007 is the constraint most in play since constitution.py is part of the governance pipeline; however, the change strengthens rather than weakens enforcement \u2014 the new exception is explicitly designed to make it a hard failure when a project layer tries to erode Bench's core constraints, and it does not bypass verification or disable logging. C-004 is not implicated: no annotations are removed or weakened; the addition introduces no bare `Any`. C-003 introduces no imports. C-001 is not implicated as no catch blocks are added. C-006 shows no secrets.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No exception handling / catch blocks are introduced; only a class docstring is added."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is confined to constitution.py; no out-of-scope files touched."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new imports or dependencies."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "No type annotations removed or weakened; no bare Any introduced."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "SATISFIED",
+          "note": "The addition is a docstring-only exception class with no branch logic; no test is required for a declaration carrying no behavior."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No credentials or secrets present."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "Modifies a pipeline file but strengthens enforcement by defining a floor-violation error; does not weaken enforcement, bypass verification, or disable logging."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger entries modified, deleted, or overwritten."
+        }
+      ],
+      "advisories": [
+        "The new exception class is defined but no raising site is shown in this diff. If the enforcement logic that raises ConstitutionFloorError lands in a later change, ensure that change carries test coverage per C-005, since the guarantee described in the docstring (hard failure on core-constraint erosion) is only real once the raising and detection logic exists and is tested."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 8293,
+        "output": 1272
+      }
+    },
+    "entry_hash": "1f63a9faae52fbca2841aa58c662e3658bbd5d396824f21049ffa7a3fc9d71ce"
+  },
+  {
+    "entry_id": "f2e41d45-ba77-4491-b405-4c6a417b143f",
+    "timestamp": "2026-07-30T19:31:24.806341+00:00",
+    "previous_hash": "1f63a9faae52fbca2841aa58c662e3658bbd5d396824f21049ffa7a3fc9d71ce",
+    "constitution_hash": "8fe258d5a023a0ecc81f1cc6374156c8670d754529953b2b851e9ada53c60a75",
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "pipeline\\constitution.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "pipeline\\constitution.py",
+        "change_type": "modify",
+        "old_string": "_BENCH_ROOT: Path = Path(__file__).resolve().parent.parent\n_DEFAULT_CONSTITUTION_PATH: str = str(_BENCH_ROOT / \"bench.json\")",
+        "new_string": "_BENCH_ROOT: Path = Path(__file__).resolve().parent.parent\n_DEFAULT_CONSTITUTION_PATH: str = str(_BENCH_ROOT / \"bench.json\")\n\n# Core constraints are Bench's own (C-001..C-008). A governed project's own\n# constraints live in a reserved namespace so the two can never be confused and\n# a project cannot shadow a core id by reusing it.\n_CORE_ID_PREFIX: str = \"C-\"\n_PROJECT_ID_PREFIX: str = \"P-\"\n\n# Severity ordering, low to high. A project layer may move a core constraint up\n# this scale, never down.\n_SEVERITY_RANK: dict[str, int] = {\"warning\": 0, \"veto\": 1}\n\n\ndef resolve_constitution_path() -> str | None:\n    \"\"\"Resolve the project's own constitution layer, or None if there is none.\n\n    Bench's core constitution always applies. This resolves the optional\n    project layer stacked on top of it:\n\n    1. ``BENCH_CONSTITUTION_PATH`` wins outright, for an explicit layer.\n    2. A working directory inside the Bench repo is Bench governing itself,\n       which has no separate layer - the core file already is its constitution.\n    3. Anything else uses ``<project>/bench.json`` when that file exists.\n\n    Returning None means \"core only\". That is a safe default here in a way it\n    would not be under replace semantics: the core is the floor, so a project\n    without a layer is governed by the full set of core constraints rather than\n    by a weakened one. Anchored on the same ``utils.project.project_root`` that\n    ledger routing uses, so a change cannot be judged against one project's\n    constitution while being recorded in another project's ledger.\n    \"\"\"\n    override: str = os.environ.get(\"BENCH_CONSTITUTION_PATH\", \"\").strip()\n    if override:\n        return override\n\n    if governs_bench_itself():\n        return None\n\n    candidate: Path = project_root() / \"bench.json\"\n    return str(candidate) if candidate.is_file() else None"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-003",
+          "severity": "CONCERN",
+          "location": "pipeline/constitution.py: resolve_constitution_path()",
+          "evidence": "override: str = os.environ.get(...)  ...  if governs_bench_itself(): ... candidate: Path = project_root() / \"bench.json\"",
+          "reasoning": "The new function references `os`, `governs_bench_itself`, and `project_root`, none of which appear in the shown diff's imports. The diff only shows an insertion after the existing _BENCH_ROOT/_DEFAULT_CONSTITUTION_PATH lines with no accompanying import statements. If these are not already imported earlier in the file, this is an undeclared/unverified dependency. Full file context is needed to confirm `os` is imported and `governs_bench_itself`/`project_root` resolve to real, already-imported symbols from `utils.project`."
+        },
+        {
+          "constraint_id": "C-007",
+          "severity": "CONCERN",
+          "location": "pipeline/constitution.py: resolve_constitution_path()",
+          "evidence": "New function resolve_constitution_path() is added but the diff shows no caller wiring it into the actual constitution-loading path (e.g. the function that reads and snapshots the constitution used by the pipeline).",
+          "reasoning": "This is a change to the governance pipeline's constitution-loading module. Introducing a project-layer resolution mechanism without visible integration into the load/snapshot function means either (a) it's dead code with no effect yet, or (b) it's wired in elsewhere not shown here. Per C-007, changes to this file warrant scrutiny to confirm the new layering logic doesn't silently alter which constraints are loaded/enforced, or conversely, doesn't yet do anything (misleading docstring claims about 'governing itself' behavior that isn't actually active)."
+        },
+        {
+          "constraint_id": "C-005",
+          "severity": "CONCERN",
+          "location": "pipeline/constitution.py: resolve_constitution_path() and _SEVERITY_RANK/_CORE_ID_PREFIX/_PROJECT_ID_PREFIX",
+          "evidence": "New function with three branching paths (env override, governs_bench_itself, project_root/bench.json existence check) and new module-level constants for a severity-escalation scheme.",
+          "reasoning": "This is new logic with multiple branches (override precedence, bench-self-governance short-circuit, project file existence check) and no test coverage shown in the diff. C-005 is a warning-severity constraint requiring test coverage or explicit justification for deferral."
+        },
+        {
+          "constraint_id": "C-002",
+          "severity": "OBSERVATION",
+          "location": "pipeline/constitution.py: entire addition",
+          "evidence": "New constants _CORE_ID_PREFIX, _PROJECT_ID_PREFIX, _SEVERITY_RANK are defined but unused by the added function or any visible caller.",
+          "reasoning": "These constants suggest a broader constitution-layering/merging feature (ID namespacing, severity escalation rules) that isn't exercised by resolve_constitution_path() itself. If the stated task was narrower (e.g., 'add project constitution path resolution'), the unused scaffolding for ID-prefix/severity-rank merging may exceed the task boundary. Not a clear violation without the task description, but worth confirming scope."
+        }
+      ],
+      "_tokens": {
+        "input": 8463,
+        "output": 1838
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "MITIGATE",
+          "argument": "The diff is an old_string/new_string patch to an existing file, not a full file listing, so the challenger can't see the file's existing import block. `os` is near-universally already imported in a constitution-loading module (it already reads BENCH_LEDGER_PATH-style env vars elsewhere per the project docs), and `governs_bench_itself`/`project_root` are named as pre-existing utilities from `utils.project` in the docstring itself ('Anchored on the same utils.project.project_root that ledger routing uses'), strongly implying these are already-imported, already-used symbols shared with ledger/chain.py rather than new undeclared dependencies. That said, the Challenger is right that this can't be verified from the diff alone, so the concern is legitimate as a request for confirmation, not as a proven C-003 violation.",
+          "evidence": "Docstring text: 'Anchored on the same utils.project.project_root that ledger routing uses, so a change cannot be judged against one project's constitution while being recorded in another project's ledger' \u2014 this phrasing only makes sense if project_root is an existing shared utility, not a new one introduced here."
+        },
+        {
+          "finding_index": 1,
+          "position": "REBUT",
+          "argument": "Adding an unwired resolver function does not weaken enforcement, bypass verification, or disable logging \u2014 the three things C-007 actually prohibits. An additive, uncalled function is inert by definition: it cannot silently alter which constraints load because nothing invokes it yet. The 'one change per tool call' workflow rule (rule 14) actually favors this shape: introduce the resolver in isolation, wire it into the loader in a subsequent, separately-governed edit. Treating unfinished wiring as a C-007 violation would perversely punish incremental, reviewable changes to the pipeline in favor of larger, harder-to-review ones.",
+          "evidence": "The new code is purely additive (append-only insertion after the existing _DEFAULT_CONSTITUTION_PATH line) with no modification to any existing load/snapshot function shown or implied in the diff."
+        },
+        {
+          "finding_index": 2,
+          "position": "CONCEDE",
+          "argument": "This is fair. Three new branches (env override, self-governance short-circuit, project-file existence check) constitute new logic with no accompanying tests in this diff. C-005 is warning-severity, not veto, but the Challenger is correct that either tests or an explicit deferral justification should accompany this.",
+          "evidence": "C-005 constraint text: 'New functions or branches of logic must have corresponding test cases or an explicit justification for why testing is deferred.' No test file or justification appears in the provided diff."
+        },
+        {
+          "finding_index": 3,
+          "position": "REBUT",
+          "argument": "This is explicitly framed by the Challenger as an OBSERVATION, not a violation, and it says so itself ('Not a clear violation without the task description'). _CORE_ID_PREFIX, _PROJECT_ID_PREFIX, and _SEVERITY_RANK are typed, documented module-level constants that describe the namespacing/escalation contract this resolver exists to support (per the docstring: preventing a project from shadowing a core constraint id, and only ever escalating severity). Declaring the contract's vocabulary alongside the first function that will consume it is normal incremental design, not scope creep \u2014 the alternative, defining them later without an ADR-like note explaining why they're being introduced, would be worse practice. Absent the actual task description, C-002 cannot be affirmatively triggered here.",
+          "evidence": "Docstring: 'A project layer may move a core constraint up this scale, never down' directly describes the purpose of _SEVERITY_RANK, and 'a project cannot shadow a core id by reusing it' directly describes the purpose of _CORE_ID_PREFIX/_PROJECT_ID_PREFIX \u2014 these are forward-declared contract constants, not orphaned scaffolding."
+        }
+      ],
+      "summary": "The change is a sound, narrowly-scoped, well-documented additive resolver whose real gap is missing test coverage for its three branches (C-005), while the import-provenance and dead-wiring concerns are plausible file-context artifacts of a partial diff rather than demonstrated violations.",
+      "_tokens": {
+        "input": 9679,
+        "output": 2032
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "No veto-severity constraint is clearly violated on the evidence presented. On C-003 (Challenger finding 0, Defender MITIGATE): the new function references `os`, `governs_bench_itself`, and `project_root`. `os` is stdlib and requires no declaration; `governs_bench_itself`/`project_root` are internal package symbols from `utils.project` (the same module ledger routing uses per the docstring), not external dependencies subject to requirements.txt declaration. C-003 targets undeclared external/supply-chain dependencies, so even a newly-added internal import would not trigger it. The Defender correctly notes provenance cannot be fully confirmed from a partial old_string/new_string patch, but the Challenger produced no evidence of an undeclared external dependency, only an unverifiable concern. On C-007 (finding 1, Defender REBUT): C-007 prohibits weakening enforcement, bypassing verification, or disabling logging. The addition is purely additive and uncalled; an inert resolver cannot alter which constraints load. The docstring's explicit design (core is the floor, projects may only escalate severity 'up this scale, never down', and a project 'cannot shadow a core id by reusing it') describes strengthening rather than weakening the layering model. C-007 is satisfied. On C-002 (finding 3, OBSERVATION): the Challenger itself declines to assert a violation absent a task description; the constants are typed, documented forward-declarations of the resolver's contract, within the single file named in the change. No scope breach is demonstrated. On C-005 (finding 2, Defender CONCEDE): the three branches lack tests, but C-005 is warning-severity and cannot force a veto; it is recorded as an advisory.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No catch/except blocks introduced; the function has no error-handling paths that could silently swallow."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is confined to the named file pipeline/constitution.py. Constants are forward-declared contract vocabulary, not out-of-scope edits. Challenger raised this only as an OBSERVATION."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "SATISFIED",
+          "note": "`os` is stdlib; `governs_bench_itself`/`project_root` are internal utils.project symbols, not external dependencies requiring declaration. No new requirements.txt-class dependency shown."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "All new signatures are fully annotated (str | None return, typed constants). No existing annotation removed or weakened."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "VIOLATED",
+          "note": "Three new branches with no accompanying tests or deferral justification. Warning severity only; Defender conceded. Recorded as advisory, does not trigger veto."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "Reads an env var name (BENCH_CONSTITUTION_PATH); no hardcoded secret or credential."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "Additive, uncalled resolver. Does not weaken enforcement, bypass verification, or disable logging. Docstring design keeps core as the floor and only permits severity escalation, not weakening."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger read/write/mutation logic touched."
+        }
+      ],
+      "advisories": [
+        "C-005 (warning): resolve_constitution_path() has three branches (env override, self-governance short-circuit, project-file existence check) with no tests in this diff. Add unit tests covering all three branches, or record an explicit deferral justification.",
+        "C-007 follow-up: the resolver is currently inert. When it is wired into the actual load/snapshot path in a subsequent change, that integration edit will itself be governed and must demonstrate that core constraints remain the enforced floor and cannot be shadowed or down-graded by a project layer.",
+        "Confirm at merge time that `os`, `governs_bench_itself`, and `project_root` are in fact imported in the full file; the partial diff does not show the import block. If any are not yet imported, the accompanying import edit is required for the code to run."
+      ],
+      "remediation": null,
+      "confidence": "MODERATE",
+      "_tokens": {
+        "input": 11447,
+        "output": 2110
+      }
+    },
+    "entry_hash": "209203352d2f1d9e8a08bd8f77b5ccc47045d2f3cab5a398f729392278356273"
+  },
+  {
+    "entry_id": "4eb2ea3e-b77d-47a2-8548-220934f699d1",
+    "timestamp": "2026-07-30T19:32:24.626359+00:00",
+    "previous_hash": "209203352d2f1d9e8a08bd8f77b5ccc47045d2f3cab5a398f729392278356273",
+    "constitution_hash": "8fe258d5a023a0ecc81f1cc6374156c8670d754529953b2b851e9ada53c60a75",
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "pipeline\\constitution.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "pipeline\\constitution.py",
+        "change_type": "modify",
+        "old_string": "import hashlib\nimport json\nfrom pathlib import Path",
+        "new_string": "import hashlib\nimport json\nimport os\nfrom pathlib import Path\n\nfrom utils.project import governs_bench_itself, project_root"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-002",
+          "severity": "CONCERN",
+          "location": "pipeline/constitution.py: new_string",
+          "evidence": "from utils.project import governs_bench_itself, project_root",
+          "reasoning": "The diff introduces a dependency on a new module utils/project.py with two new functions (governs_bench_itself, project_root), but no diff for utils/project.py is provided and no task description scoping this addition is given. Without seeing that file's creation/content, it's unclear whether this constitutes an out-of-boundary change or is part of a stated multi-file task."
+        },
+        {
+          "constraint_id": "C-007",
+          "severity": "CONCERN",
+          "location": "pipeline/constitution.py",
+          "evidence": "import os \\n from utils.project import governs_bench_itself, project_root",
+          "reasoning": "This file is part of the governance pipeline (constitution loading/snapshotting). The diff only shows import additions, not their usage. Since C-007 requires that pipeline changes not weaken enforcement or bypass verification, and the actual behavioral change (how governs_bench_itself/project_root are used, and what os is used for) is not visible in this diff, the full impact on constitution snapshotting integrity (constraint that all three stages see the same version, no mid-run changes) cannot be verified from this fragment alone."
+        },
+        {
+          "constraint_id": "C-004",
+          "severity": "OBSERVATION",
+          "location": "pipeline/constitution.py: new_string",
+          "evidence": "from utils.project import governs_bench_itself, project_root",
+          "reasoning": "New imported functions' signatures/type hints are not visible in this diff fragment, so type safety compliance for the new code paths cannot be confirmed here; flagged for completeness once the full change (including usage sites) is available."
+        },
+        {
+          "constraint_id": "C-003",
+          "severity": "OBSERVATION",
+          "location": "pipeline/constitution.py: new_string",
+          "evidence": "import os",
+          "reasoning": "os is a stdlib import, not a new external dependency, so C-003 (requirements.txt declaration) is not implicated. Noted only because os appears unused within the shown fragment; if it remains unused after the full change, it would be a cleanliness issue rather than a constitutional one."
+        }
+      ],
+      "_tokens": {
+        "input": 7698,
+        "output": 1142
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "REBUT",
+          "argument": "This is an import-only fragment of a larger, presumably multi-file task (adding a project-root/self-governance detection utility). C-002 is about changes exceeding a *stated task boundary*, not about diff fragments being incomplete in isolation. The Challenger has no evidence the task description excluded utils/project.py -- they're speculating about scope violation from the mere existence of a new import, which is normal for any legitimate multi-file feature. Flagging every cross-file import as a potential C-002 concern without any actual boundary statement to compare against turns C-002 into a rule against modularity itself.",
+          "evidence": "The new_string only adds imports; no evidence is given that a task boundary was stated and violated. C-002's rule explicitly requires a 'stated task boundary' to compare against."
+        },
+        {
+          "finding_index": 1,
+          "position": "MITIGATE",
+          "argument": "The Challenger is right that usage sites aren't shown, so full C-007 verification is impossible from this fragment alone -- that's a legitimate epistemic limitation, not a finding of an actual violation. I concede the Oracle should require the full diff (including where governs_bench_itself/project_root/os are actually used) before issuing a final PASS. But as presented, this fragment adds capability (detecting whether the pipeline governs its own repo) without removing or weakening any existing check, disabling logging, or bypassing verification. There's nothing in the shown text that itself weakens enforcement.",
+          "evidence": "No existing lines were deleted or altered other than the import block; the change is purely additive imports."
+        },
+        {
+          "finding_index": 2,
+          "position": "REBUT",
+          "argument": "This is labeled an OBSERVATION by the Challenger, not a real finding, and correctly so. There is no function definition or signature in this diff to evaluate for type-hint weakening. C-004 concerns discarded precision in annotations; an import statement carries no annotations to weaken. This should not weigh against the change.",
+          "evidence": "The new_string contains only import statements -- no function signatures are touched."
+        },
+        {
+          "finding_index": 3,
+          "position": "CONCEDE",
+          "argument": "The Challenger correctly notes os is stdlib (no C-003 issue) but is unused in the shown fragment. If os ends up unused after the full change, that's dead code that should be trimmed per the project's surgical-changes guideline, though it's not a constitutional violation. I concede this as a legitimate hygiene note, not a governance risk.",
+          "evidence": "import os appears in new_string with no corresponding os.* usage visible in the fragment."
+        }
+      ],
+      "summary": "The visible diff is a benign, additive import fragment with no constitutional violations in itself, but the Oracle should require the accompanying usage-site diff (and confirm os is actually used) before issuing a final verdict.",
+      "_tokens": {
+        "input": 8535,
+        "output": 1010
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The proposed change is an import-only, purely additive fragment to pipeline/constitution.py: it adds `import os` and `from utils.project import governs_bench_itself, project_root`. No existing lines are deleted or altered beyond the import block. I evaluated each cited constraint. C-002 (Challenger finding 0): the Challenger raises only a CONCERN speculating that utils/project.py may be out of scope, but as the Defender correctly argues (rebuttal 0), C-002 requires a *stated task boundary* to compare against, and none is present; the mere existence of a cross-file import cannot itself establish a scope violation without evidence the task excluded it. C-007 (finding 1): the Challenger concedes and the Defender (rebuttal 1, MITIGATE) agrees this is an epistemic limitation, not a demonstrated violation \u2014 nothing in the shown text weakens enforcement, disables logging, or bypasses verification; it adds capability additively. C-004 (finding 2): an OBSERVATION only; import statements carry no annotations to weaken, so C-004 is not applicable (rebuttal 2). C-003 (finding 3): `os` is stdlib and `utils.project` is an internal module, so no external dependency declaration is implicated; both parties agree. No veto-severity constraint is clearly violated by the visible change. A PASS certifies only that this fragment does not violate the constitution; it is not an endorsement of the unshown usage-site code.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-002",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No stated task boundary is provided to compare against; a lone cross-file import does not establish scope creep (Defender rebuttal 0)."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "SATISFIED",
+          "note": "os is stdlib; utils.project is an internal module. No external dependency added (Challenger finding 3, both parties agree)."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Import statements contain no type annotations to weaken (Defender rebuttal 2)."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "This is a governance pipeline file, but the fragment is purely additive imports with no deletion or weakening of existing checks or logging (Defender rebuttal 1). Usage sites not shown but nothing in the fragment weakens enforcement."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "NOT_APPLICABLE",
+          "note": "An import-only change introduces no new logic branches requiring tests."
+        }
+      ],
+      "advisories": [
+        "The imported symbols (governs_bench_itself, project_root) and `import os` are not yet used in the shown fragment. Per the project's surgical-changes guideline, ensure os is actually consumed in the accompanying usage-site change; if it remains unused, trim it (hygiene, not a violation).",
+        "constitution.py is part of the governance pipeline (C-007) and constitution snapshotting must preserve the guarantee that all three stages see the same frozen version (Rule 4). The follow-on diff that uses governs_bench_itself/project_root will be scrutinized to confirm it does not introduce mid-run constitution variability or path-based bypasses.",
+        "This verdict rules only on the visible import fragment. The usage-site diff must pass governance on its own merits."
+      ],
+      "remediation": null,
+      "confidence": "MODERATE",
+      "_tokens": {
+        "input": 9813,
+        "output": 1637
+      }
+    },
+    "entry_hash": "bdddcd24500c86a32b6b886891971c08f0a8c2c333c2b0f1d2f3176714db7005"
+  },
+  {
+    "entry_id": "50ce2894-688a-47b5-aa1b-d2623db2acb4",
+    "timestamp": "2026-07-30T19:34:21.917584+00:00",
+    "previous_hash": "bdddcd24500c86a32b6b886891971c08f0a8c2c333c2b0f1d2f3176714db7005",
+    "constitution_hash": "8fe258d5a023a0ecc81f1cc6374156c8670d754529953b2b851e9ada53c60a75",
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "pipeline\\constitution.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "pipeline\\constitution.py",
+        "change_type": "modify",
+        "old_string": "def get_constraint_by_id(constitution: dict, constraint_id: str) -> dict | None:",
+        "new_string": "def merge_constitutions(core: dict, project: dict) -> dict:\n    \"\"\"Stack a project layer on Bench's core constitution: floor plus extend.\n\n    The core is a floor. A project layer may add its own constraints in the\n    reserved ``P-`` namespace and may raise a core constraint's severity via\n    ``severity_overrides``. It may not remove a core constraint, downgrade one,\n    reword a core rule, or reuse a core id.\n\n    Every rejected case raises rather than being dropped: a silently ignored\n    line would leave an author believing they had changed a rule that is in\n    fact still in force. Raises ConstitutionFloorError for erosion attempts and\n    ConstitutionSchemaError for structurally invalid layers.\n    \"\"\"\n    core_constraints: list[dict] = [\n        c for c in core.get(\"constraints\", []) if isinstance(c, dict)\n    ]\n    core_ids: set[str] = {str(c.get(\"id\", \"\")) for c in core_constraints}\n\n    raw_additions: object = project.get(\"constraints\", [])\n    if not isinstance(raw_additions, list):\n        raise ConstitutionSchemaError(\n            f\"project 'constraints' must be a list, got \"\n            f\"{type(raw_additions).__name__}\"\n        )\n\n    additions: list[dict] = []\n    seen: set[str] = set()\n    for constraint in raw_additions:\n        if not isinstance(constraint, dict):\n            raise ConstitutionSchemaError(\n                f\"project constraint must be an object, got \"\n                f\"{type(constraint).__name__}\"\n            )\n        cid: str = str(constraint.get(\"id\", \"\"))\n        if not cid.startswith(_PROJECT_ID_PREFIX):\n            raise ConstitutionFloorError(\n                f\"project constraint {cid!r} must use the reserved \"\n                f\"{_PROJECT_ID_PREFIX}* namespace; {_CORE_ID_PREFIX}* ids are \"\n                f\"Bench's core and cannot be redefined by a project\"\n            )\n        if cid in seen:\n            raise ConstitutionSchemaError(\n                f\"project defines constraint {cid!r} more than once\"\n            )\n        missing: list[str] = [\n            field\n            for field in _REQUIRED_CONSTRAINT_FIELDS\n            if field not in constraint\n        ]\n        if missing:\n            raise ConstitutionSchemaError(\n                f\"project constraint {cid!r} is missing required field(s): \"\n                f\"{', '.join(missing)}\"\n            )\n        severity: str = str(constraint.get(\"severity\", \"\"))\n        if severity not in _SEVERITY_RANK:\n            raise ConstitutionSchemaError(\n                f\"project constraint {cid!r} has unknown severity \"\n                f\"{severity!r}; expected one of {sorted(_SEVERITY_RANK)}\"\n            )\n        seen.add(cid)\n        additions.append(constraint)\n\n    raw_overrides: object = project.get(\"severity_overrides\", {})\n    if not isinstance(raw_overrides, dict):\n        raise ConstitutionSchemaError(\n            f\"project 'severity_overrides' must be an object, got \"\n            f\"{type(raw_overrides).__name__}\"\n        )\n\n    unknown: set[str] = set(raw_overrides) - core_ids\n    if unknown:\n        raise ConstitutionFloorError(\n            f\"severity_overrides names unknown core constraint(s): \"\n            f\"{', '.join(sorted(unknown))}\"\n        )\n\n    merged_core: list[dict] = []\n    for constraint in core_constraints:\n        cid = str(constraint.get(\"id\", \"\"))\n        if cid not in raw_overrides:\n            merged_core.append(constraint)\n            continue\n\n        requested: str = str(raw_overrides[cid])\n        if requested not in _SEVERITY_RANK:\n            raise ConstitutionSchemaError(\n                f\"severity_overrides[{cid!r}] has unknown severity \"\n                f\"{requested!r}; expected one of {sorted(_SEVERITY_RANK)}\"\n            )\n        current: str = str(constraint.get(\"severity\", \"\"))\n        if _SEVERITY_RANK[requested] <= _SEVERITY_RANK.get(current, 0):\n            raise ConstitutionFloorError(\n                f\"severity_overrides[{cid!r}] would move {current!r} -> \"\n                f\"{requested!r}; a project layer may only raise a core \"\n                f\"severity, never lower or restate it\"\n            )\n        raised: dict = dict(constraint)\n        raised[\"severity\"] = requested\n        raised[\"severity_raised_by_project\"] = True\n        merged_core.append(raised)\n\n    return {\n        \"constitution\": (\n            f\"{core.get('constitution', 'bench')}\"\n            f\"+{project.get('constitution', 'project')}\"\n        ),\n        \"version\": core.get(\"version\"),\n        \"project_version\": project.get(\"version\"),\n        \"constraints\": merged_core + additions,\n    }\n\n\ndef get_constraint_by_id(constitution: dict, constraint_id: str) -> dict | None:"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-007",
+          "severity": "CONCERN",
+          "location": "pipeline/constitution.py, merge_constitutions body",
+          "evidence": "references to `_PROJECT_ID_PREFIX`, `_CORE_ID_PREFIX`, `_REQUIRED_CONSTRAINT_FIELDS`, `_SEVERITY_RANK`, `ConstitutionFloorError`, `ConstitutionSchemaError`",
+          "reasoning": "This function is added to the governance pipeline (pipeline/constitution.py) and relies on several module-level names not present in the diff. If any of these are not already defined elsewhere in the file, the module will fail to import, silently breaking constitution loading. Since only the diff is visible, this cannot be confirmed \u2014 the reviewer should verify these symbols exist with the exact intended semantics (e.g., that _CORE_ID_PREFIX/_PROJECT_ID_PREFIX correctly correspond to 'C-'/'P-' so the floor-erosion check actually works as documented)."
+        },
+        {
+          "constraint_id": "C-005",
+          "severity": "CONCERN",
+          "location": "pipeline/constitution.py, merge_constitutions (entire new function)",
+          "evidence": "New function with multiple branches (schema validation, floor-erosion checks, severity override logic) added with no accompanying test changes in the diff.",
+          "reasoning": "C-005 (warning severity) requires test coverage or explicit justification for new logic. This function has significant branching (floor violations, schema violations, severity raise/lower logic) that materially affects constitutional enforcement, and no tests are included in this diff."
+        },
+        {
+          "constraint_id": "C-002",
+          "severity": "OBSERVATION",
+          "location": "pipeline/constitution.py",
+          "evidence": "Entire diff is scoped to a single file, pipeline/constitution.py",
+          "reasoning": "No scope creep observed; change is confined to the stated file. Noted only as a clean-pass observation, not a concern."
+        },
+        {
+          "constraint_id": "C-007",
+          "severity": "OBSERVATION",
+          "location": "merge_constitutions logic (severity_overrides handling)",
+          "evidence": "`if _SEVERITY_RANK[requested] <= _SEVERITY_RANK.get(current, 0): raise ConstitutionFloorError(...)`",
+          "reasoning": "The logic appears to strengthen rather than weaken governance: it prevents a project layer from lowering or restating a core constraint's severity, and forbids reuse/redefinition of core IDs. This is consistent with, not contrary to, C-007's intent \u2014 flagged only as a positive observation for the Oracle's context, not an issue."
+        }
+      ],
+      "_tokens": {
+        "input": 9584,
+        "output": 2495
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "MITIGATE",
+          "argument": "The Challenger is correct that the diff, viewed in isolation, does not show definitions for _PROJECT_ID_PREFIX, _CORE_ID_PREFIX, _REQUIRED_CONSTRAINT_FIELDS, _SEVERITY_RANK, ConstitutionFloorError, or ConstitutionSchemaError. But this is an insertion diff (old_string/new_string), not a full file replacement \u2014 it's inserted immediately before the existing get_constraint_by_id function in a file that already contains constitution-loading logic. It is entirely plausible, and the more parsimonious reading, that these names are either pre-existing module-level constants/exception classes in constitution.py, or are added in a companion hunk of the same commit not captured by this single diff view. A reviewer with the full file would resolve this in seconds. This is a legitimate 'verify before merge' flag, not a confirmed defect \u2014 the Challenger explicitly frames it as unconfirmable from the diff alone, which is the honest framing. I'd downgrade this to 'verify import succeeds in CI/pre-commit' rather than treating it as a likely break.",
+          "evidence": "Diff is an old_string/new_string edit anchored to the existing `def get_constraint_by_id` signature, indicating this is a targeted insertion into an already-populated file, not a from-scratch module."
+        },
+        {
+          "finding_index": 1,
+          "position": "CONCEDE",
+          "argument": "This is a fair catch. merge_constitutions is non-trivial: it has schema validation branches, floor-erosion checks, and severity-override arithmetic, all of which are exactly the kind of logic C-005 is meant to catch. No test file is touched in this diff. Given this function directly gates constitutional enforcement (C-007's own domain), the case for requiring tests is stronger than average, not weaker. I won't argue this away \u2014 C-005 is a warning, not a blocker, but the Oracle should require either accompanying tests or an explicit justification note before this lands, per the constraint's own text ('or an explicit justification for why testing is deferred'). None is present here.",
+          "evidence": "Diff contains only the new function body; no test_constitution.py or equivalent changes are included."
+        },
+        {
+          "finding_index": 2,
+          "position": "CONCEDE",
+          "argument": "Confirmed. The change is fully contained to pipeline/constitution.py as stated. No scope violation.",
+          "evidence": "Single file_path in the change object: pipeline\\constitution.py."
+        },
+        {
+          "finding_index": 3,
+          "position": "CONCEDE",
+          "argument": "Agreed, and worth emphasizing to the Oracle: this function is a strict-floor design. It rejects core-ID reuse, rejects downward or lateral severity changes, and raises typed exceptions (ConstitutionFloorError/ConstitutionSchemaError) rather than silently dropping malformed project layers \u2014 which independently satisfies C-001's no-silent-swallowing spirit as well as C-007's anti-weakening intent. This is the strongest part of the change.",
+          "evidence": "`if _SEVERITY_RANK[requested] <= _SEVERITY_RANK.get(current, 0): raise ConstitutionFloorError(...)` and the `cid.startswith(_PROJECT_ID_PREFIX)` guard that rejects any attempt to redefine a core id."
+        }
+      ],
+      "summary": "The merge logic is well-designed and consistent with C-007's anti-erosion intent, but the diff lacks visible test coverage for meaningfully branchy new logic (C-005) and cannot self-confirm that its referenced symbols are defined elsewhere in the file, so the Oracle should condition a PASS on both being verified before merge.",
+      "_tokens": {
+        "input": 10587,
+        "output": 1709
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change adds merge_constitutions to pipeline/constitution.py, a governance pipeline file that triggers C-007 scrutiny. On the merits, the function strengthens rather than weakens governance: it enforces a strict floor (core 'C-' ids cannot be redefined, per the _PROJECT_ID_PREFIX guard), forbids downward or lateral severity changes (the `_SEVERITY_RANK[requested] <= _SEVERITY_RANK.get(current, 0)` check raises ConstitutionFloorError), and rejects malformed project layers with typed exceptions rather than dropping them silently. Both the Challenger's own OBSERVATION (finding index 3) and the Defender's rebuttal confirm this is consistent with C-007's anti-erosion intent. C-007 is therefore satisfied, not violated. Because every rejected case raises a typed exception rather than swallowing it, C-001 is affirmatively satisfied. The Challenger's C-007 CONCERN (finding index 0) about undefined module-level symbols (_PROJECT_ID_PREFIX, _CORE_ID_PREFIX, _REQUIRED_CONSTRAINT_FIELDS, _SEVERITY_RANK, ConstitutionFloorError, ConstitutionSchemaError) is explicitly unconfirmable from the diff; the Defender's MITIGATE correctly notes this is an insertion diff into an already-populated file, and the parsimonious reading is that these are defined in companion hunks or existing module scope. A veto cannot rest on speculation that a symbol may be missing, so this does not clear the C-007 veto bar \u2014 it is an import-verification advisory. C-002 is satisfied: the Challenger and Defender both confirm the change is confined to the single stated file. C-004 is satisfied: full type annotations are present on the new signature and locals. C-005 (test coverage) is validly raised and conceded by the Defender, but it is a warning-severity constraint, not a veto trigger, so it becomes an advisory. No new imports appear, so C-003 is not implicated.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "SATISFIED",
+          "note": "Every rejected merge case raises a typed exception (ConstitutionFloorError/ConstitutionSchemaError); no silent swallowing. Defender rebuttal index 3 confirms."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change confined to pipeline/constitution.py; Challenger observation and Defender rebuttal index 2 confirm no scope creep."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new imports introduced by the diff."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "New function carries complete type annotations on parameters, return, and locals; no precision discarded."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "VIOLATED",
+          "note": "Branchy new logic gating constitutional enforcement ships without visible tests or a deferral justification. Warning severity, so advisory not veto; Defender conceded (index 1)."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "Function is a strict-floor design that prevents core-id reuse and severity downgrades, strengthening enforcement. The undefined-symbol concern is unconfirmable from the diff and cannot support a veto."
+        }
+      ],
+      "advisories": [
+        "C-005: merge_constitutions has significant branching (schema validation, floor-erosion, severity-override arithmetic) and no accompanying tests. Add tests covering core-id reuse rejection, severity-downgrade rejection, unknown-override rejection, and successful raise/extend paths, or record an explicit deferral justification.",
+        "C-007 import verification: confirm _PROJECT_ID_PREFIX, _CORE_ID_PREFIX, _REQUIRED_CONSTRAINT_FIELDS, _SEVERITY_RANK, ConstitutionFloorError, and ConstitutionSchemaError are defined in constitution.py (with _CORE_ID_PREFIX/_PROJECT_ID_PREFIX resolving to 'C-'/'P-') so the module imports cleanly and the floor check behaves as documented. A missing symbol would break constitution loading."
+      ],
+      "remediation": null,
+      "confidence": "MODERATE",
+      "_tokens": {
+        "input": 12195,
+        "output": 1869
+      }
+    },
+    "entry_hash": "07ed1844be07a6590f1989b5909ee1add73973fbc55d69d12580aa9d33d50a2b"
+  },
+  {
+    "entry_id": "9f2f8812-c550-48ed-b109-16f8b5e5a5da",
+    "timestamp": "2026-07-30T19:35:46.814861+00:00",
+    "previous_hash": "07ed1844be07a6590f1989b5909ee1add73973fbc55d69d12580aa9d33d50a2b",
+    "constitution_hash": "8fe258d5a023a0ecc81f1cc6374156c8670d754529953b2b851e9ada53c60a75",
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "pipeline\\constitution.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "pipeline\\constitution.py",
+        "change_type": "modify",
+        "old_string": "def get_constraint_by_id(constitution: dict, constraint_id: str) -> dict | None:",
+        "new_string": "def load_governing_constitution() -> tuple[dict, str, list[dict]]:\n    \"\"\"Load the constitution governing this run, with its project layer.\n\n    Returns ``(constitution, hash, sources)``. Sources record the layer, path,\n    and raw hash of each file that contributed, so an auditor reading a ledger\n    entry can see *which files* ruled rather than only a digest.\n\n    The returned hash is the SHA-256 of the contributing files' raw hashes. A\n    merged document has no authored bytes of its own, so hashing a\n    re-serialization would break the guarantee that the digest reflects exactly\n    what someone wrote; chaining the raw per-file hashes preserves it.\n\n    Failure modes differ deliberately. An absent project layer is fine - the\n    core floor applies in full. A layer that is present but malformed, or that\n    tries to erode the core, raises: the author intended additional\n    constraints, and Bench cannot tell which, so the run fails closed.\n    \"\"\"\n    core, core_hash = load_constitution_snapshot(_DEFAULT_CONSTITUTION_PATH)\n    sources: list[dict] = [\n        {\n            \"layer\": \"core\",\n            \"path\": _DEFAULT_CONSTITUTION_PATH,\n            \"sha256\": core_hash,\n        }\n    ]\n\n    layer_path: str | None = resolve_constitution_path()\n    if layer_path is None:\n        return core, core_hash, sources\n\n    project, project_hash = load_constitution_snapshot(layer_path)\n    merged: dict = merge_constitutions(core, project)\n    sources.append(\n        {\"layer\": \"project\", \"path\": layer_path, \"sha256\": project_hash}\n    )\n    merged_hash: str = hashlib.sha256(\n        f\"{core_hash}\\n{project_hash}\".encode(\"utf-8\")\n    ).hexdigest()\n    return merged, merged_hash, sources\n\n\ndef get_constraint_by_id(constitution: dict, constraint_id: str) -> dict | None:"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-007",
+          "severity": "CONCERN",
+          "location": "pipeline/constitution.py: load_governing_constitution body",
+          "evidence": "merged: dict = merge_constitutions(core, project)",
+          "reasoning": "This is a governance pipeline file (C-007 applies). The new function delegates the actual core-vs-project merge to merge_constitutions(), whose implementation is not present in this diff/context. Whether a malformed or adversarial project layer can weaken, override, or drop core constraints hinges entirely on that function's logic, which cannot be verified here. The docstring asserts fail-closed behavior on erosion attempts ('tries to erode the core, raises'), but no enforcement of that claim is visible in the shown code \u2014 it depends on merge_constitutions actually implementing it."
+        },
+        {
+          "constraint_id": "C-007",
+          "severity": "OBSERVATION",
+          "location": "pipeline/constitution.py: load_governing_constitution body",
+          "evidence": "layer_path: str | None = resolve_constitution_path()\\nif layer_path is None:\\n    return core, core_hash, sources",
+          "reasoning": "Absent-project-layer fallback to core-only is documented and appears correctly fail-open per spec (core floor still applies), which is the intended non-erosive behavior. Noted as clean but flagged as observation since resolve_constitution_path's implementation is also not shown, so its correctness (e.g. not accidentally resolving to a tampered path) can't be independently confirmed from this diff alone."
+        },
+        {
+          "constraint_id": "C-005",
+          "severity": "OBSERVATION",
+          "location": "pipeline/constitution.py: new function load_governing_constitution",
+          "evidence": "def load_governing_constitution() -> tuple[dict, str, list[dict]]: ...",
+          "reasoning": "New branching logic (present/absent project layer, hash chaining, sources list construction) with no accompanying test in the diff. C-005 is a warning-severity constraint, not veto, so this is not a blocking finding, but worth surfacing for defender/oracle review or explicit deferral justification."
+        },
+        {
+          "constraint_id": "C-004",
+          "severity": "OBSERVATION",
+          "location": "pipeline/constitution.py: function signature and body",
+          "evidence": "-> tuple[dict, str, list[dict]]",
+          "reasoning": "Type hints are present and reasonably precise throughout (dict, str, list[dict], str | None). No annotation weakening or bare Any observed. Compliant, noted only for completeness."
+        }
+      ],
+      "_tokens": {
+        "input": 8399,
+        "output": 1929
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "MITIGATE",
+          "argument": "The Challenger is correct that merge_constitutions' internals aren't in this diff, but that function is not introduced or modified here - the diff only adds load_governing_constitution, which calls a pre-existing helper. If merge_constitutions already has fail-closed erosion checks (as the docstring's confident, specific description of its behavior implies the author verified), then this change doesn't introduce new C-007 risk; it composes existing verified logic into a clearer entry point with better audit metadata (the sources list). The concern is legitimate as a call for verification, but it's a finding about a dependency's correctness, not a defect in the code actually shown in this diff. If merge_constitutions has NOT been reviewed under C-007 previously, that's a pre-existing gap this diff didn't create.",
+          "evidence": "The new_string only defines load_governing_constitution(); merge_constitutions and resolve_constitution_path are referenced, not defined here, indicating they predate this change."
+        },
+        {
+          "finding_index": 1,
+          "position": "CONCEDE",
+          "argument": "Agreed, this is correctly noted as clean behavior. No dispute.",
+          "evidence": "if layer_path is None: return core, core_hash, sources - correctly falls back to core-only, no erosion path."
+        },
+        {
+          "finding_index": 2,
+          "position": "CONCEDE",
+          "argument": "The new function does introduce untested branching (present/absent layer, hash construction, sources list). This is a fair C-005 observation. Since C-005 is warning-severity, it should not block the change, but the author should add tests for both branches before this lands, or explicitly justify deferral per project workflow rules.",
+          "evidence": "load_governing_constitution has two return paths (early return on None layer_path, and full merge path) with no test file shown in the diff."
+        },
+        {
+          "finding_index": 3,
+          "position": "CONCEDE",
+          "argument": "Agreed - annotations are precise (tuple[dict, str, list[dict]], str | None) and there is no weakening. This finding is a clean confirmation, not a critique.",
+          "evidence": "-> tuple[dict, str, list[dict]] and layer_path: str | None are both fully specified, no bare Any."
+        }
+      ],
+      "summary": "The new function is well-documented, type-safe, and correctly composes existing constitution-loading logic without introducing new erosion paths itself, but its safety guarantee ultimately rests on merge_constitutions' unverified internals and it currently lacks test coverage for its two branches.",
+      "_tokens": {
+        "input": 9343,
+        "output": 1233
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change adds a single new function, load_governing_constitution, to a governance pipeline file, so C-007 governs. The Challenger's strongest finding (index 0) is a CONCERN, not a veto-severity assertion, and rests on the internals of merge_constitutions, which this diff neither introduces nor modifies. The Defender's MITIGATE rebuttal is well-founded: the new_string only defines load_governing_constitution and calls pre-existing helpers (merge_constitutions, resolve_constitution_path, load_constitution_snapshot). The code actually shown does not weaken enforcement, bypass verification, or disable logging; on the contrary it fails closed on an absent-but-malformed or erosive project layer (per the documented contract) and adds audit metadata via the sources list, which strengthens traceability. C-007 is therefore satisfied by the shown code, with the caveat that the fail-closed guarantee is inherited from merge_constitutions rather than proven here. The hash construction (SHA-256 over the two raw per-file hashes) preserves the ledger's guarantee that the digest reflects authored bytes rather than a re-serialization, consistent with C-008's evidentiary intent. C-004 is satisfied: annotations are precise (tuple[dict, str, list[dict]], str | None) with no weakening, confirmed by both Challenger finding index 3 and Defender concession. C-003 is not triggered: hashlib is stdlib and the function relies on symbols (load_constitution_snapshot, hashlib) presumed already present in the file. C-005 (test coverage) is a warning-severity observation, conceded by the Defender, and does not block. No veto-severity constraint is clearly violated and no Defender rebuttal leaves a veto finding unaddressed.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "New function composes pre-existing merge logic, fails closed on malformed/erosive project layers per its documented contract, and adds audit metadata. Challenger finding 0 is a CONCERN about the unshown merge_constitutions internals, adequately mitigated by Defender: no enforcement weakening is present in the code actually changed."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "SATISFIED",
+          "note": "Hashing the two raw per-file hashes rather than a re-serialized merged document preserves the guarantee that a digest reflects authored bytes; consistent with the evidence-chain rationale."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "Precise annotations throughout; no weakening or bare Any. Confirmed by Challenger finding 3 and Defender concession."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "hashlib is stdlib; no new third-party dependency introduced or required in requirements.txt."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "VIOLATED",
+          "note": "Two-branch logic (absent vs present project layer, hash chaining, sources construction) ships with no test in the diff. Warning severity only; conceded by both sides; does not trigger veto."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is confined to pipeline/constitution.py, the stated target file; no out-of-scope edits."
+        }
+      ],
+      "advisories": [
+        "The fail-closed erosion guarantee described in the docstring is enforced by merge_constitutions, which is not shown in this diff. Confirm merge_constitutions has actually been reviewed under C-007 and rejects project layers that attempt to weaken or drop core constraints; if that verification does not exist, it is a pre-existing gap that this cleaner entry point now depends on and should be audited separately.",
+        "C-005: add tests covering both return paths (None layer_path early return and the full merge path, including merged_hash construction and the sources list) before this lands, or record an explicit deferral per workflow rules.",
+        "Confirm hashlib is already imported at module scope in pipeline/constitution.py so load_governing_constitution does not raise NameError at runtime."
+      ],
+      "remediation": null,
+      "confidence": "MODERATE",
+      "_tokens": {
+        "input": 10515,
+        "output": 2180
+      }
+    },
+    "entry_hash": "3bba88648a1fe8c42749444db8e188339692d2f16f12b74683004f511431c969"
+  },
+  {
+    "entry_id": "367d0705-da1d-49dc-a4d9-b518c3b1a436",
+    "timestamp": "2026-07-30T19:37:36.611479+00:00",
+    "previous_hash": "3bba88648a1fe8c42749444db8e188339692d2f16f12b74683004f511431c969",
+    "constitution_hash": "8fe258d5a023a0ecc81f1cc6374156c8670d754529953b2b851e9ada53c60a75",
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "tests\\test_constitution_layers.py",
+      "tool": "Write",
+      "diff_summary": {
+        "file_path": "tests\\test_constitution_layers.py",
+        "change_type": "create",
+        "content": "\"\"\"Tests for per-project constitution layering (floor + extend).\n\nBench's core constitution is a floor. A governed project may add constraints in\nthe reserved ``P-`` namespace and raise a core severity; it may not remove,\ndowngrade, reword, or shadow a core constraint. Every rejection must raise\nrather than silently drop the line, so an author is never left believing they\nchanged a rule that is still in force.\n\nRun: python -m unittest tests.test_constitution_layers -v\n\"\"\"\n\nimport json\nimport os\nimport shutil\nimport sys\nimport tempfile\nimport unittest\nfrom pathlib import Path\n\n_REPO_ROOT: Path = Path(__file__).resolve().parent.parent\nif str(_REPO_ROOT) not in sys.path:\n    sys.path.insert(0, str(_REPO_ROOT))\n\nfrom pipeline.constitution import (  # noqa: E402\n    ConstitutionFloorError,\n    ConstitutionSchemaError,\n    load_governing_constitution,\n    merge_constitutions,\n    resolve_constitution_path,\n)\nfrom utils.project import BENCH_ROOT  # noqa: E402\n\n_ENV_VAR: str = \"BENCH_CONSTITUTION_PATH\"\n\n\ndef _core() -> dict:\n    return {\n        \"constitution\": \"bench-v1\",\n        \"version\": 4,\n        \"constraints\": [\n            {\n                \"id\": \"C-001\",\n                \"name\": \"No Silent Error Swallowing\",\n                \"rule\": \"Catch blocks must log, re-throw, or return.\",\n                \"severity\": \"veto\",\n            },\n            {\n                \"id\": \"C-005\",\n                \"name\": \"Test Coverage\",\n                \"rule\": \"New logic carries tests.\",\n[BENCH TRUNCATION: 6 lines omitted]\ndef _project(**overrides: object) -> dict:\n[BENCH TRUNCATION: 16 lines omitted]\ndef _severities(doc: dict) -> dict:\n[BENCH TRUNCATION: 3 lines omitted]\nclass MergeExtendTests(unittest.TestCase):\n    def test_project_constraints_are_appended(self) -> None:\n[BENCH TRUNCATION: 4 lines omitted]\n    def test_core_constraints_survive_unchanged(self) -> None:\n[BENCH TRUNCATION: 4 lines omitted]\n    def test_severity_may_be_raised(self) -> None:\n[BENCH TRUNCATION: 9 lines omitted]\n    def test_both_versions_are_recorded(self) -> None:\n[BENCH TRUNCATION: 7 lines omitted]\nclass MergeFloorTests(unittest.TestCase):\n[BENCH TRUNCATION: 2 lines omitted]\n    def test_rejects_reusing_a_core_id(self) -> None:\n[BENCH TRUNCATION: 8 lines omitted]\n        self.assertIn(\"C-007\", str(ctx.exception))\n[BENCH TRUNCATION: 1 lines omitted]\n    def test_rejects_downgrading_a_core_severity(self) -> None:\n[BENCH TRUNCATION: 4 lines omitted]\n        self.assertIn(\"only raise\", str(ctx.exception))\n[BENCH TRUNCATION: 1 lines omitted]\n    def test_rejects_restating_the_same_severity(self) -> None:\n[BENCH TRUNCATION: 6 lines omitted]\n    def test_rejects_override_of_unknown_constraint(self) -> None:\n[BENCH TRUNCATION: 4 lines omitted]\n        self.assertIn(\"C-999\", str(ctx.exception))\n[BENCH TRUNCATION: 1 lines omitted]\n    def test_omitting_a_core_constraint_does_not_remove_it(self) -> None:\n[BENCH TRUNCATION: 9 lines omitted]\nclass MergeSchemaTests(unittest.TestCase):\n    def test_rejects_non_list_constraints(self) -> None:\n[BENCH TRUNCATION: 3 lines omitted]\n    def test_rejects_duplicate_project_ids(self) -> None:\n[BENCH TRUNCATION: 9 lines omitted]\n    def test_rejects_missing_required_fields(self) -> None:\n[BENCH TRUNCATION: 4 lines omitted]\n        self.assertIn(\"missing required field\", str(ctx.exception))\n[BENCH TRUNCATION: 1 lines omitted]\n    def test_rejects_unknown_severity(self) -> None:\n[BENCH TRUNCATION: 8 lines omitted]\n    def test_rejects_non_dict_severity_overrides(self) -> None:\n[BENCH TRUNCATION: 4 lines omitted]\nclass ResolveTests(unittest.TestCase):\n    def setUp(self) -> None:\n[BENCH TRUNCATION: 5 lines omitted]\n    def _restore_env(self) -> None:\n[BENCH TRUNCATION: 5 lines omitted]\n    def test_bench_repo_has_no_project_layer(self) -> None:\n[BENCH TRUNCATION: 4 lines omitted]\n    def test_foreign_project_without_a_file_has_no_layer(self) -> None:\n[BENCH TRUNCATION: 6 lines omitted]\n    def test_foreign_project_with_a_file_uses_it(self) -> None:\n[BENCH TRUNCATION: 13 lines omitted]\n    def test_env_override_wins(self) -> None:\n[BENCH TRUNCATION: 5 lines omitted]\nclass LoadGoverningTests(unittest.TestCase):\n    def setUp(self) -> None:\n[BENCH TRUNCATION: 5 lines omitted]\n    def _restore_env(self) -> None:\n[BENCH TRUNCATION: 5 lines omitted]\n    def _write_layer(self, layer: dict) -> str:\n[BENCH TRUNCATION: 5 lines omitted]\n    def test_core_only_when_no_layer(self) -> None:\n[BENCH TRUNCATION: 15 lines omitted]\n    def test_layer_is_merged_and_both_sources_recorded(self) -> None:\n[BENCH TRUNCATION: 10 lines omitted]\n    def test_hash_changes_when_the_layer_changes(self) -> None:\n[BENCH TRUNCATION: 10 lines omitted]\n    def test_malformed_layer_fails_closed(self) -> None:\n        path: str = os.path.join(self._tmp, \"bench.json\")\n        with open(path, \"w\", encoding=\"utf-8\") as handle:\n            handle.write(\"{not json\")\n        os.environ[_ENV_VAR] = path\n\n        from pipeline.constitution import ConstitutionError\n\n        with self.assertRaises(ConstitutionError):\n            load_governing_constitution()\n\n    def test_hostile_layer_fails_closed(self) -> None:\n        os.environ[_ENV_VAR] = self._write_layer(\n            _project(severity_overrides={\"C-007\": \"warning\"})\n        )\n        with self.assertRaises(ConstitutionFloorError):\n            load_governing_constitution()\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n[BENCH TRUNCATION: original_lines=310, truncated_lines=108, preserved=first50+signatures+exception_handlers+last20]\n",
+        "formatted_diff": "+\"\"\"Tests for per-project constitution layering (floor + extend).\n+\n+Bench's core constitution is a floor. A governed project may add constraints in\n+the reserved ``P-`` namespace and raise a core severity; it may not remove,\n+downgrade, reword, or shadow a core constraint. Every rejection must raise\n+rather than silently drop the line, so an author is never left believing they\n+changed a rule that is still in force.\n+\n+Run: python -m unittest tests.test_constitution_layers -v\n+\"\"\"\n+\n+import json\n+import os\n+import shutil\n+import sys\n+import tempfile\n+import unittest\n+from pathlib import Path\n+\n+_REPO_ROOT: Path = Path(__file__).resolve().parent.parent\n+if str(_REPO_ROOT) not in sys.path:\n+    sys.path.insert(0, str(_REPO_ROOT))\n+\n+from pipeline.constitution import (  # noqa: E402\n+    ConstitutionFloorError,\n+    ConstitutionSchemaError,\n+    load_governing_constitution,\n+    merge_constitutions,\n+    resolve_constitution_path,\n+)\n+from utils.project import BENCH_ROOT  # noqa: E402\n+\n+_ENV_VAR: str = \"BENCH_CONSTITUTION_PATH\"\n+\n+\n+def _core() -> dict:\n+    return {\n+        \"constitution\": \"bench-v1\",\n+        \"version\": 4,\n+        \"constraints\": [\n+            {\n+                \"id\": \"C-001\",\n+                \"name\": \"No Silent Error Swallowing\",\n+                \"rule\": \"Catch blocks must log, re-throw, or return.\",\n+                \"severity\": \"veto\",\n+            },\n+            {\n+                \"id\": \"C-005\",\n+                \"name\": \"Test Coverage\",\n+                \"rule\": \"New logic carries tests.\",\n+[BENCH TRUNCATION: 6 lines omitted]\n+def _project(**overrides: object) -> dict:\n+[BENCH TRUNCATION: 16 lines omitted]\n+def _severities(doc: dict) -> dict:\n+[BENCH TRUNCATION: 3 lines omitted]\n+class MergeExtendTests(unittest.TestCase):\n+    def test_project_constraints_are_appended(self) -> None:\n+[BENCH TRUNCATION: 4 lines omitted]\n+    def test_core_constraints_survive_unchanged(self) -> None:\n+[BENCH TRUNCATION: 4 lines omitted]\n+    def test_severity_may_be_raised(self) -> None:\n+[BENCH TRUNCATION: 9 lines omitted]\n+    def test_both_versions_are_recorded(self) -> None:\n+[BENCH TRUNCATION: 7 lines omitted]\n+class MergeFloorTests(unittest.TestCase):\n+[BENCH TRUNCATION: 2 lines omitted]\n+    def test_rejects_reusing_a_core_id(self) -> None:\n+[BENCH TRUNCATION: 8 lines omitted]\n+        self.assertIn(\"C-007\", str(ctx.exception))\n+[BENCH TRUNCATION: 1 lines omitted]\n+    def test_rejects_downgrading_a_core_severity(self) -> None:\n+[BENCH TRUNCATION: 4 lines omitted]\n+        self.assertIn(\"only raise\", str(ctx.exception))\n+[BENCH TRUNCATION: 1 lines omitted]\n+    def test_rejects_restating_the_same_severity(self) -> None:\n+[BENCH TRUNCATION: 6 lines omitted]\n+    def test_rejects_override_of_unknown_constraint(self) -> None:\n+[BENCH TRUNCATION: 4 lines omitted]\n+        self.assertIn(\"C-999\", str(ctx.exception))\n+[BENCH TRUNCATION: 1 lines omitted]\n+    def test_omitting_a_core_constraint_does_not_remove_it(self) -> None:\n+[BENCH TRUNCATION: 9 lines omitted]\n+class MergeSchemaTests(unittest.TestCase):\n+    def test_rejects_non_list_constraints(self) -> None:\n+[BENCH TRUNCATION: 3 lines omitted]\n+    def test_rejects_duplicate_project_ids(self) -> None:\n+[BENCH TRUNCATION: 9 lines omitted]\n+    def test_rejects_missing_required_fields(self) -> None:\n+[BENCH TRUNCATION: 4 lines omitted]\n+        self.assertIn(\"missing required field\", str(ctx.exception))\n+[BENCH TRUNCATION: 1 lines omitted]\n+    def test_rejects_unknown_severity(self) -> None:\n+[BENCH TRUNCATION: 8 lines omitted]\n+    def test_rejects_non_dict_severity_overrides(self) -> None:\n+[BENCH TRUNCATION: 4 lines omitted]\n+class ResolveTests(unittest.TestCase):\n+    def setUp(self) -> None:\n+[BENCH TRUNCATION: 5 lines omitted]\n+    def _restore_env(self) -> None:\n+[BENCH TRUNCATION: 5 lines omitted]\n+    def test_bench_repo_has_no_project_layer(self) -> None:\n+[BENCH TRUNCATION: 4 lines omitted]\n+    def test_foreign_project_without_a_file_has_no_layer(self) -> None:\n+[BENCH TRUNCATION: 6 lines omitted]\n+    def test_foreign_project_with_a_file_uses_it(self) -> None:\n+[BENCH TRUNCATION: 13 lines omitted]\n+    def test_env_override_wins(self) -> None:\n+[BENCH TRUNCATION: 5 lines omitted]\n+class LoadGoverningTests(unittest.TestCase):\n+    def setUp(self) -> None:\n+[BENCH TRUNCATION: 5 lines omitted]\n+    def _restore_env(self) -> None:\n+[BENCH TRUNCATION: 5 lines omitted]\n+    def _write_layer(self, layer: dict) -> str:\n+[BENCH TRUNCATION: 5 lines omitted]\n+    def test_core_only_when_no_layer(self) -> None:\n+[BENCH TRUNCATION: 15 lines omitted]\n+    def test_layer_is_merged_and_both_sources_recorded(self) -> None:\n+[BENCH TRUNCATION: 10 lines omitted]\n+    def test_hash_changes_when_the_layer_changes(self) -> None:\n+[BENCH TRUNCATION: 10 lines omitted]\n+    def test_malformed_layer_fails_closed(self) -> None:\n+        path: str = os.path.join(self._tmp, \"bench.json\")\n+        with open(path, \"w\", encoding=\"utf-8\") as handle:\n+            handle.write(\"{not json\")\n+        os.environ[_ENV_VAR] = path\n+\n+        from pipeline.constitution import ConstitutionError\n+\n+        with self.assertRaises(ConstitutionError):\n+            load_governing_constitution()\n+\n+    def test_hostile_layer_fails_closed(self) -> None:\n+        os.environ[_ENV_VAR] = self._write_layer(\n+            _project(severity_overrides={\"C-007\": \"warning\"})\n+        )\n+        with self.assertRaises(ConstitutionFloorError):\n+            load_governing_constitution()\n+\n+\n+if __name__ == \"__main__\":\n+    unittest.main()\n+[BENCH TRUNCATION: original_lines=310, truncated_lines=108, preserved=first50+signatures+exception_handlers+last20]\n",
+        "truncation": {
+          "original_lines": 310,
+          "truncated_lines": 108,
+          "preserved": "first50+signatures+exception_handlers+last20"
+        }
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-002",
+          "severity": "CONCERN",
+          "location": "tests/test_constitution_layers.py imports",
+          "evidence": "from pipeline.constitution import (ConstitutionFloorError, ConstitutionSchemaError, load_governing_constitution, merge_constitutions, resolve_constitution_path) ... from utils.project import BENCH_ROOT",
+          "reasoning": "This diff introduces only a new test file. It depends on several symbols (ConstitutionFloorError, ConstitutionSchemaError, merge_constitutions, resolve_constitution_path, load_governing_constitution) and an entirely new module (utils/project.py exposing BENCH_ROOT) that are not documented in the current CLAUDE.md architecture description of pipeline/constitution.py or utils/. If the corresponding implementation changes to pipeline/constitution.py and a new utils/project.py are not part of this same governed change, this test file will fail on import (ModuleNotFoundError / ImportError) and the change is effectively incomplete or out of its stated scope. This cannot be confirmed without seeing the implementation diff."
+        },
+        {
+          "constraint_id": "C-005",
+          "severity": "OBSERVATION",
+          "location": "whole file",
+          "evidence": "class MergeExtendTests / MergeFloorTests / MergeSchemaTests / ResolveTests / LoadGoverningTests",
+          "reasoning": "This file itself is test coverage, which is the intent of C-005. No concern here \u2014 noted as a positive, not an issue \u2014 assuming the tested implementation exists and is itself under governance."
+        },
+        {
+          "constraint_id": "C-007",
+          "severity": "OBSERVATION",
+          "location": "N/A (tests/ directory, not pipeline/ledger/hooks)",
+          "evidence": "File path tests\\test_constitution_layers.py",
+          "reasoning": "This file sits in tests/, so C-007's direct file-scope trigger (pipeline/, ledger/, hooks/) does not apply to this specific diff. However, the tests exercise constitution-loading/merging behavior that is core governance logic (floor enforcement, hostile-layer rejection). If the corresponding pipeline/constitution.py changes are submitted separately, those changes should be scrutinized under C-007 directly \u2014 this test file alone is not the governance-integrity risk, but it is evidence that such a change exists or is imminent."
+        },
+        {
+          "constraint_id": "N/A",
+          "severity": "OBSERVATION",
+          "location": "diff metadata",
+          "evidence": "\"truncation\": {\"original_lines\": 310, \"truncated_lines\": 108, ...}",
+          "reasoning": "108 of 310 lines were omitted from this review payload (most test method bodies). A full accuracy check of assertions, fixture cleanup (tempfile/shutil usage, env var restoration ordering), and whether every test actually exercises what its name claims cannot be completed from the truncated content. This is a limitation of the review input, not a finding against the code itself, but the Oracle should weigh that this review is necessarily partial."
+        }
+      ],
+      "_tokens": {
+        "input": 13305,
+        "output": 2303
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "MITIGATE",
+          "argument": "The Challenger is correct that this diff, viewed in isolation, only adds a test file that imports symbols (ConstitutionFloorError, ConstitutionSchemaError, merge_constitutions, resolve_constitution_path, load_governing_constitution) and a module (utils/project.BENCH_ROOT) not shown to exist yet. Rule 14 in CLAUDE.md ('One change per tool call. Do not batch unrelated changes into a single Write/Edit operation') is precisely why tests and implementation are being proposed as separate governed changes rather than one large diff. That is compliant workflow, not scope creep: C-002 targets a change touching files outside its stated task boundary, and this task's boundary is 'add tests for constitution layering' \u2014 it does not itself modify pipeline/constitution.py or utils/project.py, so there's no boundary violation in this diff. The real risk the Challenger identifies is sequencing/completeness, not scope violation: if this test file lands before the implementation, `python -m unittest` will fail with ImportError. That is a legitimate operational concern worth flagging to the Oracle as a condition (land together, or land tests only with CI expected to fail until implementation follows), but it is not itself a C-002 violation on this diff as submitted.",
+          "evidence": "The finding itself concedes uncertainty: 'This cannot be confirmed without seeing the implementation diff.' Absent evidence the implementation is missing or that this is intentionally the final state, the presumption should be that the companion pipeline/constitution.py and utils/project.py changes are submitted as sibling governed changes, consistent with the one-change-per-tool-call rule."
+        },
+        {
+          "finding_index": 1,
+          "position": "CONCEDE",
+          "argument": "Agreed \u2014 this is a correct observation and a positive one. The file directly serves C-005 by providing extensive coverage for floor/extend/schema/resolution/loading behavior.",
+          "evidence": "Classes MergeExtendTests, MergeFloorTests, MergeSchemaTests, ResolveTests, LoadGoverningTests each target a distinct behavior surface of the constitution-layering feature."
+        },
+        {
+          "finding_index": 2,
+          "position": "CONCEDE",
+          "argument": "Correct on the letter of C-007's file-scope trigger \u2014 tests/ is not pipeline/, ledger/, or hooks/, so this diff alone doesn't invoke C-007 directly. The Challenger's caution that the paired implementation change should be scrutinized under C-007 is sound advice for the Oracle and for whoever submits that companion diff, not a defect in this file.",
+          "evidence": "CLAUDE.md Rule 16: 'If you modify any file in pipeline/, ledger/, or hooks/, you are modifying the governance pipeline itself.' This diff modifies none of those paths."
+        },
+        {
+          "finding_index": 3,
+          "position": "CONCEDE",
+          "argument": "Fair and honest limitation disclosure. I have no additional visibility into the truncated 108 lines beyond what's shown, and cannot personally vouch for fixture cleanup correctness (env var restoration, tempfile teardown) or that every test body matches its name's claim. I'd note only that the visible teardown-related method names (_restore_env, setUp/tempfile patterns) follow conventional unittest hygiene, but that's inference from naming, not verification.",
+          "evidence": "Truncation metadata: 108 of 310 lines omitted, preserving signatures/first50/exception handlers/last20 only \u2014 test bodies for most cases are not visible in this review."
+        }
+      ],
+      "summary": "The test file is a legitimate, well-structured addition to C-005 coverage that does not itself violate C-002 or C-007, but its soundness is contingent on a companion implementation diff (pipeline/constitution.py, utils/project.py) landing alongside it, and full correctness cannot be verified from this truncated view.",
+      "_tokens": {
+        "input": 14435,
+        "output": 1387
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "This diff creates a single new test file under tests/, exercising per-project constitution layering behavior. I evaluated it against the full constitution. No veto-severity constraint is clearly violated. On C-002, the Challenger raised a CONCERN but explicitly conceded it 'cannot be confirmed without seeing the implementation diff,' and the Defender correctly notes (MITIGATE) that this change's stated boundary is 'add tests for constitution layering' and it touches no file outside tests/. The dependency on symbols (ConstitutionFloorError, merge_constitutions, etc.) and utils/project.BENCH_ROOT that may not yet exist is a sequencing/completeness risk, not a scope-boundary violation on this diff as submitted. On C-007, both Challenger and Defender agree the file-scope trigger (pipeline/, ledger/, hooks/) is not invoked because this file lives in tests/. On C-005, this file is affirmatively coverage-positive. C-001 (no silent error swallowing) is satisfied: the visible teardown/exception patterns and assertRaises usage do not swallow errors. C-003 (dependencies) uses only stdlib imports (json, os, shutil, sys, tempfile, unittest, pathlib) plus intra-repo modules. C-006 (secrets) and C-008 (ledger) are not applicable. C-004 is satisfied: all visible signatures carry type hints.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "SATISFIED",
+          "note": "Visible exception handling uses assertRaises and does not silently swallow errors."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is confined to a single new test file within the stated 'add tests' boundary; Challenger conceded the concern is unconfirmable, Defender showed no out-of-boundary file is touched."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "SATISFIED",
+          "note": "Only stdlib and intra-repo imports appear; no new third-party dependency introduced."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "Visible function signatures carry type annotations (e.g. -> None, dict)."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "SATISFIED",
+          "note": "This diff is itself test coverage; both sides agree it advances C-005."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "File resides in tests/, not pipeline/ledger/hooks; file-scope trigger not invoked, per both Challenger and Defender."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger entries are modified; tests use tempfile-scoped fixtures."
+        }
+      ],
+      "advisories": [
+        "This test file depends on symbols (ConstitutionFloorError, ConstitutionSchemaError, merge_constitutions, resolve_constitution_path, load_governing_constitution) and a new module (utils/project.BENCH_ROOT) that must exist for the suite to import. Ensure the companion implementation changes to pipeline/constitution.py and utils/project.py land as sibling governed changes; if this test lands first, the suite will fail with ImportError until they do.",
+        "The companion pipeline/constitution.py implementation, when submitted, WILL invoke C-007 (governance pipeline integrity) directly and should be scrutinized accordingly \u2014 per both Challenger and Defender.",
+        "108 of 310 lines were truncated from this review payload. Fixture cleanup (env var restoration ordering, tempfile/shutil teardown) and whether each test body matches its name could not be fully verified from the visible content."
+      ],
+      "remediation": null,
+      "confidence": "MODERATE",
+      "_tokens": {
+        "input": 16106,
+        "output": 1610
+      }
+    },
+    "entry_hash": "2d009f4dcb30744daa9042a8cbd76ea085ceb73ba40eae86cee947d96beaf202"
   }
 ]
