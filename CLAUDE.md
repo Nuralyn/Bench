@@ -91,8 +91,18 @@ non-Anthropic model families remain out of scope.
 ### Absolute
 
 1. Every file change made through Claude Code's Write/Edit/MultiEdit tools is
-   governed. No exceptions and no bypasses on that path. One category sits
-   outside it and cannot be brought in: a bot-authored dependency PR, where
+   governed. No exceptions and no bypasses on that path. Other tool paths are
+   not governed at all, which is a boundary to state rather than a gap to
+   assume closed. Files written through Bash (redirection, `tee`, `sed -i`, a
+   heredoc) and through any MCP server's tools never reach the PreToolUse hook,
+   so they carry no verdict and no ledger entry. Do not add Bash to the matcher
+   to try to close this: `utils.diff.build_diff_info` returns no payload for
+   those tools, so the Challenger rejects the input and every such call
+   hard-fails into a VETO, denying ordinary shell work outright. Audit an MCP
+   server's package before registering it in a governed project — that raises
+   confidence in one version at one point in time, and it is not governance.
+   A further category sits outside it and cannot be brought in: a bot-authored
+   dependency PR, where
    Dependabot edits requirements.txt on GitHub, never reaches the PreToolUse
    hook, so it merges without a verdict or a ledger entry. Merge those by
    deliberate human decision after reading the diff, and do not enable

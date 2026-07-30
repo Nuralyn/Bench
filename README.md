@@ -69,17 +69,55 @@ Closing the hole properly needs a meaningful diff representation for a shell
 command — deciding which files `sed -i`, a heredoc, or a redirect will touch
 before it runs. That is a real piece of work and is not done.
 
-So read the boundary plainly: what Bench guarantees is that changes made through
-the governed file tools were adjudicated and recorded — not that every change to
-the repository was.
+MCP servers are the same gap, and a less visible one. Any server registered in a
+project's `.mcp.json` is spawned by Claude Code with its own tool surface, and
+none of those tools pass through the PreToolUse hook. A server exposing
+file-write or shell capability bypasses Bench exactly as `Bash` does — but a
+tool named `write_file` reads as a governed primitive, where a shell command at
+least looks like a shell command.
+
+Bench already accounts for MCP in exactly one place, and it is worth being
+precise about which. `utils/api.py` spawns the judge with `--strict-mcp-config`
+and no `--mcp-config`, dropping every MCP server so a prompt-injected diff cannot
+drive the judge into running MCP tools. That hardens the judge's own sandbox. It
+does nothing for the governed project's tool surface, which is where this gap
+lives.
+
+The mitigation available today is to audit a server's package before registering
+it in a governed project — read what it can reach, not what it advertises. Be
+honest about what that buys: it is a point-in-time check of one version, it does
+not survive an upgrade, and a source grep is necessary rather than sufficient. A
+server can reach files through `os.popen`, `pty`, an asyncio subprocess,
+`Path.open`, a dynamic import, or a remote API, and many MCP servers are Node
+rather than Python. An audit raises confidence; it does not produce a guarantee,
+and it is not governance.
+
+So read the boundary plainly: Bench governs the file-editing tools it hooks.
+Shell commands and MCP server tools are outside that boundary. What Bench
+guarantees is that changes made through the governed file tools were adjudicated
+and recorded — not that every change to the repository was.
 
 Bench governs what a model proposes through the tools it hooks, not everything
 that can reach a branch.
 
-During the build, Bench vetoed a change to its own governance pipeline code
-under constraint C-007 (governance pipeline integrity). The change would have
-reduced fallback coverage in the hook entry point. It was corrected and
-re-submitted. Ledger entry #13 is the receipt.
+Bench has repeatedly vetoed changes to its own governance pipeline under
+constraint C-007 (governance pipeline integrity). Ledger entry #64 is a clean
+example: a change to `pipeline/constitution.py` left a literal placeholder token
+in the file, which would have been a `SyntaxError` breaking every pipeline
+import and disabling enforcement outright. The Oracle caught it, named it, and
+blocked it. It was corrected and re-submitted.
+
+Other C-007 vetoes in this chain: #22–#25 (`bench.json`), #28
+(`ledger/chain.py`), #54 and #56 (`utils/api.py`), #77 (`pipeline/runner.py`).
+Read any of them with `python -m cli ledger`.
+
+One note on the numbering, so it is not mysterious. This chain opens with an
+`ANCHOR` entry rather than an ordinary verdict. A predecessor chain was retired
+on 2026-07-24 and archived without being published, because a globally
+registered hook had written diffs from unrelated projects into Bench's own
+ledger and that chain contained third-party source. Retiring it whole was chosen
+over editing entries, which C-008 forbids without exception. Entry numbers in
+this README refer to the current published chain.
 
 Run `python -m cli verify` to confirm the ledger's integrity.
 Run `python -m cli stats` to see the full governance history.
@@ -185,6 +223,29 @@ Bench's hook can be registered globally in `~/.claude/settings.json`, which gove
 This matters because a ledger records the full diff of every change it governs. Routing all projects into one chain mixes unrelated codebases together, and if that chain is committed to a public repository, it publishes them. Set `BENCH_LEDGER_PATH` if you deliberately want one central ledger across projects.
 
 The corollary is worth stating: keeping a ledger out of git also removes git as its backup path. An ignored `.bench/` chain exists on one machine and nowhere else, so losing that working copy loses the audit trail with it, and a project governed from two machines accumulates two independent chains that cannot be merged — the hash chain admits no interleaving after the fact. Decide deliberately which you want: a private chain you back up by other means, or a committed one that publishes the diffs it records.
+
+### Declaring Scope Where the Pipeline Can See It
+
+C-002 judges whether a change stays inside its intended boundary. It is worth
+knowing what the pipeline actually has to judge that against.
+
+The PreToolUse payload carries the tool name and the tool's input. It does not
+carry your prompt. Intent that exists only in the conversation is invisible to
+the Challenger, the Defender, and the Oracle — they see a diff and a
+constitution, and nothing about why you asked for it. On ordinary code changes
+that is usually enough, because the reason is legible in the change itself. On
+config files, dotfiles, and comment-less JSON there is often nothing to read.
+
+The remedy is to put the justification in the repository, where it is part of
+the context the pipeline sees: declare provenance, the task boundary, and — for
+anything that adds a tool surface — what you audited and what you found. Your
+project's `CLAUDE.md` is the natural home.
+
+This is not a workaround so much as the better outcome. In a project governed by
+Bench, an `.mcp.json` that had been vetoed passed on resubmission after exactly
+this, with no change to the config file itself. The justification stopped being
+ephemeral prompt text and became something a reviewer can read six months later,
+which is what a governance record is for.
 
 ## Models
 
