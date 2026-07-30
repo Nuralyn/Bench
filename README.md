@@ -47,8 +47,34 @@ Bench itself.
 One category is outside that boundary and is named here rather than glossed
 over: bot-authored dependency PRs. Dependabot edits `requirements.txt` on
 GitHub, which never reaches the PreToolUse hook, so those changes merge on a
-human decision and carry no ledger entry. Bench governs what a model proposes
-through the tools it hooks, not everything that can reach a branch.
+human decision and carry no ledger entry.
+
+A second, wider boundary deserves the same candor: Bench governs the `Write`,
+`Edit`, and `MultiEdit` tools, and nothing else. Any file written through `Bash`
+— shell redirection, `tee`, `sed -i`, a `python - <<EOF` heredoc — never reaches
+the PreToolUse hook. No challenge, no verdict, no ledger entry. This is not a
+narrow gap: it is a complete bypass of the governance layer, available to any
+model or human with shell access, and it leaves no trace in the chain to show it
+was used.
+
+Bench does not close this hole, and adding `Bash` to the matcher yourself does
+not close it either — it breaks the tool instead. `utils.diff.build_diff_info`
+produces a payload only for `Write`, `Edit`, and `MultiEdit`; every other tool
+yields an empty dict, which the Challenger rejects as a malformed input and the
+runner fail-closes into a VETO. The practical result is that every `git status`,
+test run, and build is denied without ever reaching a model. Bash matching is
+unsupported today, not merely slow, and it should not be enabled.
+
+Closing the hole properly needs a meaningful diff representation for a shell
+command — deciding which files `sed -i`, a heredoc, or a redirect will touch
+before it runs. That is a real piece of work and is not done.
+
+So read the boundary plainly: what Bench guarantees is that changes made through
+the governed file tools were adjudicated and recorded — not that every change to
+the repository was.
+
+Bench governs what a model proposes through the tools it hooks, not everything
+that can reach a branch.
 
 During the build, Bench vetoed a change to its own governance pipeline code
 under constraint C-007 (governance pipeline integrity). The change would have
@@ -75,13 +101,29 @@ export ANTHROPIC_API_KEY=your-key-here
 # export BENCH_PROVIDER=claude_code
 
 # Add Bench hooks to your Claude Code project
-cp .claude/settings.json /your-project/.claude/settings.json
+# Copy the TEMPLATE, not Bench's own .claude/settings.json: that file registers
+# the hook by a Bench-relative path, which only resolves when the working
+# directory is the Bench repo itself.
+cp .claude/settings.template.json /your-project/.claude/settings.json
+# Then edit the copied file and replace /absolute/path/to/bench with the
+# absolute path to this checkout. Claude Code runs the hook with your project
+# as the working directory, so a relative path leaves python unable to find the
+# script. The hook then emits no JSON, and Bench fails closed — blocking every
+# Write/Edit/MultiEdit in that project until the path is corrected.
 
-# Add your constitution
-cp bench.json /your-project/bench.json
+# Customize your constitution
+# The pipeline resolves the constitution to an absolute path inside THIS
+# checkout (pipeline/runner.py `_CONSTITUTION_PATH`), so it reads the same
+# bench.json no matter which project it is governing. Edit it here; copying a
+# bench.json into the governed project has no effect today.
+# Edit bench.json to add your own rules.
 
-# Customize your constraints
-# Edit bench.json to add your own rules
+# Keep the ledger out of git BEFORE your first governed edit
+# The ledger stores the full diff of every change it governs, so committing it
+# publishes them (see "Project-Scoped Ledger" below). Anchor the pattern with a
+# leading slash: bare `.bench/` would match any directory of that name at any
+# depth in the project.
+echo '/.bench/' >> /your-project/.gitignore
 
 # Verify governance
 python -m cli verify
@@ -141,6 +183,8 @@ Bench's hook can be registered globally in `~/.claude/settings.json`, which gove
 `ledger-meta.json` is written alongside whichever ledger is selected, so every chain carries its own anchor and verifies independently. `python -m cli verify` prints which ledger it read, and validates that chain only: per-project chains under `.bench/` are verified by running the command from that project.
 
 This matters because a ledger records the full diff of every change it governs. Routing all projects into one chain mixes unrelated codebases together, and if that chain is committed to a public repository, it publishes them. Set `BENCH_LEDGER_PATH` if you deliberately want one central ledger across projects.
+
+The corollary is worth stating: keeping a ledger out of git also removes git as its backup path. An ignored `.bench/` chain exists on one machine and nowhere else, so losing that working copy loses the audit trail with it, and a project governed from two machines accumulates two independent chains that cannot be merged — the hash chain admits no interleaving after the fact. Decide deliberately which you want: a private chain you back up by other means, or a committed one that publishes the diffs it records.
 
 ## Models
 

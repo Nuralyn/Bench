@@ -1,0 +1,18 @@
+{
+  "env": {
+    "BENCH_PROVIDER": "claude_code"
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"/absolute/path/to/bench/hooks/pre-tool-use.py\""
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -32,7 +32,18 @@ import sys
 import tempfile
 from typing import Any
 
-import anthropic
+# Soft dependency, mirroring the openai treatment in requirements.txt. Only the
+# BENCH_PROVIDER=anthropic path (the default) needs the SDK; claude_code and
+# openrouter do not. A bare top-level import made a missing SDK an ImportError
+# at module load, which crashes the hook before it can emit JSON — and a hook
+# that emits no JSON fails closed, locking out every Write/Edit/MultiEdit with
+# no stated cause. Tolerating it here keeps the module importable; _anthropic_call
+# re-imports lazily and raises a typed _ProviderError naming the fix, so the
+# anthropic path still fails closed, but legibly.
+try:
+    import anthropic  # noqa: F401
+except ImportError:
+    pass
 
 
 # Single source of truth for pipeline model IDs (CLAUDE.md and README reference
@@ -53,7 +64,10 @@ UTILITY_MODEL: str = "claude-haiku-4-5-20251001"
 # currently-uninvoked UTILITY_MODEL) falls back to the bare "anthropic/"
 # prefix, which is only correct when the first-party ID and the OpenRouter slug
 # coincide (as they do for claude-sonnet-5). A wrong slug would make the stage
-# return API_ERROR, which the runner fails open into a PASS.
+# return API_ERROR, which the stage reports as PIPELINE_ERROR and the runner
+# fails CLOSED on, returning a VETO. (An earlier version of this comment said
+# the runner fails open into a PASS; it does not, and misstating that in the
+# fail-safe direction is exactly the sort of thing C-001 exists to prevent.)
 _OPENROUTER_SLUGS: dict[str, str] = {
     "claude-sonnet-5": "anthropic/claude-sonnet-5",
     "claude-opus-4-8": "anthropic/claude-opus-4.8",
@@ -238,6 +252,22 @@ def _anthropic_call(
     construction failures and all API-call exceptions) and on any
     unexpected response shape, so callers never see a raw exception.
     """
+    # Imported lazily so the SDK is a soft dependency, mirroring the openai
+    # treatment in requirements.txt: BENCH_PROVIDER=claude_code and
+    # =openrouter never reach this function and must not require it. A missing
+    # SDK becomes a typed _ProviderError here, which the stage reports as
+    # API_ERROR and the runner fails closed on with a readable reason —
+    # instead of an ImportError at module load, which would crash the hook
+    # before it can emit JSON and lock out every edit with no explanation.
+    try:
+        import anthropic
+    except ImportError as e:
+        raise _ProviderError(
+            "anthropic: SDK not installed. BENCH_PROVIDER is 'anthropic' "
+            "(the default), which requires it: pip install -r requirements.txt. "
+            "Set BENCH_PROVIDER=claude_code to use the Claude Code CLI instead."
+        ) from e
+
     try:
         client = anthropic.Anthropic()
         response = client.messages.create(
