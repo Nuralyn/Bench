@@ -30,7 +30,23 @@ _REQUIRED_TOP_LEVEL: tuple[str, ...] = ("constitution", "version", "constraints"
 _REQUIRED_CONSTRAINT_FIELDS: tuple[str, ...] = ("id", "name", "rule", "severity")
 
 
-def load_constitution_snapshot(path: str = "bench.json") -> tuple[dict, str]:
+# Bench's own constitution, resolved absolutely from this file's location.
+#
+# The default was the bare relative "bench.json", which resolves against the
+# working directory. pipeline/runner.py always passes an absolute path, so the
+# pipeline was unaffected — but cli/commands.py calls this with no argument, so
+# `python -m cli constitution` read whatever bench.json happened to sit in the
+# cwd. Inside the Bench repo the two coincide and the split is invisible; from
+# any other project the auditor displayed a different constitution than the one
+# the pipeline enforced. Anchoring the default to this file removes that split
+# at the source, so every caller sees one constitution.
+_BENCH_ROOT: Path = Path(__file__).resolve().parent.parent
+_DEFAULT_CONSTITUTION_PATH: str = str(_BENCH_ROOT / "bench.json")
+
+
+def load_constitution_snapshot(
+    path: str = _DEFAULT_CONSTITUTION_PATH,
+) -> tuple[dict, str]:
     """Load and validate the constitution, returning (parsed_data, sha256_hex).
 
     The hash is computed over the raw file content (UTF-8 bytes) before
