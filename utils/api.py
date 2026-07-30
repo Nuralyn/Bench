@@ -64,7 +64,10 @@ UTILITY_MODEL: str = "claude-haiku-4-5-20251001"
 # currently-uninvoked UTILITY_MODEL) falls back to the bare "anthropic/"
 # prefix, which is only correct when the first-party ID and the OpenRouter slug
 # coincide (as they do for claude-sonnet-5). A wrong slug would make the stage
-# return API_ERROR, which the runner fails open into a PASS.
+# return API_ERROR, which the stage reports as PIPELINE_ERROR and the runner
+# fails CLOSED on, returning a VETO. (An earlier version of this comment said
+# the runner fails open into a PASS; it does not, and misstating that in the
+# fail-safe direction is exactly the sort of thing C-001 exists to prevent.)
 _OPENROUTER_SLUGS: dict[str, str] = {
     "claude-sonnet-5": "anthropic/claude-sonnet-5",
     "claude-opus-4-8": "anthropic/claude-opus-4.8",
