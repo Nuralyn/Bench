@@ -4,6 +4,7 @@ Run: python -m unittest tests.test_api_claude_cli -v
 """
 
 import json
+import os
 import subprocess
 import sys
 import unittest
@@ -133,6 +134,38 @@ class ClaudeCliCallTests(unittest.TestCase):
         self.assertIn("--system-prompt-file", cmd)
         self.assertNotIn("SYSPROMPT_SENTINEL", kwargs["input"])
         self.assertNotIn("SYSPROMPT_SENTINEL", cmd)
+
+    @mock.patch("utils.api.subprocess.run")
+    @mock.patch("utils.api.shutil.which", return_value="/usr/bin/claude")
+    def test_runs_from_an_isolated_working_directory(self, _which, run) -> None:
+        """The child must not inherit the governed project's cwd.
+
+        Claude Code loads project memory (CLAUDE.md) and project settings from
+        its working directory. Inheriting the governed project would hand this
+        provider an unframed, untruncated copy of the file runner.py already
+        passes in framed and capped, which the API providers never see, making
+        the judge's evidence depend on the transport.
+        """
+        seen: dict = {}
+
+        def _capture(*args, **kwargs):
+            work_dir = kwargs["cwd"]
+            seen["cwd"] = work_dir
+            seen["exists"] = os.path.isdir(work_dir)
+            seen["entries"] = os.listdir(work_dir)
+            return _completed(stdout=_OK_ENVELOPE)
+
+        run.side_effect = _capture
+        _claude_cli_call("claude-opus-4-7", "sys", _msgs(), 4096)
+
+        self.assertIsNotNone(seen["cwd"])
+        self.assertTrue(seen["exists"])
+        self.assertEqual(seen["entries"], [])
+        self.assertNotEqual(
+            os.path.realpath(seen["cwd"]), os.path.realpath(os.getcwd())
+        )
+        # Cleaned up when the call returns.
+        self.assertFalse(os.path.isdir(seen["cwd"]))
 
     @mock.patch("utils.api.subprocess.run")
     @mock.patch("utils.api.shutil.which", return_value="/usr/bin/claude")

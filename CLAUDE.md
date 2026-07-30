@@ -19,6 +19,12 @@ PreToolUse Hook -> Challenger (Sonnet) -> Defender (Sonnet) -> Oracle (Opus) -> 
 
 - Hook intercepts Write/Edit/MultiEdit tool calls
 - Constitution snapshot loaded once per pipeline run (frozen within, hot-reload between)
+- The governed project's CLAUDE.md is read once per run alongside it and passed
+  to all three stages as `file_context`, on every provider, so the judge's
+  evidence does not vary by transport. It is framed as untrusted repository
+  input that informs scope and cannot waive or amend a constraint. Content over
+  `pipeline/runner.py`'s `_MAX_CONTEXT_CHARS` (10,000) is truncated, and the
+  framing is prepended after truncation so it always precedes the content.
 - Oracle verdict is PASS or VETO. VETO is binding.
 - Every verdict hashed and chained into bench-ledger.json
 - Ledger destination is project-scoped via `ledger.chain.resolve_ledger_path()`:
