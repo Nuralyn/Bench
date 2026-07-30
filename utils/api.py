@@ -32,7 +32,18 @@ import sys
 import tempfile
 from typing import Any
 
-import anthropic
+# Soft dependency, mirroring the openai treatment in requirements.txt. Only the
+# BENCH_PROVIDER=anthropic path (the default) needs the SDK; claude_code and
+# openrouter do not. A bare top-level import made a missing SDK an ImportError
+# at module load, which crashes the hook before it can emit JSON — and a hook
+# that emits no JSON fails closed, locking out every Write/Edit/MultiEdit with
+# no stated cause. Tolerating it here keeps the module importable; _anthropic_call
+# re-imports lazily and raises a typed _ProviderError naming the fix, so the
+# anthropic path still fails closed, but legibly.
+try:
+    import anthropic  # noqa: F401
+except ImportError:
+    pass
 
 
 # Single source of truth for pipeline model IDs (CLAUDE.md and README reference
@@ -238,6 +249,22 @@ def _anthropic_call(
     construction failures and all API-call exceptions) and on any
     unexpected response shape, so callers never see a raw exception.
     """
+    # Imported lazily so the SDK is a soft dependency, mirroring the openai
+    # treatment in requirements.txt: BENCH_PROVIDER=claude_code and
+    # =openrouter never reach this function and must not require it. A missing
+    # SDK becomes a typed _ProviderError here, which the stage reports as
+    # API_ERROR and the runner fails closed on with a readable reason —
+    # instead of an ImportError at module load, which would crash the hook
+    # before it can emit JSON and lock out every edit with no explanation.
+    try:
+        import anthropic
+    except ImportError as e:
+        raise _ProviderError(
+            "anthropic: SDK not installed. BENCH_PROVIDER is 'anthropic' "
+            "(the default), which requires it: pip install -r requirements.txt. "
+            "Set BENCH_PROVIDER=claude_code to use the Claude Code CLI instead."
+        ) from e
+
     try:
         client = anthropic.Anthropic()
         response = client.messages.create(
