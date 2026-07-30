@@ -10741,5 +10741,228 @@
       }
     },
     "entry_hash": "92b873dbdced8662bdbf2ca5662ec3db79e8d70f34e989f86deafc8f1cea1640"
+  },
+  {
+    "entry_id": "e78f0498-2fce-4265-a3b5-373b6208b251",
+    "timestamp": "2026-07-30T21:18:06.375764+00:00",
+    "previous_hash": "92b873dbdced8662bdbf2ca5662ec3db79e8d70f34e989f86deafc8f1cea1640",
+    "constitution_hash": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3",
+    "constitution_sources": [
+      {
+        "layer": "core",
+        "path": "E:\\dev\\Bench\\bench.json",
+        "sha256": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3"
+      }
+    ],
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "README.md",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "README.md",
+        "change_type": "modify",
+        "old_string": "### Declaring Scope Where the Pipeline Can See It",
+        "new_string": "### Per-Project Constitutions\n\nBench's own constitution is a floor, not a default to be replaced. A governed\nproject can add constraints of its own on top of it, and can make an existing\nconstraint stricter, but it cannot weaken what the core already requires.\n\n| Working directory | Constitution |\n|---|---|\n| Inside the Bench repo | `bench.json` (core only \u2014 it *is* Bench's constitution) |\n| Any other project | core + `<project>/bench.json` when that file exists |\n| `BENCH_CONSTITUTION_PATH` set | core + that file |\n\nA project layer looks like this:\n\n```json\n{\n  \"constitution\": \"myproject-v1\",\n  \"version\": 1,\n  \"constraints\": [\n    {\n      \"id\": \"P-001\",\n      \"name\": \"No Raw SQL\",\n      \"rule\": \"Use the query builder.\",\n      \"severity\": \"veto\"\n    }\n  ],\n  \"severity_overrides\": { \"C-005\": \"veto\" }\n}\n```\n\nProject constraints live in the reserved `P-` namespace; `C-` belongs to the\ncore and cannot be redefined. `severity_overrides` may only move a core\nconstraint *up* the scale. Removing a core constraint, downgrading one,\nrestating a severity unchanged, reusing a `C-` id, or overriding an id the core\ndoes not define are all errors, and they raise rather than being ignored \u2014 a\nsilently dropped line would leave you believing you had changed a rule that is\nstill in force.\n\nThe two failure modes differ on purpose. **No layer** is safe: the core floor\napplies in full, which is why this design is preferable to one where a project\nfile replaces the constitution and an absent file silently downgrades it. **A\nmalformed or hostile layer** fails closed, because the author clearly intended\nadditional constraints and Bench cannot tell which.\n\nEach ledger entry records `constitution_sources` \u2014 the layer, path, and raw hash\nof every file that ruled. The recorded hash chains those raw hashes rather than\ndigesting a re-serialization, so it still reflects authored bytes. Run\n`python -m cli constitution` to see the merged result, its sources, and which\nconstraints the project added or raised.\n\nOne consequence worth stating plainly: if you already run Bench's hook globally,\na `bench.json` sitting in an unrelated project root is now a constitution layer\nwhere it was previously inert. The floor makes that safe \u2014 a layer can only add\n\u2014 but it is not a no-op, and it will show up in that project's ledger entries.\n\n### Declaring Scope Where the Pipeline Can See It"
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 8945,
+        "output": 19
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change modifies only README.md, inserting a documentation section ('Per-Project Constitutions') that describes a layered constitution model. Both Challenger (CLEAR) and Defender (CONFIRM_CLEAR) found no issues. Independently evaluating against the full constitution: C-001, C-003, C-004, C-006, C-008 are not applicable because no code, imports, type annotations, secrets, or ledger logic are touched \u2014 this is prose in a Markdown file. C-002 (scope) is satisfied: the edit is a single coherent documentation addition within one file. C-007 (governance pipeline integrity) is the closest to relevant, since documentation of the pipeline could in principle misrepresent enforcement; but the described design explicitly strengthens rather than weakens governance \u2014 a project layer can only add or raise severity, never remove or downgrade a core constraint, malformed/hostile layers fail closed, and the ledger records constitution_sources with raw-hash chaining. Nothing in the text weakens enforcement, bypasses verification, or disables logging. Therefore no veto-severity constraint is violated.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error-handling code is added or modified; this is documentation prose."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Single-file, single-topic README addition; coherent scope with no unrelated edits bundled in."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependency manifests changed."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No type annotations added or weakened; Markdown only."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "The JSON example contains no secrets or credentials."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "The documented layering model can only add or raise constraints and fails closed on malformed layers; enforcement is described as strengthened, not weakened or bypassed."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger entries are read, written, or modified by this documentation change."
+        }
+      ],
+      "advisories": [
+        "This documentation describes behavior (per-project constitution layering, severity_overrides, the P- namespace, BENCH_CONSTITUTION_PATH, and constitution_sources in ledger entries) that must be backed by actual implementation. If the referenced code paths do not yet exist or diverge from this description, the README will misstate system behavior. Ensure the implementation matches before relying on these docs."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 9310,
+        "output": 1347
+      }
+    },
+    "entry_hash": "7e51441bc19fb03ad3bfe6bf0446cf1925ec745cf5b08a39edc73c0cfa7700ae"
+  },
+  {
+    "entry_id": "fd4e6873-bbac-4db3-b272-7291b0e18a4e",
+    "timestamp": "2026-07-30T21:19:50.855065+00:00",
+    "previous_hash": "7e51441bc19fb03ad3bfe6bf0446cf1925ec745cf5b08a39edc73c0cfa7700ae",
+    "constitution_hash": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3",
+    "constitution_sources": [
+      {
+        "layer": "core",
+        "path": "E:\\dev\\Bench\\bench.json",
+        "sha256": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3"
+      }
+    ],
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "CLAUDE.md",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "CLAUDE.md",
+        "change_type": "modify",
+        "old_string": "- **C-008**: Ledger immutability (veto)\n\n## API Configuration",
+        "new_string": "- **C-008**: Ledger immutability (veto)\n\nThese are the core, and they are a floor. When Bench governs another project,\n`pipeline.constitution.load_governing_constitution()` stacks that project's\n`<project>/bench.json` on top: the project may add constraints in the reserved\n`P-` namespace and raise a core severity via `severity_overrides`, and may not\nremove, downgrade, restate, or redefine anything in `C-`. Attempts to do so\nraise and fail closed rather than being ignored. Governing Bench itself uses the\ncore alone. `BENCH_CONSTITUTION_PATH` overrides which layer is stacked.\n\nReaders resolve through that same function \u2014 `python -m cli constitution` prints\nthe merged result and its sources \u2014 so the auditor never displays a different\nconstitution than the pipeline enforced. Each ledger entry records\n`constitution_sources` (layer, path, and raw hash per file), and the entry's\n`constitution_hash` chains those raw hashes rather than digesting a merged\nre-serialization.\n\n## API Configuration"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-002",
+          "severity": "CONCERN",
+          "location": "CLAUDE.md, new paragraph after C-008 constraint list",
+          "evidence": "\"`pipeline.constitution.load_governing_constitution()` stacks that project's `<project>/bench.json` on top... may add constraints in the reserved `P-` namespace and raise a core severity via `severity_overrides`, and may not remove, downgrade, restate, or redefine anything in `C-`. Attempts to do so raise and fail closed...\"",
+          "reasoning": "This documents specific, named functions, behaviors, and failure semantics (load_governing_constitution, severity_overrides, fail-closed validation, BENCH_CONSTITUTION_PATH) for a constitution-layering feature. No corresponding diff to pipeline/constitution.py, ledger/chain.py, or cli/commands.py is provided alongside this doc change. If this describes a feature not yet implemented, the documentation misrepresents actual pipeline behavior, which is a scope/consistency problem: a change should not document capabilities the code doesn't have. This should be verified against the actual implementation before merge (or confirmed as a separate already-landed change)."
+        },
+        {
+          "constraint_id": "C-007",
+          "severity": "CONCERN",
+          "location": "CLAUDE.md, new paragraph re: `constitution_sources` and `constitution_hash`",
+          "evidence": "\"Each ledger entry records `constitution_sources` (layer, path, and raw hash per file), and the entry's `constitution_hash` chains those raw hashes rather than digesting a merged re-serialization.\"",
+          "reasoning": "This describes a change to ledger entry schema (new fields `constitution_sources`, altered `constitution_hash` computation) \u2014 this is governance-pipeline-affecting behavior per C-007's scope (pipeline/, ledger/). If ledger/chain.py and pipeline/constitution.py have not actually been updated to produce these fields, the documentation overstates the pipeline's integrity guarantees (claiming per-file raw-hash chaining that doesn't exist), which risks undermining auditability rather than strengthening it. Should be confirmed against actual code before landing as authoritative doc."
+        },
+        {
+          "constraint_id": "C-002",
+          "severity": "OBSERVATION",
+          "location": "CLAUDE.md diff overall",
+          "evidence": "Entire new paragraph inserted into the Constitution Reference section",
+          "reasoning": "The diff is internally coherent as a single documentation addition (one topic: constitution layering for governed projects), so it does not violate the 'bundling unrelated edits' clause of C-002. Flagged only as context for the concerns above, not as a scope violation in itself."
+        }
+      ],
+      "_tokens": {
+        "input": 8383,
+        "output": 2297
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "MITIGATE",
+          "argument": "The Challenger is right to want verification, but the constraint cited doesn't quite reach the harm described. C-002's rule text is about scope coherence and bundling of unrelated edits, not about verifying that documented behavior matches implemented code \u2014 and the Challenger's own third finding concedes the diff is internally coherent as a single-topic addition. Whether load_governing_constitution, P-namespace constraints, and severity_overrides actually exist in pipeline/constitution.py is a real question, but it's a documentation-accuracy question, not a scope-boundary violation. I don't have visibility into pipeline/constitution.py in this review to confirm or deny the feature exists, so I can't fully clear this \u2014 but I can say C-002 is the wrong constraint for the concern being raised.",
+          "evidence": "C-002 rule: 'Changes must stay within one coherent scope... Bundling unrelated edits into a single change is a violation.' The new paragraph is a single topic (constitution layering) inserted at a single, logical location in the Constitution Reference section \u2014 it doesn't bundle unrelated edits."
+        },
+        {
+          "finding_index": 1,
+          "position": "MITIGATE",
+          "argument": "Same structural issue: C-007's rule text targets 'changes to the governance pipeline itself (challenger, defender, oracle, ledger, constitution)' and prohibits weakening enforcement, bypassing verification, or disabling logging. This diff touches zero files in pipeline/, ledger/, or hooks/ \u2014 it is CLAUDE.md only. A doc paragraph describing ledger schema fields doesn't itself weaken enforcement, bypass verification, or disable logging; at worst, if the described fields (constitution_sources, per-file-hash chaining) don't exist yet, the risk is stale/aspirational documentation, not a pipeline integrity violation. That said, if this is aspirational documentation of a not-yet-built feature, it should be labeled as a design doc or roadmap note, not stated as present-tense fact ('Each ledger entry records...') in the same reference section that documents C-008 and the ledger's actual append-only guarantees. That's a legitimate concern worth the Oracle's attention even if C-007 isn't the precise mechanism for it.",
+          "evidence": "C-007 scope: 'Changes to the governance pipeline itself (challenger, defender, oracle, ledger, constitution)...' \u2014 the changed file is CLAUDE.md, not any file in pipeline/ or ledger/. Per rule 16 in this same document, C-007 scrutiny applies specifically to edits within pipeline/, ledger/, or hooks/."
+        },
+        {
+          "finding_index": 2,
+          "position": "CONCEDE",
+          "argument": "Agreed \u2014 this is an observation, not an actionable finding, and the Challenger correctly notes it isn't a scope violation. Nothing to rebut.",
+          "evidence": "Challenger's own text: 'Flagged only as context for the concerns above, not as a scope violation in itself.'"
+        }
+      ],
+      "summary": "The change is a single-topic documentation addition that doesn't literally trip C-002 or C-007 as written, but the Challenger's underlying instinct \u2014 verify that load_governing_constitution, severity_overrides, and the constitution_sources/constitution_hash ledger fields actually exist in code before this present-tense documentation ships \u2014 is sound engineering hygiene that the Oracle should require confirmed before PASS.",
+      "_tokens": {
+        "input": 9385,
+        "output": 2901
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The proposed change is a single-topic documentation addition to CLAUDE.md describing a constitution-layering mechanism (load_governing_constitution, P- namespace, severity_overrides, constitution_sources/constitution_hash ledger fields). The Challenger raised two CONCERN-level findings under C-002 and C-007, but both are grounded in the possibility that the documentation describes behavior not yet present in code, which the Challenger itself frames as a 'documentation-accuracy question' to be verified. The Defender correctly demonstrates that neither cited constraint reaches this concern as written: C-002 targets scope incoherence and bundling of unrelated edits, and the Challenger's own OBSERVATION (finding index 2) concedes the diff is a single coherent topic at a single logical location, so C-002 is not tripped. C-007's scope is 'changes to the governance pipeline itself (challenger, defender, oracle, ledger, constitution)' and prohibits weakening enforcement, bypassing verification, or disabling logging; per rule 16 in CLAUDE.md this scrutiny attaches to edits within pipeline/, ledger/, or hooks/. This diff touches only CLAUDE.md and alters no code, disables no logging, and bypasses no verification, so C-007 is not violated. A prose paragraph, even one that overstates present-tense pipeline capabilities, does not itself degrade governance enforcement. Evaluating the change against the constitution as a whole, no veto-severity constraint (C-001, C-003, C-004, C-006, C-008) is implicated by a documentation edit that adds no imports, secrets, type changes, or ledger-mutation logic. The documentation-accuracy risk both parties flag is a genuine hygiene concern but is not encoded in any constitutional constraint, so it cannot ground a veto.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Single coherent topic (constitution layering) at one logical location; Challenger's OBSERVATION and Defender both agree no unrelated edits are bundled."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Change is CLAUDE.md only, touching no pipeline/, ledger/, or hooks/ code. No enforcement weakened, no verification bypassed, no logging disabled. Documentation prose cannot itself alter pipeline integrity."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger entries modified, deleted, or reordered; the change is documentation describing ledger schema, not code that touches the ledger."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependencies added."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No type annotations affected."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "BENCH_CONSTITUTION_PATH and BENCH_LEDGER_PATH are env-var names, not hardcoded secrets."
+        }
+      ],
+      "advisories": [
+        "Documentation-accuracy risk (raised by both Challenger and Defender): the paragraph asserts present-tense facts ('Each ledger entry records constitution_sources...', 'load_governing_constitution() stacks...'). If these features are not yet implemented in pipeline/constitution.py, ledger/chain.py, and cli/commands.py, this doc misrepresents actual pipeline behavior. Confirm the referenced functions, the P-/severity_overrides validation with fail-closed semantics, and the constitution_sources/constitution_hash ledger fields exist in code before treating this as authoritative documentation. If aspirational, label it as a design/roadmap note rather than present-tense fact.",
+        "This is a certification of constitutional compliance only, not an endorsement that the documented mechanism is correctly built."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 10900,
+        "output": 1868
+      }
+    },
+    "entry_hash": "61b47156b182294454a4216c31877f873a125e7485efc5b207f51c8e88eb6061"
   }
 ]
