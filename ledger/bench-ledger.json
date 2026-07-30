@@ -10964,5 +10964,103 @@
       }
     },
     "entry_hash": "61b47156b182294454a4216c31877f873a125e7485efc5b207f51c8e88eb6061"
+  },
+  {
+    "entry_id": "8cb57693-7c38-4f31-b4b2-2fc5df72edb3",
+    "timestamp": "2026-07-30T21:28:14.066749+00:00",
+    "previous_hash": "61b47156b182294454a4216c31877f873a125e7485efc5b207f51c8e88eb6061",
+    "constitution_hash": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3",
+    "constitution_sources": [
+      {
+        "layer": "core",
+        "path": "E:\\dev\\Bench\\bench.json",
+        "sha256": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3"
+      }
+    ],
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "README.md",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "README.md",
+        "change_type": "modify",
+        "old_string": "# Customize your constitution\n# The pipeline resolves the constitution to an absolute path inside THIS\n# checkout (pipeline/runner.py `_CONSTITUTION_PATH`), so it reads the same\n# bench.json no matter which project it is governing. Edit it here; copying a\n# bench.json into the governed project has no effect today.\n# Edit bench.json to add your own rules.",
+        "new_string": "# Add your project's own rules as a layer\n# Bench's core constitution always applies. Put rules specific to THIS project\n# in <project>/bench.json, which is stacked on top of the core: use the\n# reserved P- namespace for new constraints, and severity_overrides to make a\n# core constraint stricter. A layer can add and tighten, never weaken.\n# See \"Per-Project Constitutions\" below for the full schema and rules.\ncat > /your-project/bench.json <<'JSON'\n{\n  \"constitution\": \"myproject-v1\",\n  \"version\": 1,\n  \"constraints\": [\n    {\n      \"id\": \"P-001\",\n      \"name\": \"No Raw SQL\",\n      \"rule\": \"Use the query builder.\",\n      \"severity\": \"veto\"\n    }\n  ],\n  \"severity_overrides\": { \"C-005\": \"veto\" }\n}\nJSON\n\n# Edit this checkout's bench.json only for rules that should bind EVERY project\n# you govern. It is the shared floor, not the place for one project's rules."
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 8810,
+        "output": 19
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change modifies README.md documentation only, replacing an outdated description of constitution resolution with an accurate description of the per-project layering model. This aligns with the behavior documented in CLAUDE.md (project bench.json stacked on core, P- namespace, severity_overrides that can only tighten). The Challenger returned CLEAR with no findings and the Defender confirmed. I independently reviewed against the full constitution: no error-handling code (C-001 N/A), the edit is a single coherent documentation correction (C-002 satisfied), no imports or dependencies added (C-003 N/A), no type annotations touched (C-004 N/A), no executable logic requiring tests (C-005 N/A), the embedded example severity_overrides only raises C-005 to veto which is a permitted tightening consistent with C-007's non-weakening principle and introduces no real secret (C-006 N/A \u2014 the 'API key' text is a documentation example of a rule, not a credential), README.md is not a pipeline/ledger/constitution file so C-007 and C-008 are not directly engaged, and nothing modifies the ledger.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Documentation change, no error-handling code."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Single coherent change: correcting README docs about constitution layering. No unrelated edits bundled."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependencies introduced."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No type annotations affected."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new executable logic; documentation only."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "SATISFIED",
+          "note": "No credentials. The example shown is an illustrative rule definition, not a real secret."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "README.md is not a pipeline/ledger/constitution file. The documented example only tightens (C-005 to veto), consistent with the non-weakening principle."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger modification."
+        }
+      ],
+      "advisories": [
+        "Verify the documented example (P- namespace, severity_overrides tightening only) matches the actual load_governing_constitution behavior so the README does not drift from implementation."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 9175,
+        "output": 1154
+      }
+    },
+    "entry_hash": "9f2f09daf9d1f85f5f4197d22e508e148ff98bb992a5fecf94b7c44ed8d4ae15"
   }
 ]
