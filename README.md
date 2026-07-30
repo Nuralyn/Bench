@@ -236,10 +236,19 @@ constitution, and nothing about why you asked for it. On ordinary code changes
 that is usually enough, because the reason is legible in the change itself. On
 config files, dotfiles, and comment-less JSON there is often nothing to read.
 
-The remedy is to put the justification in the repository, where it is part of
-the context the pipeline sees: declare provenance, the task boundary, and — for
-anything that adds a tool surface — what you audited and what you found. Your
-project's `CLAUDE.md` is the natural home.
+The remedy is to put the justification in the repository: declare provenance,
+the task boundary, and — for anything that adds a tool surface — what you
+audited and what you found. Your project's `CLAUDE.md` is the natural home.
+
+Be aware of *why* that reaches the pipeline, because it is provider-dependent.
+On `BENCH_PROVIDER=claude_code` the judge is a `claude -p` subprocess that
+inherits the governed project as its working directory, so Claude Code loads
+that project's `CLAUDE.md` into the judge's context. Verified directly: asked
+whether it could see the file, the judge quoted it back. On the `anthropic` and
+`openrouter` paths there is no such subprocess — each stage receives only the
+system prompt and the constructed user content, and the `file_context` argument
+the stages accept is never populated by `pipeline/runner.py`. On those providers
+the pipeline genuinely sees the diff and the constitution and nothing else.
 
 This is not a workaround so much as the better outcome. In a project governed by
 Bench, an `.mcp.json` that had been vetoed passed on resubmission after exactly
