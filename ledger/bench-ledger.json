@@ -5682,5 +5682,411 @@
       }
     },
     "entry_hash": "b884541b5e317e6cf17f4600a9300d6d1e804ef0b51d239b291049ce96ee49f0"
+  },
+  {
+    "entry_id": "9514120f-72da-400f-9173-97a99b0d389f",
+    "timestamp": "2026-07-30T19:09:43.369498+00:00",
+    "previous_hash": "b884541b5e317e6cf17f4600a9300d6d1e804ef0b51d239b291049ce96ee49f0",
+    "constitution_hash": "8fe258d5a023a0ecc81f1cc6374156c8670d754529953b2b851e9ada53c60a75",
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "hooks\\pre-tool-use.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "hooks\\pre-tool-use.py",
+        "change_type": "modify",
+        "old_string": "    try:\n        raw_stdin: str = sys.stdin.read()",
+        "new_string": "    try:\n        # Claude Code pipes the payload as UTF-8, but sys.stdin decodes with the\n        # locale encoding \u00e2\u20ac\u201d cp1252 on Windows. Left alone, every non-ASCII\n        # character in a governed diff is mangled BEFORE the Challenger sees it,\n        # so the pipeline adjudicates corrupted text and the ledger records that\n        # corruption as the receipt. Decode explicitly instead.\n        #\n        # Strict on purpose: undecodable bytes raise, and the except below fails\n        # closed. A payload Bench cannot read faithfully must not be adjudicated.\n        # Guarded by hasattr because the reentrancy and test paths substitute an\n        # io.StringIO for stdin, which is already text and has no reconfigure.\n        if hasattr(sys.stdin, \"reconfigure\"):\n            sys.stdin.reconfigure(encoding=\"utf-8\")\n        raw_stdin: str = sys.stdin.read()"
+      }
+    },
+    "challenger": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-005",
+          "severity": "CONCERN",
+          "location": "hooks/pre-tool-use.py: new stdin.reconfigure branch",
+          "evidence": "if hasattr(sys.stdin, \"reconfigure\"):\n            sys.stdin.reconfigure(encoding=\"utf-8\")",
+          "reasoning": "This introduces a new conditional branch (hasattr guard) and changes decode behavior for a critical hook entry point. No test is included in the diff verifying the UTF-8 reconfigure path or the io.StringIO fallback path behave as claimed. C-005 is warning-severity, so this is not blocking, but new branching logic in the governed hook should have accompanying coverage or explicit deferral justification."
+        },
+        {
+          "constraint_id": "C-007",
+          "severity": "OBSERVATION",
+          "location": "hooks/pre-tool-use.py: try block modification",
+          "evidence": "# Strict on purpose: undecodable bytes raise, and the except below fails closed.",
+          "reasoning": "The diff asserts fail-closed behavior on decode errors but the except clause itself is not shown in this diff. This is not a violation on its face \u2014 the comment is consistent with C-007's intent (no weakened enforcement) \u2014 but the Oracle/Defender should confirm the actual except block referenced still logs/fails closed rather than silently swallowing a UnicodeDecodeError, since that would implicate C-001 as well."
+        }
+      ],
+      "_tokens": {
+        "input": 8006,
+        "output": 994
+      }
+    },
+    "defender": {
+      "status": "REBUTTAL",
+      "rebuttals": [
+        {
+          "finding_index": 0,
+          "position": "MITIGATE",
+          "argument": "The finding is accurate that no test accompanies this branch, but C-005 is warning-severity by the constitution's own text, and the change is a two-line defensive guard around an existing stdlib call, not new business logic. The 'branch' is a single hasattr check that either calls a well-documented stdlib method (TextIOWrapper.reconfigure) or no-ops \u2014 there is no new decode algorithm, parsing logic, or state machine to unit test. Testing this meaningfully would require simulating both a real TextIOWrapper stdin and an io.StringIO stdin under a hook harness, which is disproportionate to the risk for a one-line stdlib delegation. A brief inline justification (the comment explaining why hasattr guards the StringIO test path) is present in the diff, which partially satisfies C-005's 'explicit justification for why testing is deferred' alternative.",
+          "evidence": "The changed code is 3 executable lines: `if hasattr(...)`, `sys.stdin.reconfigure(...)`, and the pre-existing `raw_stdin = sys.stdin.read()`. The comment block explicitly documents why the guard exists (test/reentrancy paths use io.StringIO), which is itself the deferral justification C-005 asks for."
+        },
+        {
+          "constraint_id": "C-007",
+          "finding_index": 1,
+          "position": "REBUT",
+          "argument": "The challenger flags that the except block isn't shown in this diff, but that's because this diff is a targeted old_string/new_string edit to only the try-block opening \u2014 it does not touch the except clause at all, meaning the except clause is unchanged from the prior, presumably-already-governed version of this file. C-007 governs changes to the pipeline; an untouched except block is not a change and isn't newly at risk. The comment's claim that decode errors 'fail closed' is describing existing behavior of an unmodified except block, not asserting new behavior this diff introduces. If the pre-existing except block already logs/fails closed (which it must, having passed prior governance under C-001), this diff doesn't alter that guarantee \u2014 it only makes decode failures more likely to be UnicodeDecodeError instances that flow into that same existing handler.",
+          "evidence": "The diff's old_string/new_string pair only spans the try: line through raw_stdin: str = sys.stdin.read(); no except: content appears in either old_string or new_string, confirming the except block is untouched by this specific change."
+        }
+      ],
+      "summary": "The change is a narrowly-scoped, well-justified encoding fix with a clear fail-closed rationale; the C-005 concern is a legitimate but minor warning-severity gap and the C-007 observation rests on scope not actually touched by this diff.",
+      "_tokens": {
+        "input": 8571,
+        "output": 959
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change reconfigures sys.stdin to UTF-8 before reading the governed payload, correcting locale-based (cp1252) corruption on Windows. This strengthens rather than weakens governance fidelity: the diff explicitly documents fail-closed behavior ('undecodable bytes raise, and the except below fails closed') which is consistent with C-007's mandate not to weaken enforcement, and with C-001's prohibition on silent swallowing. The Challenger's C-007 finding (OBSERVATION severity) only asks that the referenced except block still fails closed; the Defender's rebuttal (finding_index 1) correctly notes the diff's old_string/new_string pair spans only the try-block opening through the read call and does not touch the except clause, so no existing error-handling guarantee is altered by this change. The C-005 finding is warning-severity by the constitution's own text and is therefore non-blocking; the Defender's mitigation notes the inline comment documents why the hasattr guard exists (io.StringIO test/reentrancy paths lack reconfigure), which partially satisfies C-005's 'explicit justification for why testing is deferred' alternative. No new imports are introduced (sys is already imported), so C-003 is not implicated. No type annotations are weakened (raw_stdin retains its str annotation), so C-004 is satisfied. No secrets (C-006), no ledger mutation (C-008), and the change stays within the stated encoding-fix task boundary (C-002).",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "SATISFIED",
+          "note": "The comment asserts undecodable bytes raise into an unchanged except that fails closed; the except block is not modified by this diff, so no silent swallowing is introduced."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change is confined to the stdin-read opening of the try block, within the encoding-fix task boundary."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No new imports; sys and hasattr are stdlib already in use."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "raw_stdin: str annotation preserved; no annotations removed or weakened."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "VIOLATED",
+          "note": "Warning-severity only, non-blocking. No test for the reconfigure/StringIO fallback paths, but the inline comment provides partial deferral justification as the Defender argues."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "Pipeline hook change strengthens input fidelity and preserves fail-closed behavior; the except clause is untouched, so enforcement is not weakened."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger interaction in this change."
+        }
+      ],
+      "advisories": [
+        "C-005 (warning): Consider adding a targeted test that exercises both the TextIOWrapper.reconfigure path and the io.StringIO no-op fallback, or record an explicit deferral note, since this is a critical governed hook entry point.",
+        "The correctness of the fail-closed claim depends on the unchanged except block genuinely logging/re-raising a typed error on UnicodeDecodeError. This was not shown in the diff; if a future change touches that except block, C-001 must be re-verified."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 9809,
+        "output": 1541
+      }
+    },
+    "entry_hash": "ee1979366d35d2d3ad5f436d808920baa3ff3695d1904b859311cc177765bcbf"
+  },
+  {
+    "entry_id": "2eb9dcbb-90eb-4af9-8632-9a24d8831c74",
+    "timestamp": "2026-07-30T19:10:50.664014+00:00",
+    "previous_hash": "ee1979366d35d2d3ad5f436d808920baa3ff3695d1904b859311cc177765bcbf",
+    "constitution_hash": "8fe258d5a023a0ecc81f1cc6374156c8670d754529953b2b851e9ada53c60a75",
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "tests\\test_hook_encoding.py",
+      "tool": "Write",
+      "diff_summary": {
+        "file_path": "tests\\test_hook_encoding.py",
+        "change_type": "create",
+        "content": "\"\"\"Tests that the hook decodes its stdin payload as UTF-8, not the locale codec.\n\nClaude Code pipes the hook payload as UTF-8. On Windows sys.stdin defaults to\ncp1252, which silently mangles every non-ASCII character in a governed diff\nbefore the Challenger sees it \u2014 so the pipeline adjudicates corrupted text and\nthe ledger records that corruption as the receipt.\n\nThe hook module uses a hyphen in its filename, so it is imported via importlib\n(same pattern as test_hook.py). Pipeline execution is mocked to prevent real\nAPI calls.\n\nRun: python -m unittest tests.test_hook_encoding -v\n\"\"\"\n\nimport importlib.util\nimport io\nimport json\nimport sys\nimport unittest\nfrom pathlib import Path\nfrom unittest.mock import MagicMock, patch\n\n_REPO_ROOT: Path = Path(__file__).resolve().parent.parent\nif str(_REPO_ROOT) not in sys.path:\n    sys.path.insert(0, str(_REPO_ROOT))\n\n_HOOK_PATH: Path = _REPO_ROOT / \"hooks\" / \"pre-tool-use.py\"\n_spec = importlib.util.spec_from_file_location(\"pre_tool_use\", str(_HOOK_PATH))\n_hook_module = importlib.util.module_from_spec(_spec)\n_spec.loader.exec_module(_hook_module)\n\nmain = _hook_module.main\n\n# An em dash: 3 bytes in UTF-8, which cp1252 would decode as three characters.\n_EM_DASH: str = \"\u2014\"\n_MOJIBAKE: str = _EM_DASH.encode(\"utf-8\").decode(\"cp1252\")\n\n\ndef _cp1252_stdin(payload: str) -> io.TextIOWrapper:\n    \"\"\"A text stdin carrying UTF-8 bytes but defaulting to the cp1252 codec.\n\n    This reproduces the Windows console the hook actually runs under.\n    \"\"\"\n    return io.TextIOWrapper(\n        io.BytesIO(payload.encode(\"utf-8\")), encoding=\"cp1252\"\n    )\n\n\nclass StdinEncodingTests(unittest.TestCase):\n    def _run(self, stdin_obj: object) -> tuple[int, str, MagicMock]:\n        mock_stdout: io.StringIO = io.StringIO()\n        with patch.object(_hook_module, \"run_governance_pipeline\") as pipeline:\n            pipeline.return_value = {\"verdict\": \"PASS\"}\n            with patch.object(sys, \"stdin\", stdin_obj), \\\n                 patch.object(sys, \"stdout\", mock_stdout):\n                code: int = main()\n        return code, mock_stdout.getvalue(), pipeline\n\n    def test_utf8_survives_a_cp1252_stdin(self) -> None:\n        \"\"\"The em dash must reach the pipeline intact, not as mojibake.\"\"\"\n        payload: str = json.dumps({\n            \"tool_name\": \"Write\",\n            \"tool_input\": {\n                \"file_path\": \"test.py\",\n                \"content\": f\"# fails closed {_EM_DASH} blocking every edit\",\n            },\n        })\n        code, _, pipeline = self._run(_cp1252_stdin(payload))\n\n        self.assertEqual(code, 0)\n        pipeline.assert_called_once()\n        tool_input: dict = pipeline.call_args[0][1]\n        content: str = tool_input[\"content\"]\n        self.assertIn(_EM_DASH, content)\n        self.assertNotIn(_MOJIBAKE, content)\n\n    def test_stringio_stdin_still_works(self) -> None:\n        \"\"\"The no-op fallback: io.StringIO has no reconfigure and is already text.\"\"\"\n        payload: str = json.dumps({\n            \"tool_name\": \"Write\",\n            \"tool_input\": {\n                \"file_path\": \"test.py\",\n                \"content\": f\"plain {_EM_DASH} text\",\n            },\n        })\n        code, _, pipeline = self._run(io.StringIO(payload))\n\n        self.assertEqual(code, 0)\n        pipeline.assert_called_once()\n        self.assertIn(_EM_DASH, pipeline.call_args[0][1][\"content\"])\n\n    def test_undecodable_bytes_fail_closed(self) -> None:\n        \"\"\"Strict decoding: a payload Bench cannot read is blocked, not adjudicated.\"\"\"\n        bad: io.TextIOWrapper = io.TextIOWrapper(\n            io.BytesIO(b'{\"tool_name\": \"Write\", \"tool_input\": {\"content\": \"\\xff\\xfe\"}}'),\n            encoding=\"cp1252\",\n        )\n        code, output, pipeline = self._run(bad)\n\n        self.assertEqual(code, 0)\n        pipeline.assert_not_called()\n        resp: dict = json.loads(output)\n        self.assertEqual(\n            resp[\"hookSpecificOutput\"][\"permissionDecision\"], \"deny\"\n        )\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n",
+        "formatted_diff": "+\"\"\"Tests that the hook decodes its stdin payload as UTF-8, not the locale codec.\n+\n+Claude Code pipes the hook payload as UTF-8. On Windows sys.stdin defaults to\n+cp1252, which silently mangles every non-ASCII character in a governed diff\n+before the Challenger sees it \u2014 so the pipeline adjudicates corrupted text and\n+the ledger records that corruption as the receipt.\n+\n+The hook module uses a hyphen in its filename, so it is imported via importlib\n+(same pattern as test_hook.py). Pipeline execution is mocked to prevent real\n+API calls.\n+\n+Run: python -m unittest tests.test_hook_encoding -v\n+\"\"\"\n+\n+import importlib.util\n+import io\n+import json\n+import sys\n+import unittest\n+from pathlib import Path\n+from unittest.mock import MagicMock, patch\n+\n+_REPO_ROOT: Path = Path(__file__).resolve().parent.parent\n+if str(_REPO_ROOT) not in sys.path:\n+    sys.path.insert(0, str(_REPO_ROOT))\n+\n+_HOOK_PATH: Path = _REPO_ROOT / \"hooks\" / \"pre-tool-use.py\"\n+_spec = importlib.util.spec_from_file_location(\"pre_tool_use\", str(_HOOK_PATH))\n+_hook_module = importlib.util.module_from_spec(_spec)\n+_spec.loader.exec_module(_hook_module)\n+\n+main = _hook_module.main\n+\n+# An em dash: 3 bytes in UTF-8, which cp1252 would decode as three characters.\n+_EM_DASH: str = \"\u2014\"\n+_MOJIBAKE: str = _EM_DASH.encode(\"utf-8\").decode(\"cp1252\")\n+\n+\n+def _cp1252_stdin(payload: str) -> io.TextIOWrapper:\n+    \"\"\"A text stdin carrying UTF-8 bytes but defaulting to the cp1252 codec.\n+\n+    This reproduces the Windows console the hook actually runs under.\n+    \"\"\"\n+    return io.TextIOWrapper(\n+        io.BytesIO(payload.encode(\"utf-8\")), encoding=\"cp1252\"\n+    )\n+\n+\n+class StdinEncodingTests(unittest.TestCase):\n+    def _run(self, stdin_obj: object) -> tuple[int, str, MagicMock]:\n+        mock_stdout: io.StringIO = io.StringIO()\n+        with patch.object(_hook_module, \"run_governance_pipeline\") as pipeline:\n+            pipeline.return_value = {\"verdict\": \"PASS\"}\n+            with patch.object(sys, \"stdin\", stdin_obj), \\\n+                 patch.object(sys, \"stdout\", mock_stdout):\n+                code: int = main()\n+        return code, mock_stdout.getvalue(), pipeline\n+\n+    def test_utf8_survives_a_cp1252_stdin(self) -> None:\n+        \"\"\"The em dash must reach the pipeline intact, not as mojibake.\"\"\"\n+        payload: str = json.dumps({\n+            \"tool_name\": \"Write\",\n+            \"tool_input\": {\n+                \"file_path\": \"test.py\",\n+                \"content\": f\"# fails closed {_EM_DASH} blocking every edit\",\n+            },\n+        })\n+        code, _, pipeline = self._run(_cp1252_stdin(payload))\n+\n+        self.assertEqual(code, 0)\n+        pipeline.assert_called_once()\n+        tool_input: dict = pipeline.call_args[0][1]\n+        content: str = tool_input[\"content\"]\n+        self.assertIn(_EM_DASH, content)\n+        self.assertNotIn(_MOJIBAKE, content)\n+\n+    def test_stringio_stdin_still_works(self) -> None:\n+        \"\"\"The no-op fallback: io.StringIO has no reconfigure and is already text.\"\"\"\n+        payload: str = json.dumps({\n+            \"tool_name\": \"Write\",\n+            \"tool_input\": {\n+                \"file_path\": \"test.py\",\n+                \"content\": f\"plain {_EM_DASH} text\",\n+            },\n+        })\n+        code, _, pipeline = self._run(io.StringIO(payload))\n+\n+        self.assertEqual(code, 0)\n+        pipeline.assert_called_once()\n+        self.assertIn(_EM_DASH, pipeline.call_args[0][1][\"content\"])\n+\n+    def test_undecodable_bytes_fail_closed(self) -> None:\n+        \"\"\"Strict decoding: a payload Bench cannot read is blocked, not adjudicated.\"\"\"\n+        bad: io.TextIOWrapper = io.TextIOWrapper(\n+            io.BytesIO(b'{\"tool_name\": \"Write\", \"tool_input\": {\"content\": \"\\xff\\xfe\"}}'),\n+            encoding=\"cp1252\",\n+        )\n+        code, output, pipeline = self._run(bad)\n+\n+        self.assertEqual(code, 0)\n+        pipeline.assert_not_called()\n+        resp: dict = json.loads(output)\n+        self.assertEqual(\n+            resp[\"hookSpecificOutput\"][\"permissionDecision\"], \"deny\"\n+        )\n+\n+\n+if __name__ == \"__main__\":\n+    unittest.main()\n"
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 11637,
+        "output": 337
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The change creates a new test file (tests/test_hook_encoding.py) that verifies the PreToolUse hook decodes stdin as UTF-8 and fails closed on undecodable bytes. The Challenger returned CLEAR with no findings and the Defender confirmed. My independent review of the full constitution confirms no veto-severity constraint is violated. C-003: all imports (importlib, io, json, sys, unittest, pathlib, unittest.mock) are Python stdlib, so no undeclared dependency is introduced. C-004: the file adds precise type annotations throughout (e.g. tuple[int, str, MagicMock], io.StringIO, dict); no existing annotations are removed or weakened. C-007: this is a test that exercises hook behavior via a mocked pipeline (run_governance_pipeline is patched to prevent real API calls); it neither modifies the governance pipeline nor weakens enforcement \u2014 it strengthens verification by asserting the fail-closed (deny) path on undecodable input. C-008 is not applicable; no ledger code is touched. C-001 is not applicable; the tests contain no catch blocks that swallow errors. C-002: creating a test file is within a coherent task boundary and touches no unrelated production code.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No exception-handling logic introduced that could swallow errors silently."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "A single new test file is created; no unrelated production files modified."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "SATISFIED",
+          "note": "All imports are Python standard library; no new dependency added."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "Type annotations are added and precise; none removed or weakened."
+        },
+        {
+          "constraint_id": "C-005",
+          "disposition": "SATISFIED",
+          "note": "This change is itself added test coverage for hook encoding behavior."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No secrets or credentials present."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "SATISFIED",
+          "note": "Test mocks the pipeline and asserts fail-closed deny behavior; strengthens rather than weakens enforcement, and does not modify pipeline code."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger entries or hash-chain logic touched."
+        }
+      ],
+      "advisories": [
+        "The tests assert specific hook behaviors (UTF-8 stdin decoding, fail-closed deny on undecodable bytes). If hooks/pre-tool-use.py does not yet implement strict UTF-8 reconfiguration and the fail-closed path, these tests will fail on execution. Confirm the hook implementation satisfies these assertions, or land the corresponding hook change alongside this test.",
+        "The tests access pipeline.call_args[0][1] positionally, assuming run_governance_pipeline's second positional argument is tool_input. This couples the test to the hook's call signature; a signature change would require updating these assertions."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 12002,
+        "output": 1537
+      }
+    },
+    "entry_hash": "6192fc969db7fbf19c0c1b71f0a98730359c64c8b540410146122a50c0c56ea3"
+  },
+  {
+    "entry_id": "114743f6-2b6f-4f8c-97ba-494c96485278",
+    "timestamp": "2026-07-30T19:12:22.660156+00:00",
+    "previous_hash": "6192fc969db7fbf19c0c1b71f0a98730359c64c8b540410146122a50c0c56ea3",
+    "constitution_hash": "8fe258d5a023a0ecc81f1cc6374156c8670d754529953b2b851e9ada53c60a75",
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "tests\\test_hook_encoding.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "tests\\test_hook_encoding.py",
+        "change_type": "modify",
+        "old_string": "    def test_utf8_survives_a_cp1252_stdin(self) -> None:\n        \"\"\"The em dash must reach the pipeline intact, not as mojibake.\"\"\"\n        payload: str = json.dumps({\n            \"tool_name\": \"Write\",\n            \"tool_input\": {\n                \"file_path\": \"test.py\",\n                \"content\": f\"# fails closed {_EM_DASH} blocking every edit\",\n            },\n        })",
+        "new_string": "    def test_utf8_survives_a_cp1252_stdin(self) -> None:\n        \"\"\"The em dash must reach the pipeline intact, not as mojibake.\n\n        ensure_ascii=False is load-bearing. Python's json.dumps escapes\n        non-ASCII to \\\\uXXXX by default, which makes the payload pure ASCII and\n        the decoding bug unreachable \u2014 this test passes with or without the fix\n        if you leave the default on. Node's JSON.stringify, which is what\n        actually feeds this hook, emits raw UTF-8. Send raw UTF-8 here so the\n        test genuinely fails against the locale-decoded stdin it guards.\n        \"\"\"\n        payload: str = json.dumps({\n            \"tool_name\": \"Write\",\n            \"tool_input\": {\n                \"file_path\": \"test.py\",\n                \"content\": f\"# fails closed {_EM_DASH} blocking every edit\",\n            },\n        }, ensure_ascii=False)"
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 8154,
+        "output": 19
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "This change modifies a single test file (tests/test_hook_encoding.py) to add ensure_ascii=False to a json.dumps call and documents why via an expanded docstring. The change makes the test genuinely exercise the UTF-8 decoding path it guards rather than passing trivially with ASCII-escaped output. Evaluating against the full constitution: C-001 (no silent error swallowing) is not applicable \u2014 no catch blocks are touched. C-002 (scope boundary) is satisfied \u2014 the change is confined to the test file it targets and introduces no cross-file modifications. C-003 (dependency declaration) is satisfied \u2014 json is stdlib and already imported; no new dependencies. C-004 (type safety) is satisfied \u2014 the payload variable retains its 'str' annotation and no annotations are removed or weakened. C-006 (no secrets) is not applicable \u2014 the em dash content is test data, no credentials. C-007 (governance pipeline integrity) is not applicable \u2014 test_hook_encoding.py is a test, not a pipeline enforcement file (challenger/defender/oracle/ledger/constitution); moreover the change strengthens rather than weakens verification by making the test actually fail against the bug it guards. C-008 (ledger immutability) is not applicable \u2014 no ledger code touched. The Challenger returned CLEAR with no findings and the Defender confirmed. My independent review of constraints the Challenger may have missed surfaces no violation; the change actually improves test rigor.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No error-handling code modified."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change confined to the single targeted test file; no scope creep."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "SATISFIED",
+          "note": "json is stdlib and already imported; no new dependency."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "The 'payload: str' annotation is preserved; no annotations weakened."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Test payload contains no secrets or credentials."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Test file, not a pipeline enforcement component; change strengthens test fidelity."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No ledger entries touched."
+        }
+      ],
+      "advisories": [],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 8519,
+        "output": 982
+      }
+    },
+    "entry_hash": "a2da4f59b040e11c8cd25c9b75f2f953a8ef559789ed2f6173d27112d526acfb"
+  },
+  {
+    "entry_id": "64e9f6ef-0d1a-4316-8442-7a91138f8c49",
+    "timestamp": "2026-07-30T19:13:01.251739+00:00",
+    "previous_hash": "a2da4f59b040e11c8cd25c9b75f2f953a8ef559789ed2f6173d27112d526acfb",
+    "constitution_hash": "8fe258d5a023a0ecc81f1cc6374156c8670d754529953b2b851e9ada53c60a75",
+    "verdict": "PASS",
+    "pipeline_error": false,
+    "change": {
+      "file": "utils\\api.py",
+      "tool": "Edit",
+      "diff_summary": {
+        "file_path": "utils\\api.py",
+        "change_type": "modify",
+        "old_string": "# coincide (as they do for claude-sonnet-5). A wrong slug would make the stage\n# return API_ERROR, which the runner fails open into a PASS.",
+        "new_string": "# coincide (as they do for claude-sonnet-5). A wrong slug would make the stage\n# return API_ERROR, which the stage reports as PIPELINE_ERROR and the runner\n# fails CLOSED on, returning a VETO. (An earlier version of this comment said\n# the runner fails open into a PASS; it does not, and misstating that in the\n# fail-safe direction is exactly the sort of thing C-001 exists to prevent.)"
+      }
+    },
+    "challenger": {
+      "status": "CLEAR",
+      "findings": [],
+      "_tokens": {
+        "input": 7826,
+        "output": 19
+      }
+    },
+    "defender": {
+      "status": "CONFIRM_CLEAR",
+      "rebuttals": [],
+      "summary": "Challenger found no issues.",
+      "_tokens": {
+        "input": 0,
+        "output": 0
+      }
+    },
+    "oracle": {
+      "verdict": "PASS",
+      "reasoning": "The proposed change is a comment-only edit in utils/api.py that corrects a previously inaccurate statement about failure behavior (from 'the runner fails open into a PASS' to 'fails CLOSED... returning a VETO'). No executable code, type annotations, imports, or ledger logic are touched. The Challenger returned CLEAR with no findings and the Defender confirmed CLEAR. Evaluating against the constitution independently: C-001 (silent error swallowing) is not only satisfied but the edit reinforces its spirit by correcting documentation about fail-safe direction. C-002 is satisfied since the change is confined to the single stated file utils/api.py. C-003 introduces no imports. C-004 removes no type annotations. C-006 introduces no secrets. C-007 is not directly triggered because utils/api.py is not in pipeline/, ledger/, or hooks/, and even so the edit strengthens rather than weakens documented enforcement understanding. C-008 is untouched.",
+      "constraint_citations": [
+        {
+          "constraint_id": "C-001",
+          "disposition": "SATISFIED",
+          "note": "Comment-only change; no catch blocks altered. The edit actually clarifies fail-closed behavior, aligning with C-001's intent."
+        },
+        {
+          "constraint_id": "C-002",
+          "disposition": "SATISFIED",
+          "note": "Change confined to the single stated file utils/api.py; no scope creep."
+        },
+        {
+          "constraint_id": "C-003",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No imports or dependencies added."
+        },
+        {
+          "constraint_id": "C-004",
+          "disposition": "SATISFIED",
+          "note": "No type annotations added, removed, or weakened; comment text only."
+        },
+        {
+          "constraint_id": "C-006",
+          "disposition": "NOT_APPLICABLE",
+          "note": "No credentials or secrets present."
+        },
+        {
+          "constraint_id": "C-007",
+          "disposition": "NOT_APPLICABLE",
+          "note": "utils/api.py is not part of pipeline/, ledger/, or hooks/. The edit corrects documentation and does not weaken enforcement."
+        },
+        {
+          "constraint_id": "C-008",
+          "disposition": "NOT_APPLICABLE",
+          "note": "Ledger untouched."
+        }
+      ],
+      "advisories": [
+        "The corrected comment asserts that an API_ERROR is reported as PIPELINE_ERROR and the runner fails CLOSED into a VETO. This verdict does not independently verify runner.py's actual behavior from this diff alone; the author should ensure the new comment matches the real fail-closed logic in the runner, since an inaccurate fail-safe claim in the opposite direction would be equally undesirable."
+      ],
+      "remediation": null,
+      "confidence": "HIGH",
+      "_tokens": {
+        "input": 8191,
+        "output": 1211
+      }
+    },
+    "entry_hash": "b5237458509640890709b6f0c83b2f98df41b5268d981166dff9b0409691607d"
+  },
+  {
+    "entry_id": "dd0ab5dd-4c96-409d-8765-d2c2d15093e4",
+    "timestamp": "2026-07-30T19:13:09.370397+00:00",
+    "previous_hash": "b5237458509640890709b6f0c83b2f98df41b5268d981166dff9b0409691607d",
+    "constitution_hash": "8fe258d5a023a0ecc81f1cc6374156c8670d754529953b2b851e9ada53c60a75",
+    "verdict": "VETO",
+    "pipeline_error": true,
+    "change": {
+      "file": "t.py",
+      "tool": "Write",
+      "diff_summary": {
+        "file_path": "t.py",
+        "change_type": "create",
+        "content": "x",
+        "formatted_diff": "+x"
+      }
+    },
+    "challenger": {
+      "status": "PIPELINE_ERROR",
+      "error": {
+        "error": "API_ERROR",
+        "detail": "bad slug"
+      }
+    },
+    "defender": {},
+    "oracle": {},
+    "entry_hash": "6ec1f5cdce3b5b8f6e9a9224aa0fa127982e26009f7a42cb2562091b5eb9f23e"
   }
 ]
