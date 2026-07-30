@@ -73,6 +73,64 @@ class LoadProjectContextTests(unittest.TestCase):
         self.assertIn("[TRUNCATED]", result)
         self.assertLess(len(result), runner._MAX_CONTEXT_CHARS + 1000)
 
+    def test_symlinked_claude_md_is_refused(self) -> None:
+        """A governed repo is untrusted input, and git can carry a symlink.
+
+        CLAUDE.md committed as a link to a file outside the project would
+        otherwise be followed and its contents shipped to a remote model on
+        every governed edit.
+        """
+        self._patch_root()
+        secret: str = os.path.join(self._tmp, "secret.txt")
+        with open(secret, "w", encoding="utf-8") as handle:
+            handle.write("BEGIN PRIVATE KEY sk-super-secret")
+
+        link: str = os.path.join(self._tmp, "CLAUDE.md")
+        try:
+            os.symlink(secret, link)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"cannot create symlinks in this environment: {exc}")
+
+        stderr: io.StringIO = io.StringIO()
+        with patch.object(sys, "stderr", stderr):
+            result: str = runner._load_project_context()
+
+        self.assertEqual(result, "")
+        self.assertNotIn("sk-super-secret", result)
+        self.assertIn("symlink", stderr.getvalue())
+
+    def test_read_is_bounded_not_whole_file(self) -> None:
+        """The cap is enforced while reading, not after materializing the file.
+
+        Slicing after read_text() would let an oversized CLAUDE.md exhaust
+        memory or stall every governed edit despite the advertised limit.
+        """
+        self._patch_root()
+        with open(
+            os.path.join(self._tmp, "CLAUDE.md"), "w", encoding="utf-8"
+        ) as handle:
+            handle.write("z" * 50_000)
+
+        requested: list = []
+        real_open = open
+
+        def _spy_open(*args, **kwargs):
+            handle = real_open(*args, **kwargs)
+            real_read = handle.read
+
+            def _read(size=-1):
+                requested.append(size)
+                return real_read(size)
+
+            handle.read = _read
+            return handle
+
+        with patch("builtins.open", _spy_open):
+            result: str = runner._load_project_context()
+
+        self.assertEqual(requested, [runner._MAX_CONTEXT_CHARS + 1])
+        self.assertIn("[TRUNCATED]", result)
+
     def test_unreadable_file_degrades_loudly_not_silently(self) -> None:
         """C-001, and a hostile CLAUDE.md must not become a denial vector."""
         self._patch_root()
@@ -81,7 +139,7 @@ class LoadProjectContextTests(unittest.TestCase):
             handle.write("unreadable")
 
         stderr: io.StringIO = io.StringIO()
-        with patch.object(Path, "read_text", side_effect=OSError("locked")), \
+        with patch("builtins.open", side_effect=OSError("locked")), \
              patch.object(sys, "stderr", stderr):
             result: str = runner._load_project_context()
 

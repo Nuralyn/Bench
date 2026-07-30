@@ -527,17 +527,28 @@ def _claude_cli_call(
         cmd += ["--system-prompt-file", sys_prompt_path]
 
     try:
-        completed = subprocess.run(
-            cmd,
-            input=body,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=timeout,
-            env=child_env,
-            shell=False,
-        )
+        # Run from an isolated, empty directory. Claude Code loads project
+        # memory (CLAUDE.md) and project settings from its working directory,
+        # and this child would otherwise inherit the governed project's. That
+        # would hand the claude_code provider an unframed, untruncated copy of
+        # the very file pipeline/runner.py passes in framed and capped, while
+        # the API providers see only the framed copy - so content past the cap,
+        # or instructions the framing disclaims, could move a verdict on one
+        # backend and not another. The judge's evidence must not depend on the
+        # transport, so the implicit load is removed and the explicit one kept.
+        with tempfile.TemporaryDirectory() as work_dir:
+            completed = subprocess.run(
+                cmd,
+                input=body,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=timeout,
+                env=child_env,
+                shell=False,
+                cwd=work_dir,
+            )
     except subprocess.TimeoutExpired as e:
         raise _ProviderError(
             f"claude_code: `claude` timed out after {timeout}s"
