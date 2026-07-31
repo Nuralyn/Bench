@@ -353,8 +353,40 @@ def _load_entry_files(entries_dir: Path, *, strict: bool) -> list[dict]:
             )
             continue
 
+        # On the write path, being parseable is not enough. An entry with a
+        # missing or mismatched hash contributes nothing to compute_tips, so a
+        # single `{}` file would leave no tips and the next receipt would be
+        # written with an empty parent list — extending a corrupt ledger with
+        # another malformed root instead of refusing. Validate before building
+        # on it. The read path stays lenient so a human can still inspect a
+        # damaged ledger; verify.py is what rejects it authoritatively.
+        if strict:
+            problem: str = _entry_defect(data, entry_file)
+            if problem:
+                raise LedgerReadError(
+                    f"refusing to append onto an invalid ledger: {problem}"
+                )
+
         entries.append(data)
     return entries
+
+
+def _entry_defect(entry: dict, entry_file: Path) -> str:
+    """Describe why ``entry`` is unusable as a parent, or "" when it is sound.
+
+    Deliberately narrow: it checks the properties an append depends on — that
+    the entry has an identity, that the identity is authentic, and that the
+    file claims the same identity it contains. Full chain validation is
+    ``verify.py``'s job and is not duplicated here.
+    """
+    stored: Any = entry.get("entry_hash")
+    if not isinstance(stored, str) or not stored:
+        return f"{entry_file} has no string entry_hash"
+    if compute_entry_hash(entry) != stored:
+        return f"{entry_file} entry_hash does not match its contents"
+    if entry_file.stem != stored:
+        return f"{entry_file} filename does not match its entry_hash"
+    return ""
 
 
 def compute_tips(entries: list[dict]) -> list[str]:
@@ -495,9 +527,18 @@ def append_entry(
     # A list of every current tip, so a fork left by a git merge is reconciled
     # by the next governed edit instead of needing a separate command. Sorted,
     # so the hash does not depend on filesystem iteration order.
-    previous_hash: str | list[str] = (
-        compute_tips(existing) if existing else _GENESIS_MARKER
-    )
+    previous_hash: str | list[str] = _GENESIS_MARKER
+    if existing:
+        previous_hash = compute_tips(existing)
+        if not previous_hash:
+            # A non-empty ledger always has at least one tip; a cycle is
+            # impossible because a parent hash must exist before a child can
+            # commit to it. Reaching here means the ledger is incoherent, and
+            # writing an empty parent list would create a second root.
+            raise LedgerReadError(
+                "refusing to append: ledger has entries but no tip, so the "
+                "new entry would have no parent"
+            )
 
     change_in: dict = pipeline_result.get("change") or {}
     timestamp: str = datetime.now(timezone.utc).isoformat()

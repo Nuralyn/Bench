@@ -23,7 +23,9 @@ if str(_REPO_ROOT) not in sys.path:
 import ledger.verify as verify_module  # noqa: E402
 from ledger.chain import (  # noqa: E402
     ENTRIES_DIRNAME,
+    LedgerReadError,
     append_entry,
+    compute_entry_hash,
     compute_tips,
     load_ledger,
     resolve_entries_dir,
@@ -191,6 +193,112 @@ class LedgerDagTests(unittest.TestCase):
         self.assertIn(
             result["failure_type"], ("MISSING_PARENT", "ORPHAN_ENTRY")
         )
+
+
+class MalformedLinkTests(unittest.TestCase):
+    """A link that names nothing, or names a non-string, is not a valid link."""
+
+    def setUp(self) -> None:
+        self._tmp: str = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self._tmp, True)
+        self._ledger: str = os.path.join(self._tmp, "bench-ledger.json")
+        self._entries: Path = Path(resolve_entries_dir(self._ledger))
+
+    def _rewrite(self, entry: dict, previous_hash: object) -> None:
+        """Replace an entry's link and re-file it under its new hash."""
+        (self._entries / f"{entry['entry_hash']}.json").unlink()
+        entry = dict(entry)
+        entry["previous_hash"] = previous_hash
+        entry["entry_hash"] = compute_entry_hash(entry)
+        (self._entries / f"{entry['entry_hash']}.json").write_text(
+            json.dumps(entry, indent=2), encoding="utf-8"
+        )
+
+    def test_empty_parent_list_is_not_a_genesis(self) -> None:
+        entry: dict = append_entry(_result(), path=self._ledger)
+        self._rewrite(entry, [])
+
+        result: dict = verify_chain(self._ledger)
+        self.assertFalse(result["valid"])
+        self.assertEqual(result["failure_type"], "SCHEMA_ERROR")
+
+    def test_non_string_parent_element_is_rejected(self) -> None:
+        first: dict = append_entry(_result("one.py"), path=self._ledger)
+        second: dict = append_entry(_result("two.py"), path=self._ledger)
+        self._rewrite(second, [first["entry_hash"], 123])
+
+        result: dict = verify_chain(self._ledger)
+        self.assertFalse(result["valid"])
+        self.assertEqual(result["failure_type"], "SCHEMA_ERROR")
+
+    def test_empty_string_parent_is_rejected(self) -> None:
+        entry: dict = append_entry(_result(), path=self._ledger)
+        self._rewrite(entry, "")
+
+        result: dict = verify_chain(self._ledger)
+        self.assertFalse(result["valid"])
+        self.assertEqual(result["failure_type"], "SCHEMA_ERROR")
+
+
+class StrictWritePathTests(unittest.TestCase):
+    """An append must not build on entry files it has not validated."""
+
+    def setUp(self) -> None:
+        self._tmp: str = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self._tmp, True)
+        self._ledger: str = os.path.join(self._tmp, "bench-ledger.json")
+        self._entries: Path = Path(resolve_entries_dir(self._ledger))
+        self._entries.mkdir(parents=True, exist_ok=True)
+
+    def test_empty_object_entry_file_blocks_the_append(self) -> None:
+        """The corruption path: `{}` yields no tips, so the next entry would
+        have been written with an empty parent list and become a second root."""
+        (self._entries / "junk.json").write_text("{}", encoding="utf-8")
+
+        with self.assertRaises(LedgerReadError):
+            append_entry(_result(), path=self._ledger)
+
+    def test_hash_mismatch_in_an_existing_entry_blocks_the_append(self) -> None:
+        entry: dict = append_entry(_result(), path=self._ledger)
+        target: Path = self._entries / f"{entry['entry_hash']}.json"
+        tampered: dict = json.loads(target.read_text(encoding="utf-8"))
+        tampered["verdict"] = "VETO"
+        target.write_text(json.dumps(tampered, indent=2), encoding="utf-8")
+
+        with self.assertRaises(LedgerReadError):
+            append_entry(_result(), path=self._ledger)
+
+    def test_misnamed_entry_file_blocks_the_append(self) -> None:
+        entry: dict = append_entry(_result(), path=self._ledger)
+        (self._entries / f"{entry['entry_hash']}.json").rename(
+            self._entries / "wrong-name.json"
+        )
+
+        with self.assertRaises(LedgerReadError):
+            append_entry(_result(), path=self._ledger)
+
+
+class SummaryEndpointTests(unittest.TestCase):
+    """Endpoints must come from the graph, not from iteration order."""
+
+    def setUp(self) -> None:
+        self._tmp: str = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self._tmp, True)
+        self._ledger: str = os.path.join(self._tmp, "bench-ledger.json")
+
+    def test_genesis_and_latest_are_the_real_endpoints(self) -> None:
+        first: dict = append_entry(_result("one.py"), path=self._ledger)
+        append_entry(_result("two.py"), path=self._ledger)
+        last: dict = append_entry(_result("three.py"), path=self._ledger)
+
+        result: dict = verify_chain(self._ledger)
+        self.assertTrue(result["valid"], result.get("message"))
+        # Filename order is hash order, so these only agree if the endpoints
+        # are derived from the DAG rather than from insertion order.
+        self.assertEqual(result["genesis_hash"], first["entry_hash"])
+        self.assertEqual(result["latest_hash"], last["entry_hash"])
+        self.assertEqual(result["first_entry"], first["timestamp"])
+        self.assertEqual(result["last_entry"], last["timestamp"])
 
 
 class ConstantAgreementTests(unittest.TestCase):
