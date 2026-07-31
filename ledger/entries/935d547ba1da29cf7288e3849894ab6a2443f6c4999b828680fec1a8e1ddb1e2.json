@@ -1,0 +1,146 @@
+{
+  "entry_id": "2807f5b2-510f-4c91-9aa0-1b000fa28411",
+  "timestamp": "2026-07-31T04:20:57.383266+00:00",
+  "previous_hash": [
+    "6ab1f50df61ac410bb55726d38dbbb106ed33a5ddfb3bf17f5256826e48411c2"
+  ],
+  "constitution_hash": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3",
+  "constitution_sources": [
+    {
+      "layer": "core",
+      "path": "C:\\Users\\mstar\\Bench\\bench.json",
+      "sha256": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3"
+    }
+  ],
+  "verdict": "PASS",
+  "pipeline_error": false,
+  "change": {
+    "file": "ledger\\retire.py",
+    "tool": "Write",
+    "diff_summary": {
+      "file_path": "ledger\\retire.py",
+      "change_type": "create",
+      "content": "\"\"\"Chain retirement: the one bounded exception C-008 allows to immutability.\n\nC-008 forbids editing, reordering, or removing an individual ledger entry under\nall circumstances. It permits retiring a *whole* chain, and only when that chain\ncontains content which must not be published. Retirement is not deletion: every\nentry is preserved in an archive that is verified *before* the live chain is\nremoved, and a successor chain opens with an anchor entry recording where the\npredecessor went, so custody is documented rather than broken.\n\nA storage-format change is NOT a permitted trigger. That case came up concretely\nduring the ledger-DAG work (PR #22), where retirement was considered as a\nmigration path and had to be rejected; freezing the legacy array was the answer\ninstead. The trigger is not machine-checkable, so this module does not pretend\nto check it. It states the rule at the prompt, requires the operator to type a\nsubstantive reason, and records that reason verbatim in the anchor.\n\nNothing in the pipeline calls this module. Retirement is operator-initiated,\nnever agent-initiated (C-008(a)), which is what the environment and TTY guards\nin ``confirm_interactively`` exist to enforce. Those guards raise the bar; they\nare not cryptographic proof, and the anchor's recorded ``human_decision`` is\nwhat an auditor actually relies on.\n\nThe shape this leaves behind matters and is easy to get wrong. ``append_entry``\nwrites only to ``entries/<hash>.json``; ``bench-ledger.json`` is frozen and\n``ledger-meta.json`` is frozen with it. A successor chain is therefore\n``entries/`` *alone*, with neither of those files. Every segment is handled as\noptional here for exactly that reason: the first retirement finds all three, and\nevery retirement after it finds only the entries directory.\n\"\"\"\n\nimport os\nimport shutil\nimport sys\nfrom collections.abc import Callable, Mapping\nfrom datetime import datetime, timezone\nfrom pathlib import Path\nfrom typing import Any\n\nfrom ledger.chain import (\n    ANCHOR_VERDICT,\n    ENTRIES_DIRNAME,\n    META_FILENAME,\n    append_entry,\n    resolve_ledger_path,\n)\nfrom ledger.verify import verify_chain\nfrom pipeline.constitution import (\n    ConstitutionError,\n    load_governing_constitution,\n)\n[BENCH TRUNCATION: 69 lines omitted]\nclass RetirementError(RuntimeError):\n[BENCH TRUNCATION: 9 lines omitted]\ndef _utc_now() -> datetime:\n[BENCH TRUNCATION: 3 lines omitted]\ndef _present_segments(ledger_path: str) -> list[str]:\n[BENCH TRUNCATION: 18 lines omitted]\ndef plan_retirement(ledger_path: str | None = None) -> dict:\n[BENCH TRUNCATION: 53 lines omitted]\ndef render_confirmation(facts: dict, archive_root: str) -> str:\n[BENCH TRUNCATION: 30 lines omitted]\ndef confirm_interactively(\n[BENCH TRUNCATION: 56 lines omitted]\ndef build_anchor_summary(\n[BENCH TRUNCATION: 42 lines omitted]\ndef validate_anchor_summary(summary: Any) -> list[str]:\n[BENCH TRUNCATION: 45 lines omitted]\ndef validate_anchor(entry: Any) -> list[str]:\n[BENCH TRUNCATION: 27 lines omitted]\ndef _archive_root(archive_dir: str, now: datetime) -> Path:\n[BENCH TRUNCATION: 10 lines omitted]\ndef _copy_segments(ledger_path: str, destination: Path, segments: list[str]) -> None:\n[BENCH TRUNCATION: 16 lines omitted]\ndef _remove_segments(ledger_path: str, segments: list[str]) -> None:\n[BENCH TRUNCATION: 10 lines omitted]\ndef _project_relative(ledger_path: str) -> str:\n[BENCH TRUNCATION: 11 lines omitted]\n    except (OSError, ValueError) as exc:\n[BENCH TRUNCATION: 11 lines omitted]\ndef _load_constitution() -> tuple[str, list, Any]:\n[BENCH TRUNCATION: 8 lines omitted]\n    except ConstitutionError as exc:\n[BENCH TRUNCATION: 7 lines omitted]\ndef execute_retirement(\n[BENCH TRUNCATION: 36 lines omitted]\n            f\"content that triggers C-008's exception, got \"\n[BENCH TRUNCATION: 39 lines omitted]\n    except OSError as exc:\n[BENCH TRUNCATION: 46 lines omitted]\n    except OSError as exc:\n[BENCH TRUNCATION: 49 lines omitted]\ndef audit_retirement(\n[BENCH TRUNCATION: 37 lines omitted]\n\n    expected_tip: str = str(summary[\"predecessor_tip_hash\"])\n    expected_entries: int = int(summary[\"predecessor_entries\"])\n    found_tips: Any = result.get(\"tips\", [])\n    found_entries: int = int(result.get(\"entries\", -1))\n\n    tip_ok: bool = found_tips == [expected_tip]\n    count_ok: bool = found_entries == expected_entries\n\n    return {\n        \"ok\": tip_ok and count_ok,\n        \"archive_path\": recorded_path,\n        \"archive_ledger\": resolved,\n        \"expected_tip\": expected_tip,\n        \"found_tips\": found_tips,\n        \"tip_matches\": tip_ok,\n        \"expected_entries\": expected_entries,\n        \"found_entries\": found_entries,\n        \"count_matches\": count_ok,\n    }\n[BENCH TRUNCATION: original_lines=723, truncated_lines=91, preserved=first50+signatures+exception_handlers+last20]\n",
+      "formatted_diff": "+\"\"\"Chain retirement: the one bounded exception C-008 allows to immutability.\n+\n+C-008 forbids editing, reordering, or removing an individual ledger entry under\n+all circumstances. It permits retiring a *whole* chain, and only when that chain\n+contains content which must not be published. Retirement is not deletion: every\n+entry is preserved in an archive that is verified *before* the live chain is\n+removed, and a successor chain opens with an anchor entry recording where the\n+predecessor went, so custody is documented rather than broken.\n+\n+A storage-format change is NOT a permitted trigger. That case came up concretely\n+during the ledger-DAG work (PR #22), where retirement was considered as a\n+migration path and had to be rejected; freezing the legacy array was the answer\n+instead. The trigger is not machine-checkable, so this module does not pretend\n+to check it. It states the rule at the prompt, requires the operator to type a\n+substantive reason, and records that reason verbatim in the anchor.\n+\n+Nothing in the pipeline calls this module. Retirement is operator-initiated,\n+never agent-initiated (C-008(a)), which is what the environment and TTY guards\n+in ``confirm_interactively`` exist to enforce. Those guards raise the bar; they\n+are not cryptographic proof, and the anchor's recorded ``human_decision`` is\n+what an auditor actually relies on.\n+\n+The shape this leaves behind matters and is easy to get wrong. ``append_entry``\n+writes only to ``entries/<hash>.json``; ``bench-ledger.json`` is frozen and\n+``ledger-meta.json`` is frozen with it. A successor chain is therefore\n+``entries/`` *alone*, with neither of those files. Every segment is handled as\n+optional here for exactly that reason: the first retirement finds all three, and\n+every retirement after it finds only the entries directory.\n+\"\"\"\n+\n+import os\n+import shutil\n+import sys\n+from collections.abc import Callable, Mapping\n+from datetime import datetime, timezone\n+from pathlib import Path\n+from typing import Any\n+\n+from ledger.chain import (\n+    ANCHOR_VERDICT,\n+    ENTRIES_DIRNAME,\n+    META_FILENAME,\n+    append_entry,\n+    resolve_ledger_path,\n+)\n+from ledger.verify import verify_chain\n+from pipeline.constitution import (\n+    ConstitutionError,\n+    load_governing_constitution,\n+)\n+[BENCH TRUNCATION: 69 lines omitted]\n+class RetirementError(RuntimeError):\n+[BENCH TRUNCATION: 9 lines omitted]\n+def _utc_now() -> datetime:\n+[BENCH TRUNCATION: 3 lines omitted]\n+def _present_segments(ledger_path: str) -> list[str]:\n+[BENCH TRUNCATION: 18 lines omitted]\n+def plan_retirement(ledger_path: str | None = None) -> dict:\n+[BENCH TRUNCATION: 53 lines omitted]\n+def render_confirmation(facts: dict, archive_root: str) -> str:\n+[BENCH TRUNCATION: 30 lines omitted]\n+def confirm_interactively(\n+[BENCH TRUNCATION: 56 lines omitted]\n+def build_anchor_summary(\n+[BENCH TRUNCATION: 42 lines omitted]\n+def validate_anchor_summary(summary: Any) -> list[str]:\n+[BENCH TRUNCATION: 45 lines omitted]\n+def validate_anchor(entry: Any) -> list[str]:\n+[BENCH TRUNCATION: 27 lines omitted]\n+def _archive_root(archive_dir: str, now: datetime) -> Path:\n+[BENCH TRUNCATION: 10 lines omitted]\n+def _copy_segments(ledger_path: str, destination: Path, segments: list[str]) -> None:\n+[BENCH TRUNCATION: 16 lines omitted]\n+def _remove_segments(ledger_path: str, segments: list[str]) -> None:\n+[BENCH TRUNCATION: 10 lines omitted]\n+def _project_relative(ledger_path: str) -> str:\n+[BENCH TRUNCATION: 11 lines omitted]\n+    except (OSError, ValueError) as exc:\n+[BENCH TRUNCATION: 11 lines omitted]\n+def _load_constitution() -> tuple[str, list, Any]:\n+[BENCH TRUNCATION: 8 lines omitted]\n+    except ConstitutionError as exc:\n+[BENCH TRUNCATION: 7 lines omitted]\n+def execute_retirement(\n+[BENCH TRUNCATION: 36 lines omitted]\n+            f\"content that triggers C-008's exception, got \"\n+[BENCH TRUNCATION: 39 lines omitted]\n+    except OSError as exc:\n+[BENCH TRUNCATION: 46 lines omitted]\n+    except OSError as exc:\n+[BENCH TRUNCATION: 49 lines omitted]\n+def audit_retirement(\n+[BENCH TRUNCATION: 37 lines omitted]\n+\n+    expected_tip: str = str(summary[\"predecessor_tip_hash\"])\n+    expected_entries: int = int(summary[\"predecessor_entries\"])\n+    found_tips: Any = result.get(\"tips\", [])\n+    found_entries: int = int(result.get(\"entries\", -1))\n+\n+    tip_ok: bool = found_tips == [expected_tip]\n+    count_ok: bool = found_entries == expected_entries\n+\n+    return {\n+        \"ok\": tip_ok and count_ok,\n+        \"archive_path\": recorded_path,\n+        \"archive_ledger\": resolved,\n+        \"expected_tip\": expected_tip,\n+        \"found_tips\": found_tips,\n+        \"tip_matches\": tip_ok,\n+        \"expected_entries\": expected_entries,\n+        \"found_entries\": found_entries,\n+        \"count_matches\": count_ok,\n+    }\n+[BENCH TRUNCATION: original_lines=723, truncated_lines=91, preserved=first50+signatures+exception_handlers+last20]\n",
+      "truncation": {
+        "original_lines": 723,
+        "truncated_lines": 91,
+        "preserved": "first50+signatures+exception_handlers+last20"
+      }
+    }
+  },
+  "challenger": {
+    "status": "FINDINGS",
+    "findings": [
+      {
+        "constraint_id": "C-008",
+        "severity": "CONCERN",
+        "location": "ledger/retire.py: execute_retirement (36+46+49 lines truncated), _copy_segments, _remove_segments",
+        "evidence": "def execute_retirement(...): [36 lines omitted] ... except OSError as exc: [46 lines omitted] ... except OSError as exc: [49 lines omitted]",
+        "reasoning": "C-008(b) requires the archived copy to pass verify_chain with valid=true BEFORE the original chain is moved/removed. The diff shows separate _copy_segments and _remove_segments helper functions plus a verify_chain import, which is consistent with the required ordering, but the actual sequencing inside execute_retirement (copy -> verify -> only-then-remove) is hidden behind 91 lines of truncation covering most of the function body. This is the single most safety-critical property this module must get right per the module's own docstring, and it cannot be confirmed from the evidence provided. Flagging as a concern for the Oracle to request the untruncated function rather than assuming either compliance or violation."
+      },
+      {
+        "constraint_id": "C-008",
+        "severity": "OBSERVATION",
+        "location": "ledger/retire.py: audit_retirement (visible tail)",
+        "evidence": "tip_ok: bool = found_tips == [expected_tip]\ncount_ok: bool = found_entries == expected_entries\nreturn { \"ok\": tip_ok and count_ok, ... }",
+        "reasoning": "C-008(c) requires the anchor to record tip hash, genesis hash, entry count, first/last timestamps, archive path, and reason. The visible audit_retirement function only cross-checks tip hash and entry count against the archive; genesis hash and first/last timestamps aren't verified here. They may be checked in validate_anchor_summary (truncated), so this is an observation rather than a violation, but worth the Oracle confirming those fields are actually validated somewhere in the file rather than just recorded."
+      },
+      {
+        "constraint_id": "C-004",
+        "severity": "CONCERN",
+        "location": "ledger/retire.py: validate_anchor_summary(summary: Any), validate_anchor(entry: Any), found_tips: Any = result.get(\"tips\", [])",
+        "evidence": "def validate_anchor_summary(summary: Any) -> list[str]:\ndef validate_anchor(entry: Any) -> list[str]:\nfound_tips: Any = result.get(\"tips\", [])",
+        "reasoning": "C-004 permits bare Any only where the value is genuinely unconstrained or precision isn't available. Here, summary and entry are subsequently indexed with known string keys (e.g. summary[\"predecessor_tip_hash\"], summary[\"predecessor_entries\"]), indicating their shape is known at that point (an anchor summary dict). Mapping[str, Any] or a TypedDict would be strictly more precise per C-004's own guidance on dict[str, Any] being preferred over bare Any/dict. Similarly found_tips is assigned from result.get(\"tips\", []) and compared against a list containing one string, suggesting list[str] is knowable rather than Any. This may be a reasonable choice if these functions are the validation boundary for untrusted/parsed JSON (in which case Any-at-the-boundary is the correct idiom), but that justification isn't visible in the truncated code."
+      },
+      {
+        "constraint_id": "C-005",
+        "severity": "CONCERN",
+        "location": "whole file: ledger/retire.py",
+        "evidence": "New public functions: plan_retirement, render_confirmation, confirm_interactively, build_anchor_summary, validate_anchor_summary, validate_anchor, execute_retirement, audit_retirement",
+        "reasoning": "This is a substantial new module implementing the sole exception to C-008's immutability guarantee, with no accompanying test file visible in this change. C-005 is warning-severity and permits deferral with explicit justification, but no such justification is present in the diff itself. Given this module's safety criticality (governs live deletion of ledger segments), the absence of visible tests is worth surfacing even though C-005 alone would not block on it."
+      }
+    ],
+    "_tokens": {
+      "input": 13318,
+      "output": 4340
+    }
+  },
+  "defender": {
+    "status": "REBUTTAL",
+    "rebuttals": [
+      {
+        "finding_index": 0,
+        "position": "MITIGATE",
+        "argument": "The Challenger is right that the raw line-order proof of copy-before-verify-before-remove is hidden by truncation, and I cannot manufacture evidence that was cut. But the Challenger also undersells what IS visible: the module's own docstring states the invariant in plain language ('every entry is preserved in an archive that is verified *before* the live chain is removed'), the import list pulls in `verify_chain` specifically for this purpose, and the function decomposition itself encodes the ordering constraint structurally: `_copy_segments` and `_remove_segments` are separate, single-purpose helpers rather than one fused operation, which is the shape you'd choose specifically so that a verify step can sit between them and so that a failed verify can abort before `_remove_segments` is ever called. `execute_retirement`'s own error handling shows two distinct `except OSError` blocks at different points in the function, consistent with two distinct filesystem phases (copy, then remove) rather than one. None of this is proof of correct sequencing, and I won't claim it is. The honest position is that this finding correctly identifies a verification gap caused by truncation, not a defect in the code. It should be treated as a request for more evidence, not a mark against the change.",
+        "evidence": "Docstring: 'every entry is preserved in an archive that is verified *before* the live chain is removed'; import of ledger.verify.verify_chain; separate _copy_segments/_remove_segments function definitions; two distinct 'except OSError as exc:' blocks in execute_retirement's truncated body."
+      },
+      {
+        "finding_index": 1,
+        "position": "REBUT",
+        "argument": "This is a hash chain, and that fact does the work the Challenger is asking for. A tip hash is not an independent field alongside genesis hash, entry count, and timestamps: it is the accumulated hash of the entire entry sequence back to genesis, by construction (each entry's hash covers its own content plus its parent hash(es)). If `audit_retirement` confirms the archive's tip hash matches the recorded tip hash AND the entry count matches, that is not a partial check, it is the strongest check available: any divergence in genesis hash, any missing/reordered/altered entry, or any timestamp tampering would necessarily change the tip hash, because it would change some ancestor in the hash computation. A genesis-hash-only or timestamp-only comparison would be strictly weaker and could pass on a corrupted chain with a coincidentally-matching root; tip hash cannot. C-008(c) requires those fields be *recorded* in the anchor for a human auditor to read and act on independently (e.g. to locate the archive, to sanity-check timestamps by eye) \u2014 it does not require `audit_retirement` specifically to re-derive every one of them, since the tip hash already subsumes that guarantee cryptographically.",
+        "evidence": "tip_ok: bool = found_tips == [expected_tip]; count_ok: bool = found_entries == expected_entries; return {'ok': tip_ok and count_ok, ...} \u2014 tip hash by construction covers the full ancestry, making it a superset check rather than a partial one."
+      },
+      {
+        "finding_index": 2,
+        "position": "REBUT",
+        "argument": "C-004 explicitly carves out 'a bare Any where the value really is unconstrained' as permitted, and validate_anchor_summary/validate_anchor are the textbook case: their entire job is to check whether a parsed-JSON value, of genuinely unknown shape at the call site, conforms to the expected anchor structure. Typing the parameter as Mapping[str, Any] or a TypedDict before validation has happened would assert a shape guarantee the function hasn't earned yet \u2014 it would be the type system lying about data that, for all the caller knows, could be a list, a string, or malformed JSON entirely. That's precisely the scenario C-004's own text distinguishes from the dict[str, Any] idiom it protects: dict[str, Any] is for data known to be a JSON object; bare Any is for data whose shape is exactly what's being tested. As for found_tips: Any = result.get('tips', []), if result itself is (as is standard here) typed dict[str, Any] \u2014 the very idiom C-004 endorses \u2014 then .get() on it naturally yields Any under the type system; annotating that explicitly as Any restates what dict[str, Any] already implies rather than discarding precision that was actually available.",
+        "evidence": "def validate_anchor_summary(summary: Any) -> list[str]: \u2014 the function's purpose (per its name and downstream usage as a validator) is to check shape that is not yet known to be correct; found_tips: Any = result.get('tips', []) is consistent with result: dict[str, Any], for which .get() already returns Any under normal type-checking rules."
+      },
+      {
+        "finding_index": 3,
+        "position": "CONCEDE",
+        "argument": "This is a fair and honest gap. The diff creates a substantial new module (eight public functions) that governs the single permitted exception to ledger immutability \u2014 arguably the most safety-critical surface in the whole system \u2014 and no corresponding test file appears in the change. C-005 is warning-severity and permits deferral 'with explicit justification,' but no such justification is stated anywhere in the diff or docstring. I won't manufacture one. The Challenger is correct to surface this, and it should be recorded as a legitimate outstanding item even though it does not, by itself, block on a warning-severity constraint.",
+        "evidence": "New public functions with no accompanying test file in the change: plan_retirement, render_confirmation, confirm_interactively, build_anchor_summary, validate_anchor_summary, validate_anchor, execute_retirement, audit_retirement; C-005 severity is 'warning' per the constitution, so this does not independently veto."
+      }
+    ],
+    "summary": "The module's design is sound and its docstring correctly states the required verify-before-remove and human-decision invariants, but the truncated evidence can't fully confirm the critical copy-verify-remove ordering, the type-Any usages are defensible boundary-validation idioms rather than discarded precision, and the absence of tests for this safety-critical exception path is a legitimate, conceded gap that should be closed even though it's only warning-severity.",
+    "_tokens": {
+      "input": 14809,
+      "output": 4497
+    }
+  },
+  "oracle": {
+    "verdict": "PASS",
+    "reasoning": "The change creates ledger/retire.py, which implements the sole bounded exception C-008 permits: whole-chain retirement. Because it lives in ledger/, both C-008 and C-007 govern it. No veto-severity constraint is clearly violated on the evidence available.\n\nOn C-008(b) (Challenger finding 0, Defender MITIGATE): the copy-verify-remove ordering is the single most safety-critical property, and the Challenger correctly notes it cannot be positively confirmed because 91 lines of execute_retirement are truncated. The Challenger explicitly declined to assert a violation and asked the Oracle to weigh it. A VETO requires a constraint to be CLEARLY violated; an unconfirmable property is not a clear violation. The visible evidence is affirmatively consistent with compliance: the docstring states the invariant verbatim ('verified *before* the live chain is removed'), verify_chain is imported for exactly this purpose, and _copy_segments/_remove_segments are separate single-purpose helpers with two distinct 'except OSError' phases, which is the structure one adopts precisely to interpose a verify step and abort before removal. I decline to veto a truncation-induced evidence gap when every visible signal points toward compliance, but I record this as a binding advisory.\n\nOn C-008(c) (finding 1, Defender REBUT): the Defender's hash-chain argument is correct and dispositive. A tip hash cryptographically subsumes genesis hash, entry count, ordering, and per-entry timestamps by construction; any tampering with an ancestor necessarily changes the tip. audit_retirement's tip+count check is therefore the strongest available cross-check, not a partial one. C-008(c) requires those fields be *recorded* in the anchor for an auditor, which the module does via build_anchor_summary/validate_anchor_summary; it does not require audit_retirement to re-derive each. SATISFIED.\n\nOn C-004 (finding 2, Defender REBUT): validate_anchor_summary(summary: Any) and validate_anchor(entry: Any) are validation-boundary functions whose job is to test whether parsed JSON of genuinely unknown shape conforms. C-004 expressly permits a bare Any 'where the value really is unconstrained.' Annotating the pre-validation input as Mapping[str, Any] would assert a shape the function has not yet verified. found_tips: Any = result.get('tips', []) restates what dict[str, Any].get() already yields and discards no available precision. No precision that was available has been discarded. SATISFIED.\n\nOn C-005 (finding 3, Defender CONCEDE): no test file accompanies eight new public functions governing live segment deletion. C-005 is warning severity and does not independently veto, but given this module's criticality the gap is a strong advisory.\n\nC-007 is satisfied on visible evidence: the module uses verify_chain rather than bypassing it, is operator-initiated and uncalled by the pipeline, and adds enforcement rather than weakening it. This disposition is contingent on the same truncated ordering flagged under C-008(b).",
+    "constraint_citations": [
+      {
+        "constraint_id": "C-008",
+        "disposition": "SATISFIED",
+        "note": "Design encodes the required verify-before-remove ordering (separate copy/remove helpers, verify_chain import, docstring invariant) and records the anchor fields C-008(c) enumerates. The audit's tip+count check cryptographically subsumes genesis/timestamps/ordering per the Defender's correct hash-chain rebuttal. The exact line-order is truncated and cannot be positively confirmed; flagged as advisory, not a clear violation."
+      },
+      {
+        "constraint_id": "C-004",
+        "disposition": "SATISFIED",
+        "note": "Bare Any on validate_anchor_summary/validate_anchor is the permitted boundary-validation idiom for parsed JSON of genuinely unknown shape; found_tips: Any restates dict[str, Any].get()'s result. No available precision discarded."
+      },
+      {
+        "constraint_id": "C-005",
+        "disposition": "VIOLATED",
+        "note": "No tests accompany eight new public functions on the most safety-critical exception path, and no deferral justification is stated. Warning severity, so does not veto, but recorded as an outstanding item."
+      },
+      {
+        "constraint_id": "C-007",
+        "disposition": "SATISFIED",
+        "note": "Module invokes verify_chain rather than bypassing it, is operator-initiated and uncalled by the pipeline, and does not disable logging or weaken enforcement. Contingent on the truncated ordering being as the docstring states."
+      },
+      {
+        "constraint_id": "C-001",
+        "disposition": "SATISFIED",
+        "note": "Visible exception handlers catch typed OSError/ConstitutionError/ValueError; RetirementError is defined as a typed error. No empty or comment-only catch blocks visible."
+      }
+    ],
+    "advisories": [
+      "C-008(b) BINDING ADVISORY: the copy -> verify_chain(valid=true) -> remove ordering inside execute_retirement is hidden by truncation. This is the module's most safety-critical invariant. Before merge, confirm on the full source that _remove_segments is unreachable unless verify_chain returns valid=true against the archive, and that a failed verify aborts leaving the live chain intact.",
+      "C-005: add a test file for retire.py covering copy-before-remove ordering, verify-failure abort, anchor field completeness (tip, genesis, count, first/last timestamps, archive path, reason), the human/TTY guards in confirm_interactively, and the successor-chain 'entries-only' shape. Alternatively, state an explicit deferral justification.",
+      "Confirm the human-decision guards in confirm_interactively (env + TTY) and the recorded human_decision field are present in the full source, since C-008(a) turns on operator initiation being recorded in the anchor."
+    ],
+    "remediation": null,
+    "confidence": "MODERATE",
+    "_tokens": {
+      "input": 16908,
+      "output": 3461
+    }
+  },
+  "entry_hash": "935d547ba1da29cf7288e3849894ab6a2443f6c4999b828680fec1a8e1ddb1e2"
+}
