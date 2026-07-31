@@ -117,7 +117,9 @@ on 2026-07-24 and archived without being published, because a globally
 registered hook had written diffs from unrelated projects into Bench's own
 ledger and that chain contained third-party source. Retiring it whole was chosen
 over editing entries, which C-008 forbids without exception. Entry numbers in
-this README refer to the current published chain.
+this README refer to the current published chain. See
+[Chain Retirement](#chain-retirement) for when this is permitted, and run
+`python -m cli audit-retirement` to confirm that retirement yourself.
 
 Run `python -m cli verify` to confirm the ledger's integrity.
 Run `python -m cli stats` to see the full governance history.
@@ -255,6 +257,69 @@ That shape exists because the original single array was rewritten in full on eve
 Verification walks the union. The legacy array keeps its original positional check at full strength, and the entries directory is enumerated separately, failing closed on a parent that resolves to nothing (`MISSING_PARENT`), an entry unreachable from genesis (`ORPHAN_ENTRY`), a repeated hash (`DUPLICATE_ENTRY`), a filename that disagrees with the hash inside it (`FILENAME_MISMATCH`), and more than one genesis (`MULTIPLE_GENESIS`). `python -m cli verify` reports every tip when a chain is forked.
 
 One tradeoff is worth naming rather than burying. The new segment has no in-band global entry count — a per-append count cannot be both conflict-free and append-only across branches. Deleting any non-tip entry file is a hard verification failure, because its children reference a parent that no longer resolves. Deleting a *tip* file is visible in `git diff` but not in-band, which is the same exposure the array always had: truncating it was only caught if the attacker forgot to also edit the committed meta file.
+
+### Chain Retirement
+
+C-008 forbids editing, reordering, or removing an individual ledger entry under
+all circumstances. It permits exactly one escape, and only for one trigger:
+
+> the sole permitted trigger is that the chain contains content which must not
+> be published
+
+That is narrower than people expect. A storage-format change is **not** such a
+trigger. When the ledger moved to the per-entry DAG format above, retirement was
+considered as a migration path and rejected for exactly this reason; freezing the
+array was the correct answer instead. Reaching for retirement as a
+general-purpose "start fresh" tool is a C-008 violation.
+
+Retirement is not deletion. Every entry is preserved in an archive that is
+verified **before** anything is removed, and a successor chain opens with an
+`ANCHOR` entry recording where the predecessor went, so custody is documented
+rather than broken.
+
+```bash
+python -m cli retire --archive-dir /path/outside/the/repo \
+                     --reason "why this chain contains unpublishable content"
+```
+
+The command refuses unless every C-008 element is satisfied. It refuses a chain
+that does not verify, an empty chain, and a forked chain (C-008 records a single
+predecessor tip hash, so reconcile the fork with one governed edit first). It
+refuses an archive destination that already exists, because an archive is never
+overwritten, and one inside the chain being retired.
+
+**It cannot be run from inside a Claude Code session**, including via a `!`
+command. C-008(a) requires a decision that is never automated or agent-initiated,
+so the gate refuses when stdin is not a TTY and when `BENCH_SUBPROCESS`,
+`CLAUDECODE`, or `CI` are set, and it requires a confirmation phrase typed
+verbatim. Use a plain terminal. Be honest about what this buys: it raises the
+bar, it is not cryptographic proof, and what an auditor actually relies on is the
+`human_decision` attestation recorded in the anchor.
+
+Retire when nothing else is writing to the ledger. Reading, archiving, and
+removing a chain are not one atomic step, so a governed edit that lands mid
+retirement would otherwise have its receipt deleted without ever reaching the
+archive. Retirement moves the chain aside rather than deleting it and re-checks
+it against the archive before committing, so that case is refused and the chain
+is restored exactly as it was, but the retry is yours to run.
+
+The archive is a directory holding whichever segments existed. A first
+retirement archives the frozen array, its meta pin, and the entries directory; a
+later one archives only `entries/`, because a chain that retirement created has
+nothing else. That is also the shape retirement leaves behind: the successor
+chain is `entries/` alone, with no `bench-ledger.json` and no `ledger-meta.json`,
+which verifies clean.
+
+Confirm any retirement independently. This is C-008's auditor check, run against
+the archive rather than described in prose:
+
+```bash
+python -m cli audit-retirement
+```
+
+It re-verifies the archived chain and confirms its tip hash and entry count equal
+the values the anchor recorded. Run against this repository it confirms the
+2026-07-24 retirement: 2,471 entries, tip `2176516f`.
 
 ### Per-Project Constitutions
 
