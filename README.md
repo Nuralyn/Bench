@@ -240,7 +240,21 @@ Bench's hook can be registered globally in `~/.claude/settings.json`, which gove
 
 This matters because a ledger records the full diff of every change it governs. Routing all projects into one chain mixes unrelated codebases together, and if that chain is committed to a public repository, it publishes them. Set `BENCH_LEDGER_PATH` if you deliberately want one central ledger across projects.
 
-The corollary is worth stating: keeping a ledger out of git also removes git as its backup path. An ignored `.bench/` chain exists on one machine and nowhere else, so losing that working copy loses the audit trail with it, and a project governed from two machines accumulates two independent chains that cannot be merged — the hash chain admits no interleaving after the fact. Decide deliberately which you want: a private chain you back up by other means, or a committed one that publishes the diffs it records.
+The corollary is worth stating: keeping a ledger out of git also removes git as its backup path. An ignored `.bench/` chain exists on one machine and nowhere else, so losing that working copy loses the audit trail with it. Decide deliberately which you want: a private chain you back up by other means, or a committed one that publishes the diffs it records.
+
+### Ledger Format
+
+The ledger is stored in two segments, and the split is what lets two branches record verdicts independently.
+
+`bench-ledger.json` is the **frozen** legacy segment: a hash-chained JSON array that every reader still reads and nothing writes. `ledger-meta.json` is frozen with it, as a permanent pin on that segment's tip hash and entry count. Every new entry is written to its own file at `<ledger_dir>/entries/<entry_hash>.json`.
+
+That shape exists because the original single array was rewritten in full on every append. Two branches appending produced divergent chains with no valid resolution: interleaving breaks the hash links, and rebasing rewrites hashes, which C-008 forbids. The array was frozen rather than migrated for the same reason — C-008 permits no moving or rewriting of an existing entry, and a file that is never written can never conflict.
+
+`previous_hash` therefore holds either a string (legacy entries, one parent) or a sorted list of parent hashes. An append names **every current tip**, so after a `git merge` leaves two heads, the next governed edit names both and the fork reconciles itself. There is no merge command: the reconciliation is an ordinary governed, hash-linked entry.
+
+Verification walks the union. The legacy array keeps its original positional check at full strength, and the entries directory is enumerated separately, failing closed on a parent that resolves to nothing (`MISSING_PARENT`), an entry unreachable from genesis (`ORPHAN_ENTRY`), a repeated hash (`DUPLICATE_ENTRY`), a filename that disagrees with the hash inside it (`FILENAME_MISMATCH`), and more than one genesis (`MULTIPLE_GENESIS`). `python -m cli verify` reports every tip when a chain is forked.
+
+One tradeoff is worth naming rather than burying. The new segment has no in-band global entry count — a per-append count cannot be both conflict-free and append-only across branches. Deleting any non-tip entry file is a hard verification failure, because its children reference a parent that no longer resolves. Deleting a *tip* file is visible in `git diff` but not in-band, which is the same exposure the array always had: truncating it was only caught if the attacker forgot to also edit the committed meta file.
 
 ### Per-Project Constitutions
 
