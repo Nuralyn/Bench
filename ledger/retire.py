@@ -53,6 +53,12 @@ from utils.project import project_root
 ANCHOR_TOOL: str = "ChainRetirement"
 """``change.tool`` on an anchor entry, matching the 2026-07-24 reference."""
 
+_GENESIS_MARKER: str = "GENESIS"
+"""Re-declared locally rather than imported from ``chain``, as ``verify.py``
+does with the same value and for the same reason: this module checks that the
+anchor it just wrote actually opened the successor chain, and that check must
+not inherit the writer's idea of what a root looks like."""
+
 ANCHOR_EVENT: str = "chain_retirement"
 
 ANCHOR_AUTHORITY: str = "C-008 as amended in constitution version 2"
@@ -437,15 +443,70 @@ def _copy_segments(ledger_path: str, destination: Path, segments: list[str]) -> 
             shutil.copy2(source, destination / name)
 
 
-def _remove_segments(ledger_path: str, segments: list[str]) -> None:
-    """Remove the live segments after the archive has verified."""
+def _restore_segments(staging: Path, ledger_path: str, moved: list[str]) -> None:
+    """Move staged segments back, undoing a retirement that could not finish."""
+    destination: Path = Path(ledger_path).parent
+    destination.mkdir(parents=True, exist_ok=True)
+    for name in moved:
+        source: Path = staging / name
+        if source.exists():
+            shutil.move(str(source), str(destination / name))
+
+
+def _stage_segments(
+    ledger_path: str, segments: list[str], staging: Path
+) -> list[str]:
+    """Move the live segments aside rather than deleting them.
+
+    Deleting outright is not recoverable. An OSError partway through the old
+    sequential delete left a half-dismantled chain: the frozen array gone but
+    the entry files still present, their parents now missing. ``plan_retirement``
+    refuses such a chain, so the operator could not simply retry, and the
+    recovery was undocumented manual surgery against the archive.
+
+    Moving is one rename per segment on the same filesystem, and it is
+    reversible. A failure here restores what it already moved and leaves the
+    chain exactly as it was, so "retire again" is honest advice.
+
+    Returns the names actually moved, so the caller can undo them later.
+    """
+    staging.mkdir(parents=True, exist_ok=False)
     source_dir: Path = Path(ledger_path).parent
-    for name in segments:
-        target: Path = source_dir / name
-        if target.is_dir():
-            shutil.rmtree(target)
-        elif target.exists():
-            target.unlink()
+    moved: list[str] = []
+    try:
+        for name in segments:
+            source: Path = source_dir / name
+            if not source.exists():
+                continue
+            shutil.move(str(source), str(staging / name))
+            moved.append(name)
+    except OSError as exc:
+        _restore_segments(staging, ledger_path, moved)
+        raise RetirementError(
+            f"could not move the live chain aside ({exc}). It was restored "
+            f"and nothing was retired."
+        ) from exc
+    return moved
+
+
+def _discard_staging(staging: Path) -> None:
+    """Delete the staged copy once the retirement has fully succeeded.
+
+    Best effort by design. At this point the archive is verified and the anchor
+    is written, so a leftover staging directory is a redundant copy rather than
+    a risk, and failing the whole retirement over it would be worse than saying
+    so. Readers ignore it: nothing resolves a dot-prefixed directory as a ledger
+    segment.
+    """
+    try:
+        shutil.rmtree(staging)
+    except OSError as exc:
+        print(
+            f"[bench retire] retirement succeeded but the staged copy at "
+            f"{staging} could not be removed ({exc}); it is redundant with the "
+            f"archive and can be deleted by hand",
+            file=sys.stderr,
+        )
 
 
 def _project_relative(ledger_path: str) -> str:
@@ -618,14 +679,46 @@ def execute_retirement(
             + ". The live chain was not touched."
         )
 
+    # Move the live chain aside rather than deleting it, then re-check it
+    # against the archive now that nothing can be appended to it.
+    #
+    # A governance run in another session can append between the archive
+    # verification above and this point. Under the old sequential delete that
+    # receipt was destroyed without ever appearing in the archive or in the
+    # anchor's count, which is precisely the removal of an entry C-008 forbids
+    # without exception. Comparing the staged chain against the archive turns
+    # that race into a refusal, and because the segments were moved rather than
+    # deleted, the refusal restores the chain exactly as it was.
+    staging: Path = ledger_dir / f".retiring-{started.strftime('%Y-%m-%dT%H%M%SZ')}"
+    moved: list[str] = _stage_segments(resolved, segments, staging)
+
     try:
-        _remove_segments(resolved, segments)
-    except OSError as exc:
+        staged: dict = verify_chain(str(staging / Path(resolved).name))
+        drifted: bool = (
+            not staged.get("valid")
+            or int(staged.get("entries", -1)) != facts["entries"]
+            or staged.get("tips") != [facts["tip_hash"]]
+        )
+    except Exception:
+        # Any failure raised while the chain is set aside has to put it back
+        # before it surfaces, or an unrelated fault leaves the operator with a
+        # ledger directory that looks empty. Restore, then re-raise unchanged
+        # so the real error is never masked (C-001).
+        _restore_segments(staging, resolved, moved)
+        _discard_staging(staging)
+        raise
+
+    if drifted:
+        _restore_segments(staging, resolved, moved)
+        _discard_staging(staging)
         raise RetirementError(
-            f"the archive at {archive_root} is complete and verified, but "
-            f"removing the live chain failed ({exc}). No entry was lost. "
-            f"Resolve the filesystem error and retire again."
-        ) from exc
+            f"refusing to retire: the live chain changed between being "
+            f"archived and being moved aside, so the archive at {archive_root} "
+            f"is already stale and retiring would destroy the entry that "
+            f"landed in between. The chain has been restored exactly as it "
+            f"was. This happens when a governed edit runs mid-retirement; "
+            f"retry with no other session writing to this ledger."
+        )
 
     anchor: dict = append_entry(
         {
@@ -645,6 +738,22 @@ def execute_retirement(
         path=resolved,
     )
 
+    if anchor.get("previous_hash") != _GENESIS_MARKER:
+        # An entry landed between the chain being moved aside and the anchor
+        # being written, so that entry is the successor's genesis and the anchor
+        # merely links to it. verify_chain still passes on such a chain, and
+        # audit-retirement reads the first entry, so this would silently produce
+        # a successor whose opening record is not the retirement. Nothing is
+        # lost, but it must not pass unnoticed.
+        raise RetirementError(
+            f"the anchor did not open the successor chain: its previous_hash "
+            f"is {anchor.get('previous_hash')!r} rather than "
+            f"{_GENESIS_MARKER}, so another entry was appended first. The "
+            f"verified archive is at {archive_root} and the retired chain is "
+            f"staged at {staging}. Stop the concurrent writer before "
+            f"continuing."
+        )
+
     entry_defects: list[str] = validate_anchor(anchor)
     if entry_defects:
         raise RetirementError(
@@ -661,6 +770,10 @@ def execute_retirement(
             f"{successor.get('message', 'no detail')}). The verified archive "
             f"is at {archive_root}."
         )
+
+    # Everything is verified and the anchor is in place, so the staged copy is
+    # now redundant with the archive and can go.
+    _discard_staging(staging)
 
     return {
         "archive_path": str(archive_root),
