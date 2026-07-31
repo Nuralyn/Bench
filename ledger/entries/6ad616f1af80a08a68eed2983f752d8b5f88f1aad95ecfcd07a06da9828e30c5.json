@@ -1,0 +1,130 @@
+{
+  "entry_id": "b0215b2e-122e-4ff1-860e-8dda53bfb54b",
+  "timestamp": "2026-07-31T04:50:09.943729+00:00",
+  "previous_hash": [
+    "fe77d0944912f6f40b4e73aa3d8de7941e685fe782b762dce84b47330824425d"
+  ],
+  "constitution_hash": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3",
+  "constitution_sources": [
+    {
+      "layer": "core",
+      "path": "C:\\Users\\mstar\\Bench\\bench.json",
+      "sha256": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3"
+    }
+  ],
+  "verdict": "PASS",
+  "pipeline_error": false,
+  "change": {
+    "file": "README.md",
+    "tool": "Edit",
+    "diff_summary": {
+      "file_path": "README.md",
+      "change_type": "modify",
+      "old_string": "### Per-Project Constitutions",
+      "new_string": "### Chain Retirement\n\nC-008 forbids editing, reordering, or removing an individual ledger entry under\nall circumstances. It permits exactly one escape, and only for one trigger:\n\n> the sole permitted trigger is that the chain contains content which must not\n> be published\n\nThat is narrower than people expect. A storage-format change is **not** such a\ntrigger. When the ledger moved to the per-entry DAG format above, retirement was\nconsidered as a migration path and rejected for exactly this reason; freezing the\narray was the correct answer instead. Reaching for retirement as a\ngeneral-purpose \"start fresh\" tool is a C-008 violation.\n\nRetirement is not deletion. Every entry is preserved in an archive that is\nverified **before** anything is removed, and a successor chain opens with an\n`ANCHOR` entry recording where the predecessor went, so custody is documented\nrather than broken.\n\n```bash\npython -m cli retire --archive-dir /path/outside/the/repo \\\n                     --reason \"why this chain contains unpublishable content\"\n```\n\nThe command refuses unless every C-008 element is satisfied. It refuses a chain\nthat does not verify, an empty chain, and a forked chain (C-008 records a single\npredecessor tip hash, so reconcile the fork with one governed edit first). It\nrefuses an archive destination that already exists, because an archive is never\noverwritten, and one inside the chain being retired.\n\n**It cannot be run from inside a Claude Code session**, including via a `!`\ncommand. C-008(a) requires a decision that is never automated or agent-initiated,\nso the gate refuses when stdin is not a TTY and when `BENCH_SUBPROCESS`,\n`CLAUDECODE`, or `CI` are set, and it requires a confirmation phrase typed\nverbatim. Use a plain terminal. Be honest about what this buys: it raises the\nbar, it is not cryptographic proof, and what an auditor actually relies on is the\n`human_decision` attestation recorded in the anchor.\n\nThe archive is a directory holding whichever segments existed. A first\nretirement archives the frozen array, its meta pin, and the entries directory; a\nlater one archives only `entries/`, because a chain that retirement created has\nnothing else. That is also the shape retirement leaves behind: the successor\nchain is `entries/` alone, with no `bench-ledger.json` and no `ledger-meta.json`,\nwhich verifies clean.\n\nConfirm any retirement independently. This is C-008's auditor check, run against\nthe archive rather than described in prose:\n\n```bash\npython -m cli audit-retirement\n```\n\nIt re-verifies the archived chain and confirms its tip hash and entry count equal\nthe values the anchor recorded. Run against this repository it confirms the\n2026-07-24 retirement: 2,471 entries, tip `2176516f`.\n\n### Per-Project Constitutions"
+    }
+  },
+  "challenger": {
+    "status": "FINDINGS",
+    "findings": [
+      {
+        "constraint_id": "C-008",
+        "severity": "CONCERN",
+        "location": "README.md, new 'Chain Retirement' section, final paragraph",
+        "evidence": "\"Run against this repository it confirms the 2026-07-24 retirement: 2,471 entries, tip `2176516f`.\"",
+        "reasoning": "This is a specific, checkable factual claim (a date, an entry count, and a tip hash) asserting that an actual chain retirement already occurred in this repository. The diff itself contains no ledger entries, anchor entry, or archive evidencing that event \u2014 it's asserted in prose only. Given C-008's entire rationale is that retirement must be independently verifiable (verify_chain against the archive, matched against the anchor's recorded hash/count), documentation that states a retirement's specifics as settled fact should be checked against the actual ledger/anchor before merging. If the numbers are accurate this is fine; if they drift from the real ledger state (e.g., copied from a draft, or the retirement is aspirational/example content), the README becomes a misleading audit trail for the very mechanism it's describing."
+      },
+      {
+        "constraint_id": "C-002",
+        "severity": "OBSERVATION",
+        "location": "README.md, code fences for `python -m cli retire` and `python -m cli audit-retirement`",
+        "evidence": "\"python -m cli retire --archive-dir ... --reason ...\" and \"python -m cli audit-retirement\"",
+        "reasoning": "The documentation describes two CLI subcommands in detail (refusal conditions, TTY/env-var gating, archive-directory rules) but this diff only touches README.md \u2014 no corresponding cli/commands.py implementation is present in the change set. Not a violation on its own (README-only PRs are legitimate), but worth confirming these commands already exist in the codebase; if they don't, this documents unimplemented behavior as though it ships today."
+      }
+    ],
+    "_tokens": {
+      "input": 9802,
+      "output": 3299
+    }
+  },
+  "defender": {
+    "status": "REBUTTAL",
+    "rebuttals": [
+      {
+        "finding_index": 0,
+        "position": "MITIGATE",
+        "argument": "The Challenger is right that this diff, in isolation, cannot prove the 2026-07-24 retirement happened exactly as described. But look at what the sentence actually asks the reader to do: it doesn't assert the numbers as trusted prose, it tells them to run `python -m cli audit-retirement` and see for themselves. That's the opposite of an unverifiable claim; it's a claim structured to be falsified by the exact auditor mechanism C-008(a)-(d) mandates. If 2,471/`2176516f` are wrong, the very next command execution exposes it, there's no window where a false claim sits unchallenged. The real risk here isn't in this diff's text; it's a merge-gating question ('did this retirement actually occur with a valid anchor entry, archive, and human_decision attestation?') that belongs to the human reviewer running the command before merge, not to a defect in the README wording. I'd flag this as a pre-merge verification step, not a constitutional flaw in the change itself.",
+        "evidence": "The README section itself supplies the check: 'Confirm any retirement independently. This is C-008's auditor check, run against the archive rather than described in prose... It re-verifies the archived chain and confirms its tip hash and entry count equal the values the anchor recorded.' The claim is a hypothesis the doc invites the reader to test, not an assertion asked to be taken on faith."
+      },
+      {
+        "constraint_id": "C-002",
+        "finding_index": 1,
+        "position": "MITIGATE",
+        "argument": "The Challenger correctly flags this as non-violating (severity: OBSERVATION, 'not a violation on its own'), and I agree it isn't. C-002 governs bundling unrelated edits or exceeding a stated task boundary within a single diff; it is not a doc/code-sync checker. This diff touches exactly one file on exactly one coherent topic (documenting the retirement feature), which is the textbook case of staying within scope. That said, the underlying observation has some bite worth surfacing to the Oracle: CLAUDE.md's own Project Structure table lists `cli/commands.py` as covering 'verify, ledger, stats, constitution, viewer' and conspicuously omits 'retire' and 'audit-retirement.' That's either a documentation change shipped ahead of (or slightly out of sync with) an already-implemented feature, or CLAUDE.md's command list is itself stale. Either way it's a fact worth confirming before merge, but it doesn't move the needle on C-002 itself since scope-bundling and doc-accuracy are different failure modes.",
+        "evidence": "CLAUDE.md: 'cli/commands.py # verify, ledger, stats, constitution, viewer' does not list retire/audit-retirement, which is consistent with either a slightly stale structure table or genuinely new commands documented in this PR ahead of/alongside their implementation."
+      }
+    ],
+    "summary": "The change is a documentation-only addition that is internally consistent and self-verifying by design; the Challenger's findings are worth a pre-merge sanity check (does the retirement/anchor actually exist, do the CLI subcommands exist) rather than evidence of a constitutional violation in the diff itself.",
+    "_tokens": {
+      "input": 10510,
+      "output": 3146
+    }
+  },
+  "oracle": {
+    "verdict": "PASS",
+    "reasoning": "This is a documentation-only change to README.md that adds a 'Chain Retirement' section describing the C-008 retirement mechanism. The change reinforces rather than weakens the constitution: it accurately restates C-008's sole permitted trigger ('the chain contains content which must not be published'), correctly warns that a storage-format change is NOT such a trigger, and documents the human-decision requirement (C-008(a)), the archive-verified-before-move requirement (C-008(b)), the anchor entry recording tip/genesis/count/timestamps/path/reason (C-008(c)), and independent auditor verification via verify_chain (the C-008 auditor check). The Challenger raised two items, neither of which reaches a constitutional violation. Finding 0 (C-008 CONCERN) flags that the prose asserts a specific retirement occurred (2,471 entries, tip 2176516f) that the diff cannot itself prove; the Defender's MITIGATE is persuasive: the sentence explicitly instructs the reader to run 'python -m cli audit-retirement' to falsify the claim, which is exactly the auditor mechanism C-008 mandates, so this is a pre-merge factual-accuracy check for a human reviewer, not a defect in the diff or a modification/deletion of any ledger entry. C-008 governs code that mutates entries and the requirements for retirement; documentation describing a past retirement does not itself modify the chain. Finding 1 (C-002 OBSERVATION) is conceded non-violating by both the Challenger ('not a violation on its own') and the Defender: the diff touches exactly one file on one coherent topic, which satisfies C-002's scope-boundary rule. I independently checked the remaining constraints: C-001, C-003, C-006 involve code constructs (catch blocks, imports, secrets) absent from this prose diff; C-004/C-005 involve type annotations and new logic, also absent; C-007 binds changes to pipeline/ledger/constitution files, and README.md is none of these, and the content strengthens rather than weakens understanding of enforcement.",
+    "constraint_citations": [
+      {
+        "constraint_id": "C-008",
+        "disposition": "SATISFIED",
+        "note": "The documentation accurately describes the retirement mechanism and its (a)-(d) requirements and does not modify, delete, or overwrite any ledger entry. The Challenger's CONCERN about the asserted 2026-07-24 retirement facts is a pre-merge accuracy check (the doc invites falsification via audit-retirement, per the Defender's rebuttal), not a mutation of the chain."
+      },
+      {
+        "constraint_id": "C-002",
+        "disposition": "SATISFIED",
+        "note": "Single-file, single-topic documentation change. Both Challenger (OBSERVATION, 'not a violation') and Defender agree it stays within one coherent scope."
+      },
+      {
+        "constraint_id": "C-007",
+        "disposition": "NOT_APPLICABLE",
+        "note": "Change is to README.md, not to pipeline/, ledger/, hooks/, or the constitution. Content reinforces rather than weakens enforcement understanding."
+      },
+      {
+        "constraint_id": "C-001",
+        "disposition": "NOT_APPLICABLE",
+        "note": "No code or catch blocks in a prose documentation change."
+      },
+      {
+        "constraint_id": "C-003",
+        "disposition": "NOT_APPLICABLE",
+        "note": "No imports or dependency changes."
+      },
+      {
+        "constraint_id": "C-004",
+        "disposition": "NOT_APPLICABLE",
+        "note": "No type annotations affected."
+      },
+      {
+        "constraint_id": "C-005",
+        "disposition": "NOT_APPLICABLE",
+        "note": "No new functions or logic branches introduced."
+      },
+      {
+        "constraint_id": "C-006",
+        "disposition": "NOT_APPLICABLE",
+        "note": "No secrets or credentials present."
+      }
+    ],
+    "advisories": [
+      "Pre-merge (human reviewer): run 'python -m cli audit-retirement' against this repository to confirm the documented 2026-07-24 retirement facts (2,471 entries, tip 2176516f) match the actual archived chain and anchor entry, as the Challenger's C-008 CONCERN notes. If the numbers drift from real ledger state, correct the README before merge so it does not misrepresent the audit trail.",
+      "Pre-merge: confirm the documented 'retire' and 'audit-retirement' CLI subcommands actually exist in cli/commands.py. CLAUDE.md's Project Structure lists commands.py as covering 'verify, ledger, stats, constitution, viewer' and omits these two (Defender's observation on finding 1). If they are not yet implemented, this documents unshipped behavior; if they are, update CLAUDE.md's command list to remove the drift."
+    ],
+    "remediation": null,
+    "confidence": "HIGH",
+    "_tokens": {
+      "input": 11578,
+      "output": 2373
+    }
+  },
+  "entry_hash": "6ad616f1af80a08a68eed2983f752d8b5f88f1aad95ecfcd07a06da9828e30c5"
+}

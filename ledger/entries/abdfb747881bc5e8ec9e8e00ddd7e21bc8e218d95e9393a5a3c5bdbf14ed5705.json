@@ -1,0 +1,129 @@
+{
+  "entry_id": "0281d767-3d3f-4b81-8377-6b51ed9b556f",
+  "timestamp": "2026-07-31T05:26:00.165748+00:00",
+  "previous_hash": [
+    "5e9b2d8358a1d164b81fb6acedb427a9bc8cfc73ac72728b400ebfac35f30ae6"
+  ],
+  "constitution_hash": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3",
+  "constitution_sources": [
+    {
+      "layer": "core",
+      "path": "C:\\Users\\mstar\\Bench\\bench.json",
+      "sha256": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3"
+    }
+  ],
+  "verdict": "PASS",
+  "pipeline_error": false,
+  "change": {
+    "file": "tests\\test_retire.py",
+    "tool": "Edit",
+    "diff_summary": {
+      "file_path": "tests\\test_retire.py",
+      "change_type": "modify",
+      "old_string": "if __name__ == \"__main__\":\n    unittest.main()",
+      "new_string": "class ConcurrencyTests(RetirementTestCase):\n    \"\"\"A governed edit landing mid-retirement must never cost an entry.\n\n    Retirement reads the chain, archives it, and removes it, and those are not\n    one atomic step. A receipt appended in the gap was previously deleted\n    without ever reaching the archive or the anchor's count, which is exactly\n    the removal of an entry C-008 forbids without exception.\n    \"\"\"\n\n    def _staging_dirs(self) -> list[str]:\n        return [\n            p.name\n            for p in self.ledger_dir.iterdir()\n            if p.name.startswith(\".retiring-\")\n        ]\n\n    def test_an_append_after_archiving_is_refused_and_the_entry_survives(\n        self,\n    ) -> None:\n        self.make_entries_only_chain(2)\n        real_stage = retire._stage_segments\n\n        def append_then_stage(\n            ledger_path: str, segments: list[str], staging: Path\n        ) -> list[str]:\n            # A governance run in another session commits its receipt after the\n            # archive was verified but before the chain is moved aside.\n            self.append(\"raced.py\")\n            return real_stage(ledger_path, segments, staging)\n\n        with mock.patch.object(\n            retire, \"_stage_segments\", side_effect=append_then_stage\n        ):\n            with self.assertRaises(RetirementError) as caught:\n                self.retire()\n\n        self.assertIn(\"changed between being\", str(caught.exception))\n        after: dict = verify_chain(self.ledger)\n        self.assertTrue(after[\"valid\"])\n        # The raced receipt is still here. That is the whole point.\n        self.assertEqual(after[\"entries\"], 3)\n        self.assertEqual(self._staging_dirs(), [])\n\n    def test_an_entry_appended_before_the_anchor_is_detected(self) -> None:\n        \"\"\"The successor's genesis must be the anchor, not a racing receipt.\n\n        verify_chain passes on such a chain and audit-retirement reads the first\n        entry, so without this check the retirement would silently produce a\n        successor whose opening record is not the retirement.\n        \"\"\"\n        self.make_entries_only_chain(2)\n        real_append = retire.append_entry\n\n        def racer_first(payload: dict, path: str | None = None) -> dict:\n            if payload.get(\"verdict\") == ANCHOR_VERDICT:\n                real_append(\n                    {\n                        \"verdict\": \"PASS\",\n                        \"constitution_hash\": \"abc123\",\n                        \"change\": {\n                            \"file\": \"raced.py\",\n                            \"tool\": \"Write\",\n                            \"diff_summary\": {},\n                        },\n                    },\n                    path=path,\n                )\n            return real_append(payload, path=path)\n\n        with mock.patch.object(\n            retire, \"append_entry\", side_effect=racer_first\n        ):\n            with self.assertRaises(RetirementError) as caught:\n                self.retire()\n\n        self.assertIn(\"did not open the successor chain\", str(caught.exception))\n\n    def test_a_failed_move_restores_what_it_already_moved(self) -> None:\n        \"\"\"The old sequential delete could not do this.\n\n        An OSError partway through left the array gone and the entry files\n        behind with their parents missing, a chain plan_retirement then refuses,\n        so \"retire again\" was impossible and recovery was manual surgery.\n        \"\"\"\n        self.make_legacy_chain(legacy=2, new=1)\n        before: dict[str, bytes] = self.snapshot()\n        real_move = shutil.move\n        calls: dict[str, int] = {\"n\": 0}\n\n        def flaky_move(source: str, destination: str) -> Any:\n            calls[\"n\"] += 1\n            if calls[\"n\"] == 2:\n                raise OSError(\"no space left on device\")\n            return real_move(source, destination)\n\n        with mock.patch.object(shutil, \"move\", side_effect=flaky_move):\n            with self.assertRaises(RetirementError) as caught:\n                self.retire()\n\n        self.assertIn(\"restored\", str(caught.exception))\n        self.assertEqual(self.snapshot(), before)\n\n    def test_an_error_while_staged_restores_the_chain_and_reraises(self) -> None:\n        self.make_entries_only_chain(2)\n        before: dict[str, bytes] = self.snapshot()\n        real_verify = retire.verify_chain\n\n        def boom(path: str | None = None) -> dict:\n            if path and \".retiring-\" in str(path):\n                raise RuntimeError(\"filesystem exploded\")\n            return real_verify(path)\n\n        with mock.patch.object(retire, \"verify_chain\", side_effect=boom):\n            with self.assertRaises(RuntimeError) as caught:\n                self.retire()\n\n        # The original error surfaces rather than being masked by cleanup.\n        self.assertIn(\"exploded\", str(caught.exception))\n        self.assertEqual(self.snapshot(), before)\n        self.assertEqual(self._staging_dirs(), [])\n\n    def test_staging_is_discarded_only_after_the_retirement_succeeds(\n        self,\n    ) -> None:\n        self.make_legacy_chain(legacy=2, new=1)\n        result: dict = self.retire()\n\n        self.assertEqual(self._staging_dirs(), [])\n        self.assertEqual(\n            sorted(p.name for p in self.ledger_dir.iterdir()), [\"entries\"]\n        )\n        archive_ledger: str = str(\n            Path(result[\"archive_path\"]) / \"bench-ledger.json\"\n        )\n        self.assertTrue(verify_chain(archive_ledger)[\"valid\"])\n\n    def test_the_local_genesis_marker_matches_the_writers(self) -> None:\n        \"\"\"Re-declared for independence, so assert the two have not drifted.\"\"\"\n        import ledger.chain as chain_module\n\n        self.assertEqual(retire._GENESIS_MARKER, chain_module._GENESIS_MARKER)\n\n\nif __name__ == \"__main__\":\n    unittest.main()"
+    }
+  },
+  "challenger": {
+    "status": "FINDINGS",
+    "findings": [
+      {
+        "constraint_id": "C-004",
+        "severity": "CONCERN",
+        "location": "tests/test_retire.py: def flaky_move(source: str, destination: str) -> Any",
+        "evidence": "def flaky_move(source: str, destination: str) -> Any:\n            calls[\"n\"] += 1\n            if calls[\"n\"] == 2:\n                raise OSError(\"no space left on device\")\n            return real_move(source, destination)",
+        "reasoning": "real_move is shutil.move, whose return type is known (str per typeshed) except for the raised OSError path. The operative C-004 test is whether available precision was discarded rather than whether the literal token 'Any' appears; here a more precise return annotation (e.g. str) was available and a bare Any was used instead. This is a minor, test-only instance, but it fits the pattern the constraint flags."
+      },
+      {
+        "constraint_id": "C-004",
+        "severity": "OBSERVATION",
+        "location": "tests/test_retire.py: def racer_first(payload: dict, path: str | None = None) -> dict",
+        "evidence": "def racer_first(payload: dict, path: str | None = None) -> dict:",
+        "reasoning": "The constitution notes dict[str, Any] is the established idiom in this codebase (used 60+ times) for parsed JSON payloads like this one, and is explicitly called out as strictly more precise than bare dict. This new function uses bare dict instead. Not a violation since no existing annotation is weakened (this is new code), but it diverges from the documented codebase convention and is worth flagging."
+      }
+    ],
+    "_tokens": {
+      "input": 11022,
+      "output": 2744
+    }
+  },
+  "defender": {
+    "status": "REBUTTAL",
+    "rebuttals": [
+      {
+        "finding_index": 0,
+        "position": "MITIGATE",
+        "argument": "The Challenger is technically correct that shutil.move's real return path is str, and -> str would be strictly more precise than -> Any. I don't dispute the letter of the finding. But the practical stakes here are minimal: flaky_move is a private, test-local mock side_effect passed to mock.patch.object(shutil, 'move', side_effect=flaky_move). unittest.mock's side_effect contract is inherently Callable[..., Any] regardless of what the target function returns, so the Any here reflects the actual typing boundary the mock framework imposes, not a case where a caller downstream loses the ability to reason about a str value in production logic. This is also the only new function in the diff with this issue, it's confined to a single test, and severity was correctly scored CONCERN rather than veto. I'd support tightening it to -> str as a trivial follow-up, but it does not rise to a blocking C-004 issue given the constraint's stated target is discarded precision that matters for reasoning about correctness, and nothing downstream of this mock relies on its return type.",
+        "evidence": "with mock.patch.object(shutil, \"move\", side_effect=flaky_move): ... the function is consumed purely as a mock side_effect, never as a typed API whose callers depend on its return annotation."
+      },
+      {
+        "finding_index": 1,
+        "position": "REBUT",
+        "argument": "The Challenger's own reasoning states this is 'Not a violation since no existing annotation is weakened (this is new code)' and files it as an OBSERVATION rather than a finding of noncompliance. C-004 explicitly targets discarded precision on existing annotations or bare Any where shape is known and expressible; it does not mandate a specific idiom (dict[str, Any] over dict) for brand-new functions. racer_first is called with two structurally different literal payloads across the test (one shaped like an ANCHOR verdict check, the other a full entry dict with verdict/constitution_hash/change), so 'dict' is not obviously less correct than a parameterized alternative here, it's arguably the honest description of a heterogeneous, ad hoc test fixture. Since the Challenger concedes no violation occurred, there is nothing to rebut on the merits beyond confirming that conclusion.",
+        "evidence": "Challenger's own text: 'Not a violation since no existing annotation is weakened (this is new code), but it diverges from the documented codebase convention and is worth flagging.'"
+      }
+    ],
+    "summary": "The diff is a well-scoped, purely additive set of concurrency/atomicity regression tests for the C-008-governed retirement path, with only a trivial, non-blocking type-precision nitpick in a mock helper and one style observation the Challenger already conceded is not a violation.",
+    "_tokens": {
+      "input": 11615,
+      "output": 2869
+    }
+  },
+  "oracle": {
+    "verdict": "PASS",
+    "reasoning": "The change is a purely additive set of regression tests (tests/test_retire.py) that exercise concurrency and atomicity of the C-008-governed retirement path: refusing appends that race the archive, detecting a receipt inserted before the anchor, restoring partially-moved chains on OSError, re-raising staged-error cases without masking, and confirming staging is discarded only on success. This strengthens rather than weakens governance, aligning with C-008 (Ledger Immutability) and C-005 (test coverage), and touches no pipeline enforcement, so C-007 is not implicated. The Challenger raised two C-004 items. Finding 0 (flaky_move -> Any) is a real but minor imprecision: shutil.move's return is str and str was expressible, so the operative C-004 test (discarded available precision) is arguably met. However, the value is consumed solely as a unittest.mock side_effect, whose framework boundary is inherently Callable[..., Any], and no downstream logic reasons about the return, so it does not degrade the correctness-reasoning that C-004's rationale exists to protect. The Challenger scored it CONCERN, not veto, and the Defender's MITIGATE position is sound. Finding 1 (racer_first payload: dict) is conceded by the Challenger as 'Not a violation since no existing annotation is weakened (this is new code)'; C-004 does not mandate the dict[str, Any] idiom for new functions, and there is nothing to rebut on the merits. No veto-severity constraint is clearly violated.",
+    "constraint_citations": [
+      {
+        "constraint_id": "C-001",
+        "disposition": "NOT_APPLICABLE",
+        "note": "No catch blocks that swallow errors; the tests specifically assert that errors surface (e.g. 'exploded' re-raised, not masked)."
+      },
+      {
+        "constraint_id": "C-002",
+        "disposition": "SATISFIED",
+        "note": "All additions are cohesive retirement concurrency/atomicity tests within tests/test_retire.py; single coherent scope, no unrelated bundling."
+      },
+      {
+        "constraint_id": "C-003",
+        "disposition": "NOT_APPLICABLE",
+        "note": "No new third-party dependencies; uses stdlib (shutil, unittest.mock, pathlib) and existing project modules."
+      },
+      {
+        "constraint_id": "C-004",
+        "disposition": "SATISFIED",
+        "note": "flaky_move -> Any is a minor test-mock imprecision at the unittest.mock side_effect boundary (Callable[..., Any]) with no downstream reasoning impact; racer_first's bare dict is new code, weakens no existing annotation. Neither rises to a clear veto-level discard of precision. Advisory noted below."
+      },
+      {
+        "constraint_id": "C-005",
+        "disposition": "SATISFIED",
+        "note": "The change is itself test coverage for the retirement logic branches."
+      },
+      {
+        "constraint_id": "C-006",
+        "disposition": "NOT_APPLICABLE",
+        "note": "No secrets or credentials; string literals are test fixtures ('abc123', file names)."
+      },
+      {
+        "constraint_id": "C-007",
+        "disposition": "SATISFIED",
+        "note": "Tests exercise ledger/retire.py behavior but add no bypass, do not disable logging, and reinforce enforcement of the retirement guarantees."
+      },
+      {
+        "constraint_id": "C-008",
+        "disposition": "SATISFIED",
+        "note": "Tests assert no entry is lost across a mid-retirement append, that pre-anchor races are detected, and that failed moves restore state, directly upholding ledger immutability and the bounded retirement exception."
+      }
+    ],
+    "advisories": [
+      "Trivial follow-up: tighten flaky_move's return annotation from '-> Any' to '-> str' to match shutil.move's known return type, per the Challenger's CONCERN and the Defender's own concession. Non-blocking.",
+      "Optional consistency: racer_first's 'payload: dict' could use the codebase's documented dict[str, Any] idiom for parsed-JSON-shaped payloads, though bare dict is acceptable for a heterogeneous ad hoc fixture and is not a violation."
+    ],
+    "remediation": null,
+    "confidence": "HIGH",
+    "_tokens": {
+      "input": 12522,
+      "output": 2302
+    }
+  },
+  "entry_hash": "abdfb747881bc5e8ec9e8e00ddd7e21bc8e218d95e9393a5a3c5bdbf14ed5705"
+}
