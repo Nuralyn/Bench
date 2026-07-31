@@ -51,6 +51,18 @@ PreToolUse Hook -> Challenger (Sonnet) -> Defender (Sonnet) -> Oracle (Opus) -> 
   filename must equal the hash it contains), and `MULTIPLE_GENESIS`. The legacy
   array keeps its original positional walk at full strength. Nothing written to
   the entries directory escapes verification.
+- A whole chain may be retired under C-008's single bounded exception, and only
+  when it contains content which must not be published. `ledger/retire.py`
+  implements it: `python -m cli retire --archive-dir PATH --reason TEXT`
+  archives every segment that exists, verifies the archive *before* removing
+  anything, and opens a successor chain whose genesis is an `ANCHOR` entry
+  recording the predecessor's tip hash, genesis hash, entry count, first and
+  last timestamps, archive path, and reason. `python -m cli audit-retirement`
+  re-runs that check against the archive. Retirement refuses a chain that does
+  not verify, an empty or forked chain, and any invocation that is not a human
+  at a plain TTY, which means it cannot be run from inside a Claude Code
+  session. A storage-format change is not a permitted trigger; freezing the
+  legacy array was the answer there, not retirement.
 - On VETO: JSON permissionDecision "deny" with remediation feedback
 - On PASS: JSON permissionDecision "allow"
 - Exit code is ALWAYS 0. Flow control is via JSON, not exit codes.
@@ -73,12 +85,14 @@ bench/
   ledger/
     chain.py              # Hash-chaining, append
     verify.py             # Independent chain validation
+    retire.py             # C-008 chain retirement: archive, anchor, audit
     bench-ledger.json     # Frozen legacy chain segment (read, never written)
     ledger-meta.json      # Frozen pin on that segment's tip and count
     entries/              # One JSON file per new entry, named <entry_hash>.json
   cli/
     __main__.py           # python -m cli
-    commands.py           # verify, ledger, stats, constitution, viewer
+    commands.py           # verify, ledger, stats, constitution, viewer,
+                          # retire, audit-retirement
   utils/
     diff.py               # Diff extraction and formatting
     api.py                # Anthropic API client
@@ -181,7 +195,11 @@ The constitution lives in bench.json. Current constraints:
 - **C-005**: Test coverage for new logic (warning)
 - **C-006**: No hardcoded secrets (veto)
 - **C-007**: Governance pipeline integrity (veto)
-- **C-008**: Ledger immutability (veto)
+- **C-008**: Ledger immutability (veto). Its one bounded exception, chain
+  retirement, is implemented in `ledger/retire.py` and validated by
+  `ledger.retire.validate_anchor`, so a retirement that omits any element C-008
+  enumerates is refused rather than trusted. It is not a general-purpose reset:
+  the sole permitted trigger is unpublishable content.
 
 These are the core, and they are a floor. When Bench governs another project,
 `pipeline.constitution.load_governing_constitution()` stacks that project's
