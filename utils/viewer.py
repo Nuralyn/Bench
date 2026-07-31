@@ -771,9 +771,19 @@ _JS: str = """
       el('div', { class: 'k', text: 'entry hash' }),
       el('div', { class: 'v' }, hashCopy(entry.entry_hash))
     ));
+    // previous_hash is a string on legacy entries and a list of parent hashes
+    // on entries written after the DAG format; a merge reconciliation names
+    // two. Render every parent rather than passing an array to hashCopy, which
+    // takes a string and would fall through to 'N/A'.
+    const parents = Array.isArray(entry.previous_hash)
+      ? entry.previous_hash
+      : [entry.previous_hash];
     container.appendChild(el('div', { class: 'field' },
-      el('div', { class: 'k', text: 'previous hash' }),
-      el('div', { class: 'v' }, hashCopy(entry.previous_hash))
+      el('div', {
+        class: 'k',
+        text: parents.length > 1 ? 'previous hashes' : 'previous hash'
+      }),
+      el('div', { class: 'v' }, ...parents.map(function (p) { return hashCopy(p); }))
     ));
     if (entry.constitution_hash) {
       container.appendChild(el('div', { class: 'field' },
