@@ -1,13 +1,17 @@
 """Implementations of the Bench CLI commands (verify, ledger, stats,
-constitution, viewer).
+constitution, viewer, retire, audit-retirement).
 
 Each command returns an int exit code (0 on success, 1 on failure) and
 prints a human-readable summary to stdout. Error diagnostics go to stderr
 so the two streams can be separated in scripts.
 
-These commands are read-only reports over the ledger and constitution —
-nothing here mutates state, so there is no risk of collision with the
-governance pipeline running in parallel.
+All but one of these are read-only reports over the ledger and constitution,
+so there is no risk of collision with the governance pipeline running in
+parallel. The exception is ``cmd_retire``, which archives the active chain and
+opens a successor under C-008's single bounded exception to ledger
+immutability. It holds no logic of its own: every decision, guard, and write
+lives in ``ledger/retire.py``, and this module only parses arguments, supplies
+the real ``sys.stdin.isatty`` and ``input``, and renders the result.
 """
 
 import os
@@ -17,7 +21,13 @@ import tempfile
 import webbrowser
 from typing import Any
 
-from ledger.chain import load_ledger
+from ledger.chain import LedgerReadError, load_ledger, resolve_ledger_path
+from ledger.retire import (
+    ANCHOR_TOOL,
+    RetirementError,
+    audit_retirement,
+    execute_retirement,
+)
 from ledger.verify import verify_chain
 from pipeline.constitution import (
     ConstitutionError,
@@ -301,6 +311,130 @@ def cmd_viewer() -> int:
             file=sys.stderr,
         )
     return 0
+
+
+def cmd_retire(
+    archive_dir: str | None,
+    reason: str | None,
+    remediation: str | None = None,
+) -> int:
+    """Retire the active chain under C-008's bounded exception.
+
+    Argument handling and rendering only. Every guard, ordering guarantee, and
+    write lives in ``ledger.retire.execute_retirement``; this passes it the real
+    ``sys.stdin.isatty`` and ``input`` so the human gate is the live one and not
+    a test seam.
+
+    Both flags are required and neither has a default. ``--archive-dir`` in
+    particular must be stated deliberately, because C-008(d) commits the
+    operator to retaining what lands there indefinitely.
+    """
+    if not archive_dir:
+        print(
+            "[bench cli] retire requires --archive-dir <path>; the archive is "
+            "retained indefinitely (C-008(d)), so name it deliberately",
+            file=sys.stderr,
+        )
+        return 1
+    if not reason:
+        print(
+            "[bench cli] retire requires --reason <text> describing the "
+            "content which must not be published",
+            file=sys.stderr,
+        )
+        return 1
+
+    try:
+        result: dict[str, Any] = execute_retirement(
+            archive_dir=archive_dir,
+            reason=reason,
+            remediation=remediation,
+            stdin_isatty=sys.stdin.isatty,
+            prompt=input,
+        )
+    except RetirementError as e:
+        print(f"[bench cli] {e}", file=sys.stderr)
+        return 1
+    except LedgerReadError as e:
+        print(f"[bench cli] ledger unreadable, nothing retired: {e}", file=sys.stderr)
+        return 1
+    except OSError as e:
+        print(f"[bench cli] retirement failed: {e}", file=sys.stderr)
+        return 1
+
+    anchor: dict = result.get("anchor", {})
+    successor: dict = result.get("successor", {})
+    print("Chain retired.")
+    print(f"  archive      : {result.get('archive_path', '-')}")
+    print(f"  archived     : {result.get('archive_entries', 0)} entries, verified")
+    print(f"  anchor       : {anchor.get('entry_hash', '-')}")
+    print(f"  successor    : {successor.get('entries', 0)} entry (the anchor)")
+    print()
+    print("Confirm the retirement independently with:")
+    print("  python -m cli audit-retirement")
+    return 0
+
+
+def cmd_audit_retirement(archive: str | None = None) -> int:
+    """Run C-008's auditor check against the current chain's opening anchor.
+
+    C-008 says an auditor confirms a retirement by running ``verify_chain``
+    against the archive and checking that its tip hash and entry count match the
+    anchor. This is that check, so it is a command rather than a paragraph
+    someone has to reimplement by hand.
+
+    With no argument it reads the anchor from the current chain's first entry
+    and the archive location from the path that anchor recorded.
+    """
+    entries: list[dict] = load_ledger()
+    if not entries:
+        print("Ledger is empty. No retirement to audit.", file=sys.stderr)
+        return 1
+
+    anchor: dict = entries[0]
+    change: Any = anchor.get("change")
+    tool: str = (
+        str(change.get("tool", "")) if isinstance(change, dict) else ""
+    )
+    if tool != ANCHOR_TOOL:
+        print(
+            f"This chain does not open with a retirement anchor "
+            f"(first entry tool is {tool or 'unset'!r}), so there is nothing "
+            f"to audit.",
+            file=sys.stderr,
+        )
+        return 1
+
+    resolved: str | None = archive
+    if resolved and os.path.isdir(resolved):
+        # Accept either the archive directory or the ledger file inside it.
+        resolved = os.path.join(resolved, os.path.basename(resolve_ledger_path()))
+
+    report: dict[str, Any] = audit_retirement(anchor, resolved)
+
+    if report.get("defects"):
+        print("Retirement audit: ANCHOR MALFORMED", file=sys.stderr)
+        for defect in report["defects"]:
+            print(f"  - {defect}", file=sys.stderr)
+        return 1
+
+    print(f"  archive      : {_display_path(str(report.get('archive_path', '-')))}")
+    print(f"  verified file: {_display_path(str(report.get('archive_ledger', '-')))}")
+    print(f"  archive tip  : {report.get('found_tips', [])}")
+    print(f"  anchor tip   : {report.get('expected_tip', '-')}")
+    print(f"  archive count: {report.get('found_entries', '-')}")
+    print(f"  anchor count : {report.get('expected_entries', '-')}")
+
+    if report.get("ok"):
+        print("Retirement audit: CONFIRMED")
+        return 0
+
+    print("Retirement audit: FAILED", file=sys.stderr)
+    if reason := report.get("reason"):
+        print(f"  reason       : {reason}", file=sys.stderr)
+    if message := report.get("message"):
+        print(f"  message      : {message}", file=sys.stderr)
+    return 1
 
 
 def _print_entry_line(entry: dict) -> None:
