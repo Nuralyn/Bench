@@ -1,0 +1,133 @@
+{
+  "entry_id": "3ae58e3f-1adc-4a7d-b410-4158432799b5",
+  "timestamp": "2026-07-31T05:13:12.250783+00:00",
+  "previous_hash": [
+    "eaba93bf3e9ddcdb368f9fb0e7f58e9551b80d597456e0dda5b1714d227d74cb"
+  ],
+  "constitution_hash": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3",
+  "constitution_sources": [
+    {
+      "layer": "core",
+      "path": "C:\\Users\\mstar\\Bench\\bench.json",
+      "sha256": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3"
+    }
+  ],
+  "verdict": "PASS",
+  "pipeline_error": false,
+  "change": {
+    "file": "ledger\\retire.py",
+    "tool": "Edit",
+    "diff_summary": {
+      "file_path": "ledger\\retire.py",
+      "change_type": "modify",
+      "old_string": "def _remove_segments(ledger_path: str, segments: list[str]) -> None:\n    \"\"\"Remove the live segments after the archive has verified.\"\"\"\n    source_dir: Path = Path(ledger_path).parent\n    for name in segments:\n        target: Path = source_dir / name\n        if target.is_dir():\n            shutil.rmtree(target)\n        elif target.exists():\n            target.unlink()",
+      "new_string": "def _restore_segments(staging: Path, ledger_path: str, moved: list[str]) -> None:\n    \"\"\"Move staged segments back, undoing a retirement that could not finish.\"\"\"\n    destination: Path = Path(ledger_path).parent\n    destination.mkdir(parents=True, exist_ok=True)\n    for name in moved:\n        source: Path = staging / name\n        if source.exists():\n            shutil.move(str(source), str(destination / name))\n\n\ndef _stage_segments(\n    ledger_path: str, segments: list[str], staging: Path\n) -> list[str]:\n    \"\"\"Move the live segments aside rather than deleting them.\n\n    Deleting outright is not recoverable. An OSError partway through the old\n    sequential delete left a half-dismantled chain: the frozen array gone but\n    the entry files still present, their parents now missing. ``plan_retirement``\n    refuses such a chain, so the operator could not simply retry, and the\n    recovery was undocumented manual surgery against the archive.\n\n    Moving is one rename per segment on the same filesystem, and it is\n    reversible. A failure here restores what it already moved and leaves the\n    chain exactly as it was, so \"retire again\" is honest advice.\n\n    Returns the names actually moved, so the caller can undo them later.\n    \"\"\"\n    staging.mkdir(parents=True, exist_ok=False)\n    source_dir: Path = Path(ledger_path).parent\n    moved: list[str] = []\n    try:\n        for name in segments:\n            source: Path = source_dir / name\n            if not source.exists():\n                continue\n            shutil.move(str(source), str(staging / name))\n            moved.append(name)\n    except OSError as exc:\n        _restore_segments(staging, ledger_path, moved)\n        raise RetirementError(\n            f\"could not move the live chain aside ({exc}). It was restored \"\n            f\"and nothing was retired.\"\n        ) from exc\n    return moved\n\n\ndef _discard_staging(staging: Path) -> None:\n    \"\"\"Delete the staged copy once the retirement has fully succeeded.\n\n    Best effort by design. At this point the archive is verified and the anchor\n    is written, so a leftover staging directory is a redundant copy rather than\n    a risk, and failing the whole retirement over it would be worse than saying\n    so. Readers ignore it: nothing resolves a dot-prefixed directory as a ledger\n    segment.\n    \"\"\"\n    try:\n        shutil.rmtree(staging)\n    except OSError as exc:\n        print(\n            f\"[bench retire] retirement succeeded but the staged copy at \"\n            f\"{staging} could not be removed ({exc}); it is redundant with the \"\n            f\"archive and can be deleted by hand\",\n            file=sys.stderr,\n        )"
+    }
+  },
+  "challenger": {
+    "status": "FINDINGS",
+    "findings": [
+      {
+        "constraint_id": "C-008",
+        "severity": "CONCERN",
+        "location": "ledger/retire.py: _stage_segments (call site not shown in diff)",
+        "evidence": "def _stage_segments(ledger_path: str, segments: list[str], staging: Path) -> list[str]: ... staging.mkdir(parents=True, exist_ok=False) ... shutil.move(str(source), str(staging / name))",
+        "reasoning": "C-008 requires the archived copy to pass verify_chain BEFORE the original is moved. This function's docstring implies it replaces the old _remove_segments, which was documented as running 'after the archive has verified,' so the ordering is plausibly preserved. But the diff only shows the function definitions, not the orchestration/call site that decides when _stage_segments runs relative to archive verification. The Oracle should confirm the caller still verifies the archive before invoking _stage_segments."
+      },
+      {
+        "constraint_id": "C-005",
+        "severity": "CONCERN",
+        "location": "ledger/retire.py: _stage_segments, _restore_segments, _discard_staging (new)",
+        "evidence": "Three new functions (_restore_segments, _stage_segments, _discard_staging) replace the single _remove_segments function, adding new branches (mkdir failure, OSError mid-move, restore-on-failure, best-effort discard failure).",
+        "reasoning": "New logic and new failure branches are introduced (partial-move rollback, best-effort cleanup warning) with no test cases visible in the diff. This is a warning-level constraint requiring either tests or explicit justification for deferral, neither of which appears here."
+      },
+      {
+        "constraint_id": "C-007",
+        "severity": "OBSERVATION",
+        "location": "ledger/retire.py: _discard_staging",
+        "evidence": "except OSError as exc: print(f\"[bench retire] retirement succeeded but the staged copy at {staging} could not be removed ({exc}); ...\", file=sys.stderr)",
+        "reasoning": "This is a change to the governance pipeline itself (ledger/), so C-007 applies. The function deliberately downgrades a cleanup failure to a printed warning rather than propagating it, on the documented rationale that retirement has already succeeded by that point (archive verified, anchor written). This is a defensible, well-justified design choice and satisfies C-001's 'log' option, but it is a behavioral softening worth the Oracle explicitly confirming is scoped only to the post-success cleanup step and not to any verification-relevant path."
+      }
+    ],
+    "_tokens": {
+      "input": 9888,
+      "output": 5015
+    }
+  },
+  "defender": {
+    "status": "REBUTTAL",
+    "rebuttals": [
+      {
+        "finding_index": 0,
+        "position": "MITIGATE",
+        "argument": "The diff is honest evidence that the call site isn't shown, so the Challenger is right that the Oracle can't confirm ordering from this diff alone. But the design itself, as written, supports the correct ordering rather than undermining it. _discard_staging's docstring states plainly: 'At this point the archive is verified and the anchor is written' - meaning the function that stages (moves) the live segments is a distinct step from archiving and verification, which happen earlier in the orchestration this diff doesn't touch. The old _remove_segments docstring said segments are removed 'after the archive has verified'; this rewrite preserves that same precondition, it just changes 'remove' to 'stage, and only discard once retirement fully succeeded.' If anything, this change is strictly safer for C-008(b) than what it replaces: the old code destroyed the live chain irreversibly the moment it ran, while the new code moves it to a recoverable staging area and only discards it after the anchor is written. A bug in the orchestrator that called staging before verification would have been an equally live risk under the old code, and nothing in this diff suggests the call order changed.",
+        "evidence": "New docstring on _discard_staging: 'the archive is verified and the anchor is written' establishes staging/discard as post-verification steps; old _remove_segments docstring said the same of deletion ('after the archive has verified'), so the precondition is carried forward, not weakened."
+      },
+      {
+        "finding_index": 1,
+        "position": "CONCEDE",
+        "argument": "No test cases accompany the three new functions or their new failure branches (mkdir collision, mid-move OSError with rollback, best-effort discard failure). This is exactly the kind of new branching logic C-005 is meant to catch, and nothing in the diff or file context supplies a justification for deferring tests. I won't manufacture one. That said, C-005 is warning severity, not veto, and the added complexity here is a net safety improvement (irreversible delete becomes reversible move-then-discard), which somewhat lowers the practical cost of the gap versus, say, untested logic that changes correctness of the archive/verify path itself.",
+        "evidence": "C-005 severity is 'warning' per the constitution; the diff contains no test file changes and no comment deferring testing."
+      },
+      {
+        "finding_index": 2,
+        "position": "REBUT",
+        "argument": "The Challenger's own analysis already concludes this satisfies C-001's logging option and is 'defensible, well-justified' - I'd go further and say the scope concern is answered by the code itself, not just the docstring. _discard_staging does exactly one thing: rmtree on the staging directory, wrapped in its own try/except that only fires after the caller has already completed archive verification and anchor-writing (per the docstring's explicit ordering claim). There's no verification logic, no anchor-writing, and no chain-integrity check inside this function or reachable from it in the diff - it can only ever run after those have already succeeded, because it's the last step in the sequence described. Downgrading a leftover-directory cleanup failure to a stderr warning after the ledger has already been safely retired is not a softening of governance; it's correctly distinguishing 'the operation succeeded, one non-critical cleanup step didn't' from 'the operation failed.' Conflating those would be the actual C-001 problem (crying wolf on a fully-succeeded retirement).",
+        "evidence": "_discard_staging's docstring: 'Best effort by design. At this point the archive is verified and the anchor is written' - the function's only side effect is shutil.rmtree(staging) with the exception path limited to a stderr print, no swallowing of verification or write failures."
+      }
+    ],
+    "summary": "The change is a genuine safety improvement over the code it replaces (reversible move-then-discard instead of irreversible delete) with docstring evidence supporting correct C-008 ordering, but it ships new branching logic without tests, which the Challenger correctly flags under warning-level C-005.",
+    "_tokens": {
+      "input": 10809,
+      "output": 3039
+    }
+  },
+  "oracle": {
+    "verdict": "PASS",
+    "reasoning": "This change to ledger/retire.py replaces the irreversible _remove_segments delete with a reversible move-then-discard sequence (_stage_segments, _restore_segments, _discard_staging). No veto-severity constraint is violated by the diff as presented. On C-008 (Challenger finding index 0, CONCERN), the requirement is that the archive pass verify_chain BEFORE the original is moved. The Defender correctly notes (rebuttal 0, MITIGATE) that the diff does not touch the orchestration/call site and that the preserved precondition is documented in both the old docstring ('after the archive has verified') and the new _discard_staging docstring ('the archive is verified and the anchor is written'). Nothing in the visible change alters the ordering, and the change is strictly safer for C-008(b): the old code destroyed the live chain irreversibly the instant it ran, while the new code moves segments to recoverable staging and only discards after the anchor is written, with a rollback (_restore_segments) on partial failure. On C-001/C-007 (Challenger finding index 2, OBSERVATION; Defender rebuttal 2, REBUT), _discard_staging's OSError handler logs to stderr rather than swallowing, satisfying C-001's 'log' option, and it downgrades only a post-success, redundant-cleanup failure, not any verification or anchor-writing path, so it does not weaken enforcement under C-007. _stage_segments catches OSError, restores, and re-raises a typed RetirementError, which also satisfies C-001. On C-005 (Challenger finding index 1, CONCERN; Defender rebuttal 1, CONCEDE), the three new functions and their new failure branches ship without tests and without a stated deferral justification, but C-005 is warning severity, not veto, so it is recorded as an advisory rather than a veto trigger.",
+    "constraint_citations": [
+      {
+        "constraint_id": "C-001",
+        "disposition": "SATISFIED",
+        "note": "_stage_segments re-raises a typed RetirementError after rollback; _discard_staging logs to stderr. No empty or comment-only catch blocks."
+      },
+      {
+        "constraint_id": "C-002",
+        "disposition": "SATISFIED",
+        "note": "Single coherent scope: converting segment removal into reversible staging within retire.py. No unrelated edits bundled."
+      },
+      {
+        "constraint_id": "C-004",
+        "disposition": "SATISFIED",
+        "note": "All new functions carry full parameter and return type annotations (Path, str, list[str], None). No precision discarded."
+      },
+      {
+        "constraint_id": "C-005",
+        "disposition": "VIOLATED",
+        "note": "Warning severity. New functions and failure branches lack tests and stated deferral justification (Defender conceded). Does not trigger veto."
+      },
+      {
+        "constraint_id": "C-007",
+        "disposition": "SATISFIED",
+        "note": "Change to ledger/ file, but softening is confined to post-success cleanup; no verification, anchor-writing, or logging is disabled. Net safety improvement."
+      },
+      {
+        "constraint_id": "C-008",
+        "disposition": "SATISFIED",
+        "note": "Diff does not alter the archive-verify-before-move ordering; it makes segment removal reversible. Docstring evidence carries the precondition forward. Call site not shown but unchanged by this diff."
+      }
+    ],
+    "advisories": [
+      "C-005: The three new functions and their failure branches (mkdir collision via exist_ok=False, mid-move OSError with rollback, best-effort discard failure) have no accompanying tests. Add tests or an explicit deferral justification before this logic is relied upon.",
+      "C-008 verification: This diff does not include the orchestration call site. The verdict rests on the ordering being unchanged from the prior code. If a future change moves _stage_segments relative to archive verification, that must be re-governed, since C-008(b) requires verify_chain to pass on the archive BEFORE any live segment is moved.",
+      "Confirm 'sys' is already imported in retire.py, since _discard_staging writes to sys.stderr; an undeclared use would touch C-003 (stdlib, so not a supply-chain concern, but should resolve at import time)."
+    ],
+    "remediation": null,
+    "confidence": "MODERATE",
+    "_tokens": {
+      "input": 12125,
+      "output": 2520
+    }
+  },
+  "entry_hash": "c99b95287b38021542868ece2431552084186c75ba536463857a513e7047f660"
+}

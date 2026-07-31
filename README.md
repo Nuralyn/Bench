@@ -296,6 +296,13 @@ verbatim. Use a plain terminal. Be honest about what this buys: it raises the
 bar, it is not cryptographic proof, and what an auditor actually relies on is the
 `human_decision` attestation recorded in the anchor.
 
+Retire when nothing else is writing to the ledger. Reading, archiving, and
+removing a chain are not one atomic step, so a governed edit that lands mid
+retirement would otherwise have its receipt deleted without ever reaching the
+archive. Retirement moves the chain aside rather than deleting it and re-checks
+it against the archive before committing, so that case is refused and the chain
+is restored exactly as it was, but the retry is yours to run.
+
 The archive is a directory holding whichever segments existed. A first
 retirement archives the frozen array, its meta pin, and the entries directory; a
 later one archives only `entries/`, because a chain that retirement created has

@@ -577,5 +577,148 @@ class ProjectRelativeTests(unittest.TestCase):
         self.assertNotIn("\\", recorded)
 
 
+class ConcurrencyTests(RetirementTestCase):
+    """A governed edit landing mid-retirement must never cost an entry.
+
+    Retirement reads the chain, archives it, and removes it, and those are not
+    one atomic step. A receipt appended in the gap was previously deleted
+    without ever reaching the archive or the anchor's count, which is exactly
+    the removal of an entry C-008 forbids without exception.
+    """
+
+    def _staging_dirs(self) -> list[str]:
+        return [
+            p.name
+            for p in self.ledger_dir.iterdir()
+            if p.name.startswith(".retiring-")
+        ]
+
+    def test_an_append_after_archiving_is_refused_and_the_entry_survives(
+        self,
+    ) -> None:
+        self.make_entries_only_chain(2)
+        real_stage = retire._stage_segments
+
+        def append_then_stage(
+            ledger_path: str, segments: list[str], staging: Path
+        ) -> list[str]:
+            # A governance run in another session commits its receipt after the
+            # archive was verified but before the chain is moved aside.
+            self.append("raced.py")
+            return real_stage(ledger_path, segments, staging)
+
+        with mock.patch.object(
+            retire, "_stage_segments", side_effect=append_then_stage
+        ):
+            with self.assertRaises(RetirementError) as caught:
+                self.retire()
+
+        self.assertIn("changed between being", str(caught.exception))
+        after: dict = verify_chain(self.ledger)
+        self.assertTrue(after["valid"])
+        # The raced receipt is still here. That is the whole point.
+        self.assertEqual(after["entries"], 3)
+        self.assertEqual(self._staging_dirs(), [])
+
+    def test_an_entry_appended_before_the_anchor_is_detected(self) -> None:
+        """The successor's genesis must be the anchor, not a racing receipt.
+
+        verify_chain passes on such a chain and audit-retirement reads the first
+        entry, so without this check the retirement would silently produce a
+        successor whose opening record is not the retirement.
+        """
+        self.make_entries_only_chain(2)
+        real_append = retire.append_entry
+
+        def racer_first(payload: dict, path: str | None = None) -> dict:
+            if payload.get("verdict") == ANCHOR_VERDICT:
+                real_append(
+                    {
+                        "verdict": "PASS",
+                        "constitution_hash": "abc123",
+                        "change": {
+                            "file": "raced.py",
+                            "tool": "Write",
+                            "diff_summary": {},
+                        },
+                    },
+                    path=path,
+                )
+            return real_append(payload, path=path)
+
+        with mock.patch.object(
+            retire, "append_entry", side_effect=racer_first
+        ):
+            with self.assertRaises(RetirementError) as caught:
+                self.retire()
+
+        self.assertIn("did not open the successor chain", str(caught.exception))
+
+    def test_a_failed_move_restores_what_it_already_moved(self) -> None:
+        """The old sequential delete could not do this.
+
+        An OSError partway through left the array gone and the entry files
+        behind with their parents missing, a chain plan_retirement then refuses,
+        so "retire again" was impossible and recovery was manual surgery.
+        """
+        self.make_legacy_chain(legacy=2, new=1)
+        before: dict[str, bytes] = self.snapshot()
+        real_move = shutil.move
+        calls: dict[str, int] = {"n": 0}
+
+        def flaky_move(source: str, destination: str) -> Any:
+            calls["n"] += 1
+            if calls["n"] == 2:
+                raise OSError("no space left on device")
+            return real_move(source, destination)
+
+        with mock.patch.object(shutil, "move", side_effect=flaky_move):
+            with self.assertRaises(RetirementError) as caught:
+                self.retire()
+
+        self.assertIn("restored", str(caught.exception))
+        self.assertEqual(self.snapshot(), before)
+
+    def test_an_error_while_staged_restores_the_chain_and_reraises(self) -> None:
+        self.make_entries_only_chain(2)
+        before: dict[str, bytes] = self.snapshot()
+        real_verify = retire.verify_chain
+
+        def boom(path: str | None = None) -> dict:
+            if path and ".retiring-" in str(path):
+                raise RuntimeError("filesystem exploded")
+            return real_verify(path)
+
+        with mock.patch.object(retire, "verify_chain", side_effect=boom):
+            with self.assertRaises(RuntimeError) as caught:
+                self.retire()
+
+        # The original error surfaces rather than being masked by cleanup.
+        self.assertIn("exploded", str(caught.exception))
+        self.assertEqual(self.snapshot(), before)
+        self.assertEqual(self._staging_dirs(), [])
+
+    def test_staging_is_discarded_only_after_the_retirement_succeeds(
+        self,
+    ) -> None:
+        self.make_legacy_chain(legacy=2, new=1)
+        result: dict = self.retire()
+
+        self.assertEqual(self._staging_dirs(), [])
+        self.assertEqual(
+            sorted(p.name for p in self.ledger_dir.iterdir()), ["entries"]
+        )
+        archive_ledger: str = str(
+            Path(result["archive_path"]) / "bench-ledger.json"
+        )
+        self.assertTrue(verify_chain(archive_ledger)["valid"])
+
+    def test_the_local_genesis_marker_matches_the_writers(self) -> None:
+        """Re-declared for independence, so assert the two have not drifted."""
+        import ledger.chain as chain_module
+
+        self.assertEqual(retire._GENESIS_MARKER, chain_module._GENESIS_MARKER)
+
+
 if __name__ == "__main__":
     unittest.main()
