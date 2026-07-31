@@ -16,6 +16,7 @@ import unittest
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 _REPO_ROOT: Path = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
@@ -30,9 +31,12 @@ from ledger.chain import (  # noqa: E402
     _redact_external_diff,
     append_entry,
     compute_entry_hash,
+    LedgerReadError,
     load_ledger,
+    resolve_entries_dir,
     resolve_ledger_path,
 )
+from tests._ledger_fixtures import build_valid_chain  # noqa: E402
 
 
 class ComputeEntryHashTests(unittest.TestCase):
@@ -145,15 +149,20 @@ class ResolveLedgerPathTests(unittest.TestCase):
                     },
                 }
             )
-            written: Path = Path(foreign) / ".bench" / "bench-ledger.json"
-            self.assertTrue(written.exists(), "verdict did not land in project")
+            written: Path = Path(foreign) / ".bench" / "entries"
+            self.assertTrue(
+                written.is_dir() and any(written.glob("*.json")),
+                "verdict did not land in project",
+            )
 
             entries: list[dict] = load_ledger()
             self.assertEqual(len(entries), 1)
             self.assertEqual(entries[0]["change"]["file"], "app/main.py")
 
-            # The meta anchor is colocated with the chain it describes.
-            self.assertTrue((Path(foreign) / ".bench" / "ledger-meta.json").exists())
+            # The entries directory is colocated with the ledger it belongs to.
+            self.assertEqual(
+                Path(resolve_entries_dir()).resolve(), written.resolve()
+            )
 
             # Bench's own ledger must be untouched by a foreign project.
             bench_entries: list[dict] = load_ledger(_DEFAULT_LEDGER_PATH)
@@ -390,7 +399,10 @@ class AppendEntryTests(unittest.TestCase):
     def test_second_entry_links_to_first(self) -> None:
         first: dict = append_entry(self._minimal_result(), path=self._ledger)
         second: dict = append_entry(self._minimal_result(), path=self._ledger)
-        self.assertEqual(second["previous_hash"], first["entry_hash"])
+        # A list of every current tip, not a bare string: that is what lets a
+        # fork left by a git merge be reconciled by the next append.
+        self.assertEqual(second["previous_hash"], [first["entry_hash"]])
+        self.assertEqual(first["previous_hash"], "GENESIS")
 
     def test_entry_hash_is_valid(self) -> None:
         entry: dict = append_entry(self._minimal_result(), path=self._ledger)
@@ -415,25 +427,64 @@ class AppendEntryTests(unittest.TestCase):
         self.assertEqual(entry["change"]["file"], "unknown")
         self.assertEqual(entry["change"]["tool"], "unknown")
 
-    def test_ledger_file_created_on_first_append(self) -> None:
+    def test_entry_file_created_on_first_append(self) -> None:
+        """Entries are written one per file, named by their own hash."""
+        entry: dict = append_entry(self._minimal_result(), path=self._ledger)
+        entry_file: Path = (
+            Path(resolve_entries_dir(self._ledger)) / f"{entry['entry_hash']}.json"
+        )
+        self.assertTrue(entry_file.is_file())
+        written: dict = json.loads(entry_file.read_text(encoding="utf-8"))
+        self.assertEqual(written["entry_hash"], entry["entry_hash"])
+
+    def test_legacy_array_is_never_written(self) -> None:
+        """The frozen segment must not be created or touched by an append.
+
+        A file that is never written cannot conflict between branches, and
+        freezing it is what keeps C-008 satisfied without moving any entry.
+        """
         self.assertFalse(os.path.exists(self._ledger))
         append_entry(self._minimal_result(), path=self._ledger)
-        self.assertTrue(os.path.exists(self._ledger))
+        self.assertFalse(os.path.exists(self._ledger))
+        self.assertFalse(os.path.exists(self._meta))
 
-    def test_meta_file_created_on_first_append(self) -> None:
-        append_entry(self._minimal_result(), path=self._ledger)
-        self.assertTrue(os.path.exists(self._meta))
+    def test_append_leaves_an_existing_legacy_array_byte_identical(self) -> None:
+        seeded: list[dict] = build_valid_chain(3)
+        Path(self._ledger).write_text(
+            json.dumps(seeded, indent=2), encoding="utf-8"
+        )
+        before: bytes = Path(self._ledger).read_bytes()
 
-    def test_meta_entry_count_incremented(self) -> None:
-        append_entry(self._minimal_result(), path=self._ledger)
-        append_entry(self._minimal_result(), path=self._ledger)
-        meta: dict = json.loads(Path(self._meta).read_text(encoding="utf-8"))
-        self.assertEqual(meta["entry_count"], 2)
-
-    def test_meta_latest_hash_matches(self) -> None:
         entry: dict = append_entry(self._minimal_result(), path=self._ledger)
-        meta: dict = json.loads(Path(self._meta).read_text(encoding="utf-8"))
-        self.assertEqual(meta["latest_hash"], entry["entry_hash"])
+
+        self.assertEqual(Path(self._ledger).read_bytes(), before)
+        self.assertEqual(entry["previous_hash"], [seeded[-1]["entry_hash"]])
+
+    def test_refuses_to_overwrite_an_existing_entry_file(self) -> None:
+        """C-008: an existing entry file is never overwritten.
+
+        Real entries carry a uuid and timestamp so their hashes differ; the
+        hash is pinned here so the collision is deterministic and the raising
+        call is unambiguous.
+        """
+        with patch("ledger.chain.compute_entry_hash", return_value="deadbeef"):
+            append_entry(self._minimal_result(), path=self._ledger)
+            with self.assertRaises(LedgerReadError):
+                append_entry(self._minimal_result(), path=self._ledger)
+
+    def test_corrupt_legacy_array_raises_and_is_left_on_disk(self) -> None:
+        """Fail closed, and preserve the evidence.
+
+        Treating a corrupt array as an empty chain is what previously let the
+        next append restart from GENESIS and overwrite the damaged file.
+        """
+        Path(self._ledger).write_text("{not json", encoding="utf-8")
+        before: bytes = Path(self._ledger).read_bytes()
+
+        with self.assertRaises(LedgerReadError):
+            append_entry(self._minimal_result(), path=self._ledger)
+
+        self.assertEqual(Path(self._ledger).read_bytes(), before)
 
     def test_stages_are_cap_truncated(self) -> None:
         result: dict = self._minimal_result()
