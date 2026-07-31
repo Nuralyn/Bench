@@ -1,0 +1,100 @@
+{
+  "entry_id": "079f7b38-f6ef-4836-9815-1f89a955931f",
+  "timestamp": "2026-07-31T00:49:14.010295+00:00",
+  "previous_hash": [
+    "66a9632df1501ec83eabb3037d877a5fe5cbe88e21b466341b43132a0dd2bb97"
+  ],
+  "constitution_hash": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3",
+  "constitution_sources": [
+    {
+      "layer": "core",
+      "path": "E:\\dev\\Bench\\bench.json",
+      "sha256": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3"
+    }
+  ],
+  "verdict": "PASS",
+  "pipeline_error": false,
+  "change": {
+    "file": "tests\\test_ledger_dag.py",
+    "tool": "Edit",
+    "diff_summary": {
+      "file_path": "tests\\test_ledger_dag.py",
+      "change_type": "modify",
+      "old_string": "class ConstantAgreementTests(unittest.TestCase):",
+      "new_string": "class MalformedLinkTests(unittest.TestCase):\n    \"\"\"A link that names nothing, or names a non-string, is not a valid link.\"\"\"\n\n    def setUp(self) -> None:\n        self._tmp: str = tempfile.mkdtemp()\n        self.addCleanup(shutil.rmtree, self._tmp, True)\n        self._ledger: str = os.path.join(self._tmp, \"bench-ledger.json\")\n        self._entries: Path = Path(resolve_entries_dir(self._ledger))\n\n    def _rewrite(self, entry: dict, previous_hash: object) -> None:\n        \"\"\"Replace an entry's link and re-file it under its new hash.\"\"\"\n        (self._entries / f\"{entry['entry_hash']}.json\").unlink()\n        entry = dict(entry)\n        entry[\"previous_hash\"] = previous_hash\n        entry[\"entry_hash\"] = compute_entry_hash(entry)\n        (self._entries / f\"{entry['entry_hash']}.json\").write_text(\n            json.dumps(entry, indent=2), encoding=\"utf-8\"\n        )\n\n    def test_empty_parent_list_is_not_a_genesis(self) -> None:\n        entry: dict = append_entry(_result(), path=self._ledger)\n        self._rewrite(entry, [])\n\n        result: dict = verify_chain(self._ledger)\n        self.assertFalse(result[\"valid\"])\n        self.assertEqual(result[\"failure_type\"], \"SCHEMA_ERROR\")\n\n    def test_non_string_parent_element_is_rejected(self) -> None:\n        first: dict = append_entry(_result(\"one.py\"), path=self._ledger)\n        second: dict = append_entry(_result(\"two.py\"), path=self._ledger)\n        self._rewrite(second, [first[\"entry_hash\"], 123])\n\n        result: dict = verify_chain(self._ledger)\n        self.assertFalse(result[\"valid\"])\n        self.assertEqual(result[\"failure_type\"], \"SCHEMA_ERROR\")\n\n    def test_empty_string_parent_is_rejected(self) -> None:\n        entry: dict = append_entry(_result(), path=self._ledger)\n        self._rewrite(entry, \"\")\n\n        result: dict = verify_chain(self._ledger)\n        self.assertFalse(result[\"valid\"])\n        self.assertEqual(result[\"failure_type\"], \"SCHEMA_ERROR\")\n\n\nclass StrictWritePathTests(unittest.TestCase):\n    \"\"\"An append must not build on entry files it has not validated.\"\"\"\n\n    def setUp(self) -> None:\n        self._tmp: str = tempfile.mkdtemp()\n        self.addCleanup(shutil.rmtree, self._tmp, True)\n        self._ledger: str = os.path.join(self._tmp, \"bench-ledger.json\")\n        self._entries: Path = Path(resolve_entries_dir(self._ledger))\n        self._entries.mkdir(parents=True, exist_ok=True)\n\n    def test_empty_object_entry_file_blocks_the_append(self) -> None:\n        \"\"\"The corruption path: `{}` yields no tips, so the next entry would\n        have been written with an empty parent list and become a second root.\"\"\"\n        (self._entries / \"junk.json\").write_text(\"{}\", encoding=\"utf-8\")\n\n        with self.assertRaises(LedgerReadError):\n            append_entry(_result(), path=self._ledger)\n\n    def test_hash_mismatch_in_an_existing_entry_blocks_the_append(self) -> None:\n        entry: dict = append_entry(_result(), path=self._ledger)\n        target: Path = self._entries / f\"{entry['entry_hash']}.json\"\n        tampered: dict = json.loads(target.read_text(encoding=\"utf-8\"))\n        tampered[\"verdict\"] = \"VETO\"\n        target.write_text(json.dumps(tampered, indent=2), encoding=\"utf-8\")\n\n        with self.assertRaises(LedgerReadError):\n            append_entry(_result(), path=self._ledger)\n\n    def test_misnamed_entry_file_blocks_the_append(self) -> None:\n        entry: dict = append_entry(_result(), path=self._ledger)\n        (self._entries / f\"{entry['entry_hash']}.json\").rename(\n            self._entries / \"wrong-name.json\"\n        )\n\n        with self.assertRaises(LedgerReadError):\n            append_entry(_result(), path=self._ledger)\n\n\nclass SummaryEndpointTests(unittest.TestCase):\n    \"\"\"Endpoints must come from the graph, not from iteration order.\"\"\"\n\n    def setUp(self) -> None:\n        self._tmp: str = tempfile.mkdtemp()\n        self.addCleanup(shutil.rmtree, self._tmp, True)\n        self._ledger: str = os.path.join(self._tmp, \"bench-ledger.json\")\n\n    def test_genesis_and_latest_are_the_real_endpoints(self) -> None:\n        first: dict = append_entry(_result(\"one.py\"), path=self._ledger)\n        append_entry(_result(\"two.py\"), path=self._ledger)\n        last: dict = append_entry(_result(\"three.py\"), path=self._ledger)\n\n        result: dict = verify_chain(self._ledger)\n        self.assertTrue(result[\"valid\"], result.get(\"message\"))\n        # Filename order is hash order, so these only agree if the endpoints\n        # are derived from the DAG rather than from insertion order.\n        self.assertEqual(result[\"genesis_hash\"], first[\"entry_hash\"])\n        self.assertEqual(result[\"latest_hash\"], last[\"entry_hash\"])\n        self.assertEqual(result[\"first_entry\"], first[\"timestamp\"])\n        self.assertEqual(result[\"last_entry\"], last[\"timestamp\"])\n\n\nclass ConstantAgreementTests(unittest.TestCase):"
+    }
+  },
+  "challenger": {
+    "status": "CLEAR",
+    "findings": [],
+    "_tokens": {
+      "input": 9143,
+      "output": 24
+    }
+  },
+  "defender": {
+    "status": "CONFIRM_CLEAR",
+    "rebuttals": [],
+    "summary": "Challenger found no issues.",
+    "_tokens": {
+      "input": 0,
+      "output": 0
+    }
+  },
+  "oracle": {
+    "verdict": "PASS",
+    "reasoning": "The change adds three new test classes (MalformedLinkTests, StrictWritePathTests, SummaryEndpointTests) to tests/test_ledger_dag.py, immediately before the existing ConstantAgreementTests class. The Challenger returned CLEAR with no findings, and the Defender confirmed. My independent review of the full constitution supports this. C-002 (scope): all added tests are coherent ledger-DAG verification tests within a single test file, consistent with the repository's stated ledger/verify architecture in CLAUDE.md \u2014 no unrelated bundling. C-004 (type safety): the new code adds type annotations throughout (e.g. `-> None`, `entry: dict`, `previous_hash: object`) rather than removing or weakening any; notably `previous_hash: object` is the C-004-preferred choice over a bare Any for a pass-through value. C-001 (error swallowing): the tests use assertRaises to assert on typed errors (LedgerReadError) and inspect failure_type fields, no silent catches. C-005 (test coverage): this change IS test coverage, strengthening verification of malformed links, strict write paths, and endpoint derivation. C-006: no secrets. C-007 (pipeline integrity): the file is a test, and it exercises/tightens rather than weakens verify_chain and append_entry behavior; nothing disables logging or bypasses verification. C-008 (ledger immutability): all writes target tempfile.mkdtemp() scratch directories with addCleanup teardown, never the real ledger; the tests deliberately re-file entries under recomputed hashes in isolated temp trees to assert that verify_chain fails closed on tampering, which affirms rather than violates immutability. No constraint is violated.",
+    "constraint_citations": [
+      {
+        "constraint_id": "C-001",
+        "disposition": "SATISFIED",
+        "note": "Tests assert on typed errors via assertRaises(LedgerReadError) and inspect failure_type; no empty or comment-only catch blocks introduced."
+      },
+      {
+        "constraint_id": "C-002",
+        "disposition": "SATISFIED",
+        "note": "All added classes are coherent ledger-DAG tests in a single test file; no unrelated edits bundled."
+      },
+      {
+        "constraint_id": "C-003",
+        "disposition": "NOT_APPLICABLE",
+        "note": "Relies on stdlib (tempfile, shutil, os, json, pathlib) and existing project symbols; no new dependency introduced by this diff."
+      },
+      {
+        "constraint_id": "C-004",
+        "disposition": "SATISFIED",
+        "note": "New signatures carry annotations; `previous_hash: object` follows the C-004-preferred pass-through choice over bare Any."
+      },
+      {
+        "constraint_id": "C-005",
+        "disposition": "SATISFIED",
+        "note": "The change itself adds test coverage for malformed links, strict write paths, and endpoint derivation."
+      },
+      {
+        "constraint_id": "C-006",
+        "disposition": "NOT_APPLICABLE",
+        "note": "No credentials or secrets present."
+      },
+      {
+        "constraint_id": "C-007",
+        "disposition": "SATISFIED",
+        "note": "A test file that exercises and tightens verify_chain/append_entry; does not weaken enforcement, bypass verification, or disable logging."
+      },
+      {
+        "constraint_id": "C-008",
+        "disposition": "SATISFIED",
+        "note": "All mutation of entries occurs in isolated tempfile directories with cleanup, never on the real ledger; tests confirm verify_chain fails closed on tampering."
+      }
+    ],
+    "advisories": [
+      "Assumes the referenced symbols (resolve_entries_dir, compute_entry_hash, append_entry, verify_chain, LedgerReadError, _result) and their imports already exist in test_ledger_dag.py; the diff does not add them. If any are absent the tests will fail to import, but that is a correctness matter, not a constitutional violation."
+    ],
+    "remediation": null,
+    "confidence": "HIGH",
+    "_tokens": {
+      "input": 9508,
+      "output": 1665
+    }
+  },
+  "entry_hash": "b4b4a7b6c41aab2eed6c94f1d92f174458a42c48e35f6461ffa2783109057117"
+}
