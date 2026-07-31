@@ -59,6 +59,28 @@ class GenerateViewerHtmlTests(unittest.TestCase):
         self.assertIn("C-001 (1 veto(es))", html_out)
         self.assertIn("file_1.py", html_out)
 
+    def test_multi_parent_entry_is_embedded_for_rendering(self) -> None:
+        """An entry reconciling a merge carries a list of parent hashes.
+
+        The renderer passes each parent to hashCopy individually; handing it
+        the array would fall through to 'N/A' and silently hide the linkage
+        that makes a merge auditable.
+        """
+        chain: list[dict] = _build_valid_chain(2)
+        merge_entry: dict = dict(chain[-1])
+        merge_entry["previous_hash"] = [
+            chain[0]["entry_hash"],
+            "b" * 64,
+        ]
+        merge_entry["entry_hash"] = compute_entry_hash(merge_entry)
+        chain[-1] = merge_entry
+        self._write_chain(chain)
+
+        html_out: str = generate_viewer_html(self._path())
+        self.assertIn("previous hashes", html_out)
+        self.assertIn("Array.isArray(entry.previous_hash)", html_out)
+        self.assertIn("b" * 64, html_out)
+
     def test_tampered_ledger_reports_broken_chain(self) -> None:
         chain: list[dict] = _build_valid_chain(3)
         chain[1]["change"]["file"] = "TAMPERED.py"

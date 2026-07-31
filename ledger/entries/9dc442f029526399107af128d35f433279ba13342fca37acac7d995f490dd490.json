@@ -1,0 +1,95 @@
+{
+  "entry_id": "bf3f5a30-b7ff-4e5b-be3a-3a83a58cd27c",
+  "timestamp": "2026-07-31T00:37:18.610222+00:00",
+  "previous_hash": [
+    "82d59cf6d925a543512cdd81dc01a1ef356627dc1ea20e385e73b770ced2a7da"
+  ],
+  "constitution_hash": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3",
+  "constitution_sources": [
+    {
+      "layer": "core",
+      "path": "E:\\dev\\Bench\\bench.json",
+      "sha256": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3"
+    }
+  ],
+  "verdict": "PASS",
+  "pipeline_error": false,
+  "change": {
+    "file": "README.md",
+    "tool": "Edit",
+    "diff_summary": {
+      "file_path": "README.md",
+      "change_type": "modify",
+      "old_string": "The corollary is worth stating: keeping a ledger out of git also removes git as its backup path. An ignored `.bench/` chain exists on one machine and nowhere else, so losing that working copy loses the audit trail with it, and a project governed from two machines accumulates two independent chains that cannot be merged \u2014 the hash chain admits no interleaving after the fact. Decide deliberately which you want: a private chain you back up by other means, or a committed one that publishes the diffs it records.",
+      "new_string": "The corollary is worth stating: keeping a ledger out of git also removes git as its backup path. An ignored `.bench/` chain exists on one machine and nowhere else, so losing that working copy loses the audit trail with it. Decide deliberately which you want: a private chain you back up by other means, or a committed one that publishes the diffs it records.\n\n### Ledger Format\n\nThe ledger is stored in two segments, and the split is what lets two branches record verdicts independently.\n\n`bench-ledger.json` is the **frozen** legacy segment: a hash-chained JSON array that every reader still reads and nothing writes. `ledger-meta.json` is frozen with it, as a permanent pin on that segment's tip hash and entry count. Every new entry is written to its own file at `<ledger_dir>/entries/<entry_hash>.json`.\n\nThat shape exists because the original single array was rewritten in full on every append. Two branches appending produced divergent chains with no valid resolution: interleaving breaks the hash links, and rebasing rewrites hashes, which C-008 forbids. The array was frozen rather than migrated for the same reason \u2014 C-008 permits no moving or rewriting of an existing entry, and a file that is never written can never conflict.\n\n`previous_hash` therefore holds either a string (legacy entries, one parent) or a sorted list of parent hashes. An append names **every current tip**, so after a `git merge` leaves two heads, the next governed edit names both and the fork reconciles itself. There is no merge command: the reconciliation is an ordinary governed, hash-linked entry.\n\nVerification walks the union. The legacy array keeps its original positional check at full strength, and the entries directory is enumerated separately, failing closed on a parent that resolves to nothing (`MISSING_PARENT`), an entry unreachable from genesis (`ORPHAN_ENTRY`), a repeated hash (`DUPLICATE_ENTRY`), a filename that disagrees with the hash inside it (`FILENAME_MISMATCH`), and more than one genesis (`MULTIPLE_GENESIS`). `python -m cli verify` reports every tip when a chain is forked.\n\nOne tradeoff is worth naming rather than burying. The new segment has no in-band global entry count \u2014 a per-append count cannot be both conflict-free and append-only across branches. Deleting any non-tip entry file is a hard verification failure, because its children reference a parent that no longer resolves. Deleting a *tip* file is visible in `git diff` but not in-band, which is the same exposure the array always had: truncating it was only caught if the attacker forgot to also edit the committed meta file."
+    }
+  },
+  "challenger": {
+    "status": "CLEAR",
+    "findings": [],
+    "_tokens": {
+      "input": 7931,
+      "output": 19
+    }
+  },
+  "defender": {
+    "status": "CONFIRM_CLEAR",
+    "rebuttals": [],
+    "summary": "Challenger found no issues.",
+    "_tokens": {
+      "input": 0,
+      "output": 0
+    }
+  },
+  "oracle": {
+    "verdict": "PASS",
+    "reasoning": "The change is a documentation-only edit to README.md. It rewrites a paragraph and adds a new '### Ledger Format' section that describes the two-segment ledger design (frozen legacy array plus per-entry files, multi-parent `previous_hash`, and verification failure modes). This description is consistent with the architecture already documented in CLAUDE.md's Architecture section. The Challenger returned CLEAR with no findings and the Defender confirmed. I independently evaluated the change against the full constitution. C-008 (Ledger Immutability) is the most relevant constraint: the text describes the ledger design but touches no ledger entries, code, or hashes, and it accurately restates the immutability rationale (freezing rather than migrating the array, no rewriting of existing entries). No entry is modified, deleted, or reordered. C-007 (Governance Pipeline Integrity) applies to changes to pipeline/ledger/hooks code; README.md is documentation and no enforcement, verification, or logging is weakened. C-002 (Scope) is satisfied: the edit is a single coherent scope \u2014 documenting the ledger format. C-001, C-003, C-004, C-006 concern code (error handling, dependencies, types, secrets) and are not applicable to a prose Markdown change. C-005 (testing) does not apply to documentation.",
+    "constraint_citations": [
+      {
+        "constraint_id": "C-001",
+        "disposition": "NOT_APPLICABLE",
+        "note": "No code or catch blocks in a documentation change."
+      },
+      {
+        "constraint_id": "C-002",
+        "disposition": "SATISFIED",
+        "note": "Single coherent scope: documenting the ledger's two-segment format; no unrelated edits bundled."
+      },
+      {
+        "constraint_id": "C-003",
+        "disposition": "NOT_APPLICABLE",
+        "note": "No imports or dependencies added."
+      },
+      {
+        "constraint_id": "C-004",
+        "disposition": "NOT_APPLICABLE",
+        "note": "No type annotations affected by a Markdown edit."
+      },
+      {
+        "constraint_id": "C-006",
+        "disposition": "NOT_APPLICABLE",
+        "note": "No secrets or credentials present."
+      },
+      {
+        "constraint_id": "C-007",
+        "disposition": "SATISFIED",
+        "note": "README.md is documentation, not pipeline/ledger/hooks code; no enforcement, verification, or logging weakened."
+      },
+      {
+        "constraint_id": "C-008",
+        "disposition": "SATISFIED",
+        "note": "Describes the ledger design without modifying, deleting, or reordering any entry; accurately reflects the immutability rationale and multi-parent append model."
+      }
+    ],
+    "advisories": [
+      "The added prose asserts specific verification behaviors (MISSING_PARENT, ORPHAN_ENTRY, DUPLICATE_ENTRY, FILENAME_MISMATCH, MULTIPLE_GENESIS) and the frozen-array design. These match CLAUDE.md, but documentation and implementation should be kept in sync if the verify logic changes."
+    ],
+    "remediation": null,
+    "confidence": "HIGH",
+    "_tokens": {
+      "input": 8296,
+      "output": 1307
+    }
+  },
+  "entry_hash": "9dc442f029526399107af128d35f433279ba13342fca37acac7d995f490dd490"
+}

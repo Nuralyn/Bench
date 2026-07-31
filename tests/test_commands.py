@@ -75,6 +75,29 @@ class CmdVerifyTests(unittest.TestCase):
         self.assertIn("Ledger: VALID", out.getvalue())
         self.assertIn("meta anchor verified", out.getvalue())
 
+    def test_forked_chain_lists_every_tip(self) -> None:
+        """Two tips is a legitimate post-merge state, not a failure.
+
+        It must be visible rather than implied: a single collapsed 'latest
+        hash' would hide that the chain has two heads awaiting reconciliation.
+        """
+        forked: dict = _valid_verify()
+        forked["tips"] = ["a" * 64, "b" * 64]
+        forked["latest_hash"] = ""
+
+        out = io.StringIO()
+        with patch("cli.commands.verify_chain", return_value=forked):
+            with redirect_stdout(out):
+                code: int = cmd_verify()
+
+        text: str = out.getvalue()
+        self.assertEqual(code, 0)
+        self.assertIn("Ledger: VALID", text)
+        self.assertIn("tips         : 2 (merged branches)", text)
+        self.assertIn("a" * 64, text)
+        self.assertIn("b" * 64, text)
+        self.assertNotIn("latest hash", text)
+
     def test_empty_chain_exits_zero(self) -> None:
         out = io.StringIO()
         result: dict = {"valid": True, "entries": 0, "message": "empty"}

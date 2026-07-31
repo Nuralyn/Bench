@@ -1,0 +1,100 @@
+{
+  "entry_id": "2f4674d2-d54b-40a0-8eae-4bff6efe6511",
+  "timestamp": "2026-07-31T00:35:35.391462+00:00",
+  "previous_hash": [
+    "45b44ca64ead1a4a321baa869f13767b6a82d230cec5180b5b21fd7a7ff03afc"
+  ],
+  "constitution_hash": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3",
+  "constitution_sources": [
+    {
+      "layer": "core",
+      "path": "E:\\dev\\Bench\\bench.json",
+      "sha256": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3"
+    }
+  ],
+  "verdict": "PASS",
+  "pipeline_error": false,
+  "change": {
+    "file": "tests\\test_viewer.py",
+    "tool": "Edit",
+    "diff_summary": {
+      "file_path": "tests\\test_viewer.py",
+      "change_type": "modify",
+      "old_string": "    def test_tampered_ledger_reports_broken_chain(self) -> None:",
+      "new_string": "    def test_multi_parent_entry_is_embedded_for_rendering(self) -> None:\n        \"\"\"An entry reconciling a merge carries a list of parent hashes.\n\n        The renderer passes each parent to hashCopy individually; handing it\n        the array would fall through to 'N/A' and silently hide the linkage\n        that makes a merge auditable.\n        \"\"\"\n        chain: list[dict] = _build_valid_chain(2)\n        merge_entry: dict = dict(chain[-1])\n        merge_entry[\"previous_hash\"] = [\n            chain[0][\"entry_hash\"],\n            \"b\" * 64,\n        ]\n        merge_entry[\"entry_hash\"] = compute_entry_hash(merge_entry)\n        chain[-1] = merge_entry\n        self._write_chain(chain)\n\n        html_out: str = generate_viewer_html(self._path())\n        self.assertIn(\"previous hashes\", html_out)\n        self.assertIn(\"Array.isArray(entry.previous_hash)\", html_out)\n        self.assertIn(\"b\" * 64, html_out)\n\n    def test_tampered_ledger_reports_broken_chain(self) -> None:"
+    }
+  },
+  "challenger": {
+    "status": "CLEAR",
+    "findings": [],
+    "_tokens": {
+      "input": 7343,
+      "output": 24
+    }
+  },
+  "defender": {
+    "status": "CONFIRM_CLEAR",
+    "rebuttals": [],
+    "summary": "Challenger found no issues.",
+    "_tokens": {
+      "input": 0,
+      "output": 0
+    }
+  },
+  "oracle": {
+    "verdict": "PASS",
+    "reasoning": "The change adds a single new test method (test_multi_parent_entry_is_embedded_for_rendering) to tests/test_viewer.py, inserted immediately before an existing test. The Challenger returned CLEAR with no findings and the Defender confirmed. My independent review of the whole constitution finds no violations. C-001 is not implicated: there are no catch blocks introduced. C-002 is satisfied: the edit is a single coherent scope addition (test coverage for the multi-parent/merge-reconciliation viewer behavior described in CLAUDE.md's ledger design) and lands entirely within a test file, consistent with the repository's stated architecture. C-003 is satisfied: the test uses only symbols already present in the module (_build_valid_chain, compute_entry_hash, generate_viewer_html, self._write_chain, self._path) \u2014 no new imports or dependencies are added in the diff. C-004 is satisfied and in fact strengthened: the new method and its locals carry explicit annotations (list[dict], dict, str) consistent with rule 7; no annotation is removed or weakened. C-006 is satisfied: the strings 'b' * 64 and hashes are test fixtures, not credentials. C-007: although the viewer is part of the broader tooling, adding a test does not weaken enforcement, bypass verification, or disable logging \u2014 it increases verification of merge-linkage rendering. C-008 is satisfied: the test writes only to a test-scoped chain via a helper and does not modify, delete, or reorder any real ledger entry. C-005 (warning) is affirmatively advanced by this change since it IS new test coverage.",
+    "constraint_citations": [
+      {
+        "constraint_id": "C-001",
+        "disposition": "NOT_APPLICABLE",
+        "note": "No error-handling or catch blocks introduced."
+      },
+      {
+        "constraint_id": "C-002",
+        "disposition": "SATISFIED",
+        "note": "Single coherent scope: one new test method within tests/test_viewer.py, aligned with the ledger multi-parent behavior described in CLAUDE.md."
+      },
+      {
+        "constraint_id": "C-003",
+        "disposition": "SATISFIED",
+        "note": "Uses only pre-existing module symbols; no new imports or dependency declarations."
+      },
+      {
+        "constraint_id": "C-004",
+        "disposition": "SATISFIED",
+        "note": "All new locals and the method signature are annotated (list[dict], dict, str); no precision discarded."
+      },
+      {
+        "constraint_id": "C-005",
+        "disposition": "SATISFIED",
+        "note": "The change itself is added test coverage for the multi-parent rendering branch."
+      },
+      {
+        "constraint_id": "C-006",
+        "disposition": "SATISFIED",
+        "note": "Literal hashes are test fixtures, not credentials."
+      },
+      {
+        "constraint_id": "C-007",
+        "disposition": "SATISFIED",
+        "note": "Test-only addition does not weaken enforcement, bypass verification, or disable logging."
+      },
+      {
+        "constraint_id": "C-008",
+        "disposition": "SATISFIED",
+        "note": "Operates on a test-scoped chain via a helper; no real ledger entry is modified, reordered, or removed."
+      }
+    ],
+    "advisories": [
+      "The test asserts on rendered HTML substrings such as 'Array.isArray(entry.previous_hash)' and the literal label 'previous hashes'. If the viewer's JS/markup is later refactored, this test may become brittle; keep the assertions aligned with the renderer's actual output."
+    ],
+    "remediation": null,
+    "confidence": "HIGH",
+    "_tokens": {
+      "input": 7708,
+      "output": 1431
+    }
+  },
+  "entry_hash": "d9bd5ae47376b8a6f6ef4dee51a6116c1cd1ed0acb179c35dc36eac3690fed29"
+}

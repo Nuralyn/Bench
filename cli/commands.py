@@ -82,7 +82,19 @@ def cmd_verify() -> int:
         print(f"  first entry  : {result.get('first_entry', '-')}")
         print(f"  last entry   : {result.get('last_entry', '-')}")
         print(f"  genesis hash : {result.get('genesis_hash', '-')}")
-        print(f"  latest hash  : {result.get('latest_hash', '-')}")
+        tips: Any = result.get("tips", [])
+        tip_list: list[str] = tips if isinstance(tips, list) else []
+        if len(tip_list) > 1:
+            # A fork is a legitimate state after a git merge, not a failure.
+            # Name every tip so it is visible rather than implied, and say what
+            # resolves it, since a reader seeing two heads should know the next
+            # governed edit reconciles them.
+            print(f"  tips         : {len(tip_list)} (merged branches)")
+            for tip in tip_list:
+                print(f"    - {tip}")
+            print("  note         : the next governed edit will name both tips")
+        else:
+            print(f"  latest hash  : {result.get('latest_hash', '-')}")
         print(f"  meta anchor  : {result.get('meta', '-')}")
         return 0
 
