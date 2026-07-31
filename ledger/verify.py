@@ -217,16 +217,33 @@ def verify_chain(path: str | None = None) -> dict:
     if dag_failure is not None:
         return dag_failure
 
-    ordered: list[dict] = list(seen.values())
-    first_entry: dict = entries[0] if entries else ordered[0]
-    last_entry: dict = ordered[-1]
+    # Endpoints come from the graph, never from iteration order. ``seen`` is
+    # filled legacy-first and then by filename, which is hash order, so the
+    # last inserted entry is not the tip and the first is not necessarily
+    # genesis. Reporting those directly would name unrelated entries as the
+    # chain's endpoints while still claiming the chain is valid.
+    genesis_hash: str = next(
+        (
+            entry_hash
+            for entry_hash, entry in seen.items()
+            if entry.get("previous_hash") == _GENESIS_MARKER
+        ),
+        "",
+    )
+    genesis_entry: dict = seen.get(genesis_hash, {})
+    tip_entries: list[dict] = [seen[tip] for tip in tips if tip in seen]
+    latest_entry: dict = max(
+        tip_entries,
+        key=lambda entry: str(entry.get("timestamp", "")),
+        default={},
+    )
     return {
         "valid": True,
         "entries": checked,
         "ledger_path": str(file_path),
-        "first_entry": first_entry.get("timestamp", ""),
-        "last_entry": last_entry.get("timestamp", ""),
-        "genesis_hash": first_entry.get("entry_hash", ""),
+        "first_entry": genesis_entry.get("timestamp", ""),
+        "last_entry": latest_entry.get("timestamp", ""),
+        "genesis_hash": genesis_hash,
         "latest_hash": tips[0] if len(tips) == 1 else "",
         "tips": tips,
         "meta": meta_note,
@@ -437,18 +454,37 @@ def _verify_dag(seen: dict[str, dict], checked: int) -> tuple[dict | None, list[
     genesis: list[str] = []
     for entry_hash, entry in seen.items():
         raw: Any = entry.get("previous_hash")
-        if raw != _GENESIS_MARKER and not isinstance(raw, (str, list)):
+
+        # Only the exact sentinel is genesis. An empty list is not "no
+        # parents", it is a link that names nothing, and accepting it would let
+        # a malformed entry pose as a second root. Likewise every element must
+        # be a string: _parents_of is lenient for readers and would quietly
+        # drop a non-string, so a child could validate against only the
+        # parents that happened to be well-formed.
+        is_genesis: bool = raw == _GENESIS_MARKER
+        malformed: bool = not is_genesis and not (
+            (isinstance(raw, str) and raw)
+            or (
+                isinstance(raw, list)
+                and raw
+                and all(isinstance(p, str) and p for p in raw)
+            )
+        )
+        if malformed:
             return _failure(
                 entries_checked=checked,
                 failure_index=-1,
                 failure_type="SCHEMA_ERROR",
-                expected="previous_hash as GENESIS, a string, or a list",
+                expected=(
+                    "previous_hash as GENESIS, a non-empty string, or a "
+                    "non-empty list of strings"
+                ),
                 found=repr(raw),
                 message=f"Entry {entry_hash} has a malformed previous_hash.",
             ), []
 
         parents: list[str] = _parents_of(entry)
-        if not parents:
+        if is_genesis:
             genesis.append(entry_hash)
         for parent in parents:
             if parent not in seen:
