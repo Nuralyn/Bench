@@ -33,6 +33,24 @@ PreToolUse Hook -> Challenger (Sonnet) -> Defender (Sonnet) -> Oracle (Opus) -> 
   both. Readers (`load_ledger`, `verify_chain`, the viewer) resolve through the
   same function, so the auditor never inspects a different file than the writer
   appends to.
+- The ledger is stored in two segments. `bench-ledger.json` is the **frozen**
+  legacy array: it is read by every reader and never written again, and
+  `ledger-meta.json` is frozen with it as a permanent pin on that segment's tip
+  and entry count. All new entries are written one per file to
+  `<ledger_dir>/entries/<entry_hash>.json` via `chain.resolve_entries_dir()`.
+  A single rewritten-in-full array could not survive two branches appending, so
+  it was frozen rather than migrated: C-008 forbids moving or rewriting an
+  existing entry, and a file that is never written can never conflict.
+- `previous_hash` therefore holds either a string (legacy, one parent) or a
+  sorted list of parent hashes (new entries). `append_entry` sets it to
+  `compute_tips()` — every entry no other entry claims as a parent — so a fork
+  left by a git merge is reconciled by the next governed edit naming both tips.
+- `verify_chain` enumerates the entries directory itself and fails closed on
+  `MISSING_PARENT` (a parent hash that resolves to nothing), `ORPHAN_ENTRY` (an
+  entry unreachable from genesis), `DUPLICATE_ENTRY`, `FILENAME_MISMATCH` (the
+  filename must equal the hash it contains), and `MULTIPLE_GENESIS`. The legacy
+  array keeps its original positional walk at full strength. Nothing written to
+  the entries directory escapes verification.
 - On VETO: JSON permissionDecision "deny" with remediation feedback
 - On PASS: JSON permissionDecision "allow"
 - Exit code is ALWAYS 0. Flow control is via JSON, not exit codes.
@@ -55,8 +73,9 @@ bench/
   ledger/
     chain.py              # Hash-chaining, append
     verify.py             # Independent chain validation
-    bench-ledger.json     # Append-only ledger
-    ledger-meta.json      # Metadata
+    bench-ledger.json     # Frozen legacy chain segment (read, never written)
+    ledger-meta.json      # Frozen pin on that segment's tip and count
+    entries/              # One JSON file per new entry, named <entry_hash>.json
   cli/
     __main__.py           # python -m cli
     commands.py           # verify, ledger, stats, constitution, viewer
