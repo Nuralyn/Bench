@@ -1,0 +1,36 @@
+#!/bin/sh
+# Bench pre-commit guard: refuse a commit that stages ledger entry files
+# while other entry files remain untracked.
+#
+# Under DAG storage (ledger/entries/, one file per entry), append_entry
+# sets each new entry's previous_hash to every current tip, including
+# tips that exist only as untracked files. Committing a partial set of
+# entries therefore publishes children whose parents are not in git, and
+# a fresh clone fails `python -m cli verify` with MISSING_PARENT. The
+# discipline is: commit ALL untracked ledger entries (after reading
+# them) or none. This hook makes that mechanical at the only moment it
+# matters. Untracked entries that accumulate mid-session are fine; they
+# only become a hazard when a commit publishes some of them.
+#
+# tests/test_ledger_hygiene.py holds the CI-side backstop: on a clean
+# checkout, a partial commit surfaces as a chain that does not verify.
+#
+# Enable once per clone:  git config core.hooksPath scripts/githooks
+
+staged=$(git diff --cached --name-only -- ledger/entries)
+if [ -z "$staged" ]; then
+    exit 0
+fi
+
+untracked=$(git ls-files --others --exclude-standard -- ledger/entries)
+if [ -n "$untracked" ]; then
+    echo "pre-commit: this commit stages ledger entries while other entry files remain untracked:" >&2
+    echo "$untracked" | sed 's/^/  /' >&2
+    echo "" >&2
+    echo "Commit ALL untracked ledger entries (after reading them) or none." >&2
+    echo "A partial set publishes entries whose parents are not in git, and" >&2
+    echo "a fresh clone then fails 'python -m cli verify' with MISSING_PARENT." >&2
+    exit 1
+fi
+
+exit 0

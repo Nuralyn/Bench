@@ -34,12 +34,14 @@ import re
 import sys
 import unittest
 from pathlib import Path
+from typing import Any
 
 _REPO_ROOT: Path = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from ledger.chain import _EXTERNAL_BODY_KEYS  # noqa: E402
+from ledger.verify import verify_chain  # noqa: E402
 
 _LEDGER: Path = _REPO_ROOT / "ledger" / "bench-ledger.json"
 
@@ -54,6 +56,31 @@ def _is_out_of_project(file_ref: str) -> bool:
     if not file_ref or file_ref == "unknown":
         return False
     return bool(_ABSOLUTE.match(file_ref) or _ESCAPES.match(file_ref))
+
+
+class CommittedChainVerificationTests(unittest.TestCase):
+    """CI backstop: the chain must verify in exactly the state git holds.
+
+    Under DAG storage (ledger/entries/, one file per entry), append_entry
+    names every current tip as a parent, including tips that exist only as
+    untracked files. Committing a partial set of entries publishes children
+    whose parents are not in git. On a working machine the untracked files
+    mask this, so verification passes locally; on CI's clean checkout it
+    surfaces as MISSING_PARENT. scripts/githooks/pre-commit blocks this at
+    commit time, but that hook is per-clone opt-in; this test is the
+    enforced gate.
+    """
+
+    def test_committed_chain_verifies(self) -> None:
+        result: dict[str, Any] = verify_chain(str(_LEDGER))
+        self.assertTrue(
+            result.get("valid"),
+            "The ledger in this checkout does not verify: "
+            f"{result.get('failure_type', 'unknown')}: "
+            f"{result.get('message', 'no detail')}. If this is CI, a commit "
+            "likely published a partial set of ledger/entries/ files; commit "
+            "the missing parent entries rather than reverting the children.",
+        )
 
 
 class CommittedLedgerHygieneTests(unittest.TestCase):

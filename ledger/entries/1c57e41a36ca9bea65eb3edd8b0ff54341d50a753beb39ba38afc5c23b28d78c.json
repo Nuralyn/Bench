@@ -1,0 +1,60 @@
+{
+  "entry_id": "63fd7b9d-73c4-4927-9c9f-5401bb386f3e",
+  "timestamp": "2026-08-06T04:43:14.612379+00:00",
+  "previous_hash": [
+    "087020c3e86268cdfd0ca032a30a637d19b9d57aabc7785c9c61e0e3401be8c3"
+  ],
+  "constitution_hash": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3",
+  "constitution_sources": [
+    {
+      "layer": "core",
+      "path": "C:\\Users\\mstar\\Bench\\bench.json",
+      "sha256": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3"
+    }
+  ],
+  "verdict": "VETO",
+  "pipeline_error": true,
+  "change": {
+    "file": "scripts\\githooks\\pre-commit",
+    "tool": "Write",
+    "diff_summary": {
+      "file_path": "scripts\\githooks\\pre-commit",
+      "change_type": "create",
+      "content": "#!/bin/sh\n# Bench pre-commit guard: refuse a commit that stages ledger entry files\n# while other entry files remain untracked.\n#\n# Under DAG storage (ledger/entries/, one file per entry), append_entry\n# sets each new entry's previous_hash to every current tip, including\n# tips that exist only as untracked files. Committing a partial set of\n# entries therefore publishes children whose parents are not in git, and\n# a fresh clone fails `python -m cli verify` with MISSING_PARENT. The\n# discipline is: commit ALL untracked ledger entries (after reading\n# them) or none. This hook makes that mechanical at the only moment it\n# matters. Untracked entries that accumulate mid-session are fine; they\n# only become a hazard when a commit publishes some of them.\n#\n# tests/test_ledger_hygiene.py holds the CI-side backstop: on a clean\n# checkout, a partial commit surfaces as a chain that does not verify.\n#\n# Enable once per clone:  git config core.hooksPath scripts/githooks\n\nstaged=$(git diff --cached --name-only -- ledger/entries)\nif [ -z \"$staged\" ]; then\n    exit 0\nfi\n\nuntracked=$(git ls-files --others --exclude-standard -- ledger/entries)\nif [ -n \"$untracked\" ]; then\n    echo \"pre-commit: this commit stages ledger entries while other entry files remain untracked:\" >&2\n    echo \"$untracked\" | sed 's/^/  /' >&2\n    echo \"\" >&2\n    echo \"Commit ALL untracked ledger entries (after reading them) or none.\" >&2\n    echo \"A partial set publishes entries whose parents are not in git, and\" >&2\n    echo \"a fresh clone then fails 'python -m cli verify' with MISSING_PARENT.\" >&2\n    exit 1\nfi\n\nexit 0\n",
+      "formatted_diff": "+#!/bin/sh\n+# Bench pre-commit guard: refuse a commit that stages ledger entry files\n+# while other entry files remain untracked.\n+#\n+# Under DAG storage (ledger/entries/, one file per entry), append_entry\n+# sets each new entry's previous_hash to every current tip, including\n+# tips that exist only as untracked files. Committing a partial set of\n+# entries therefore publishes children whose parents are not in git, and\n+# a fresh clone fails `python -m cli verify` with MISSING_PARENT. The\n+# discipline is: commit ALL untracked ledger entries (after reading\n+# them) or none. This hook makes that mechanical at the only moment it\n+# matters. Untracked entries that accumulate mid-session are fine; they\n+# only become a hazard when a commit publishes some of them.\n+#\n+# tests/test_ledger_hygiene.py holds the CI-side backstop: on a clean\n+# checkout, a partial commit surfaces as a chain that does not verify.\n+#\n+# Enable once per clone:  git config core.hooksPath scripts/githooks\n+\n+staged=$(git diff --cached --name-only -- ledger/entries)\n+if [ -z \"$staged\" ]; then\n+    exit 0\n+fi\n+\n+untracked=$(git ls-files --others --exclude-standard -- ledger/entries)\n+if [ -n \"$untracked\" ]; then\n+    echo \"pre-commit: this commit stages ledger entries while other entry files remain untracked:\" >&2\n+    echo \"$untracked\" | sed 's/^/  /' >&2\n+    echo \"\" >&2\n+    echo \"Commit ALL untracked ledger entries (after reading them) or none.\" >&2\n+    echo \"A partial set publishes entries whose parents are not in git, and\" >&2\n+    echo \"a fresh clone then fails 'python -m cli verify' with MISSING_PARENT.\" >&2\n+    exit 1\n+fi\n+\n+exit 0\n"
+    }
+  },
+  "challenger": {
+    "status": "PIPELINE_ERROR",
+    "error": "INVALID_CHALLENGER_RESPONSE",
+    "raw_response": {
+      "status": "FINDINGS",
+      "findings": [
+        {
+          "constraint_id": "C-005",
+          "severity": "OBSERVATION",
+          "location": "scripts/githooks/pre-commit (entire script)",
+          "evidence": "staged=$(git diff --cached --name-only -- ledger/entries) ... untracked=$(git ls-files --others --exclude-standard -- ledger/entries)",
+          "reasoning": "The hook introduces new branching logic (staged-empty short-circuit, untracked-detection failure path) with no direct test exercising the hook script itself. The comment cites tests/test_ledger_hygiene.py as a 'CI-side backstop', but that test verifies the resulting chain state, not this script's control flow (e.g. it wouldn't catch a bug in the git plumbing commands or exclude-standard behavior). This is a reasonable justification for deferral given C-005 is a warning-severity constraint and shell hooks are awkward to unit test, but the coverage gap is real and worth naming rather than assuming closed."
+        },
+        {
+          "constraint_id": "C-007",
+          "severity": "OBSERVATION",
+          "location": "scripts/githooks/pre-commit, comment: \"Enable once per clone: git config core.hooksPath scripts/githooks\"",
+          "reasoning": "This script touches ledger integrity (it exists specifically to prevent MISSING_PARENT chain breaks) but lives outside pipeline/, ledger/, or hooks/, and is opt-in rather than enforced automatically for every clone/contributor. It does not weaken any existing enforcement (there was no prior automatic guard here, so nothing is being removed or bypassed), so this does not rise to a C-007 violation. However, because the protection is opt-in, an auditor should not treat its mere presence in the repo as equivalent to the automatic, always-on guarantees C-007 is meant to protect elsewhere in the pipeline."
+        }
+      ],
+      "_tokens": {
+        "input": 10234,
+        "output": 2332
+      }
+    },
+    "_tokens": {
+      "input": 10234,
+      "output": 2332
+    }
+  },
+  "defender": {},
+  "oracle": {},
+  "entry_hash": "1c57e41a36ca9bea65eb3edd8b0ff54341d50a753beb39ba38afc5c23b28d78c"
+}
