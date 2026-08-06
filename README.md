@@ -134,6 +134,13 @@ cd bench
 # Install
 pip install -r requirements.txt
 
+# Enable the ledger commit guard (once per clone). It refuses a commit that
+# stages some ledger/entries/ files while others remain untracked: a partial
+# set publishes entries whose parents are not in git, and a fresh clone then
+# fails `python -m cli verify`. CI enforces the same invariant through
+# tests/test_ledger_hygiene.py; this hook just catches it before the push.
+git config core.hooksPath scripts/githooks
+
 # Pick how Bench reaches the models (see "Provider Configuration" below):
 #   Option A: use your own Anthropic API key
 export ANTHROPIC_API_KEY=your-key-here
