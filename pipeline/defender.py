@@ -58,7 +58,14 @@ Respond ONLY with valid JSON matching this schema:
     }
   ],
   "summary": "one sentence overall assessment of the change's soundness"
-}"""
+}
+
+The "position" field must be exactly one of REBUT, CONCEDE, or MITIGATE.
+No other value is valid. When you simply agree with a finding — including
+an observation the Challenger itself marked as context-only or
+non-violating — use CONCEDE. Do not invent positions such as CONFIRM or
+AGREE; an out-of-schema position invalidates the entire response and is
+recorded as a pipeline error."""
 
 
 _VALID_STATUSES: frozenset[str] = frozenset(
