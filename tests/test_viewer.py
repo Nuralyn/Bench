@@ -11,6 +11,8 @@ truth for the entry shape.
 Run: python -m unittest tests.test_viewer -v
 """
 
+import contextlib
+import io
 import json
 import os
 import shutil
@@ -25,7 +27,10 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from tests._ledger_fixtures import build_valid_chain as _build_valid_chain  # noqa: E402
-from ledger.chain import compute_entry_hash  # noqa: E402
+from cli.commands import cmd_stats  # noqa: E402
+from ledger.chain import ANCHOR_VERDICT, compute_entry_hash  # noqa: E402
+from ledger.retire import ANCHOR_TOOL  # noqa: E402
+from utils.stats import compute_ledger_stats, pct  # noqa: E402
 from utils.viewer import generate_viewer_html  # noqa: E402
 
 
@@ -104,6 +109,92 @@ class GenerateViewerHtmlTests(unittest.TestCase):
             html_out: str = generate_viewer_html(self._path())
         self.assertIn("generation failed", html_out)
         self.assertIn("RuntimeError: boom", html_out)
+
+
+class ViewerStatsParityTests(unittest.TestCase):
+    """The viewer banner and cmd_stats must report identical rates.
+
+    Both surfaces consume utils.stats.compute_ledger_stats, which exists so
+    they cannot drift apart; these tests lock the contract that both compute
+    pass/veto percentages over adjudicated entries (excluding chain-retirement
+    anchors), and pin pct() behavior when a chain holds only an anchor.
+    """
+
+    def setUp(self) -> None:
+        self._tmp: str = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self._tmp)
+
+    def _path(self) -> str:
+        return os.path.join(self._tmp, "ledger.json")
+
+    def _write_chain(self, chain: list[dict]) -> None:
+        Path(self._path()).write_text(json.dumps(chain), encoding="utf-8")
+
+    @staticmethod
+    def _append_anchor(chain: list[dict]) -> None:
+        """Append a chain-retirement anchor entry, correctly linked."""
+        anchor: dict = {
+            "entry_id": "id-anchor",
+            "timestamp": "2026-01-01T00:01:00+00:00",
+            "previous_hash": (
+                chain[-1]["entry_hash"] if chain else "GENESIS"
+            ),
+            "constitution_hash": "abc",
+            "verdict": ANCHOR_VERDICT,
+            "change": {
+                "file": "ledger/bench-ledger.json",
+                "tool": ANCHOR_TOOL,
+            },
+            "oracle": {},
+        }
+        anchor["entry_hash"] = compute_entry_hash(anchor)
+        chain.append(anchor)
+
+    def test_banner_rates_match_cmd_stats_with_anchor_present(self) -> None:
+        chain: list[dict] = _build_valid_chain(
+            3, verdicts=["PASS", "VETO", "PASS"]
+        )
+        self._append_anchor(chain)
+        self._write_chain(chain)
+        html_out: str = generate_viewer_html(self._path())
+
+        stats: dict = compute_ledger_stats(chain)
+        self.assertEqual(stats["adjudicated"], 3)
+        expected_passed: str = f"({pct(stats['passed'], stats['adjudicated'])})"
+        expected_vetoed: str = f"({pct(stats['vetoed'], stats['adjudicated'])})"
+        self.assertIn(expected_passed, html_out)  # (66.7%)
+        self.assertIn(expected_vetoed, html_out)  # (33.3%)
+        # Rates over total (4, anchor included) would be 50.0% and 25.0%;
+        # their absence proves the anchor is excluded from the denominator.
+        self.assertNotIn("(50.0%)", html_out)
+        self.assertNotIn("(25.0%)", html_out)
+        self.assertIn(
+            '<div class="label">Governed changes</div>'
+            '<div class="value">3</div>',
+            html_out,
+        )
+
+        buf: io.StringIO = io.StringIO()
+        with patch("cli.commands.load_ledger", return_value=chain), patch(
+            "cli.commands.verify_chain", return_value={"valid": True}
+        ), contextlib.redirect_stdout(buf):
+            cmd_stats()
+        cli_out: str = buf.getvalue()
+        self.assertIn(expected_passed, cli_out)
+        self.assertIn(expected_vetoed, cli_out)
+
+    def test_anchor_only_ledger_renders_zero_rates(self) -> None:
+        chain: list[dict] = []
+        self._append_anchor(chain)
+        self._write_chain(chain)
+        html_out: str = generate_viewer_html(self._path())
+        self.assertNotIn("generation failed", html_out)
+        self.assertIn("(0.0%)", html_out)
+        self.assertIn(
+            '<div class="label">Governed changes</div>'
+            '<div class="value">0</div>',
+            html_out,
+        )
 
 
 if __name__ == "__main__":

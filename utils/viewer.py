@@ -100,11 +100,14 @@ def _build_html(
     entries_json: str = json.dumps(entries, default=str).replace("</", "<\\/")
     chain_json: str = json.dumps(chain_status).replace("</", "<\\/")
 
-    total: int = int(stats.get("total", 0))
+    # Rates are computed over adjudicated entries, excluding chain-retirement
+    # anchors, exactly as cmd_stats does: the shared stats helper exists so
+    # the terminal report and this banner cannot drift apart.
+    adjudicated: int = int(stats.get("adjudicated", 0))
     passed: int = int(stats.get("passed", 0))
     vetoed: int = int(stats.get("vetoed", 0))
-    passed_pct: str = pct(passed, total)
-    vetoed_pct: str = pct(vetoed, total)
+    passed_pct: str = pct(passed, adjudicated)
+    vetoed_pct: str = pct(vetoed, adjudicated)
 
     most_cited: Any = stats.get("most_cited")
     if isinstance(most_cited, (list, tuple)) and len(most_cited) == 2:
@@ -147,7 +150,7 @@ def _build_html(
         "  <p class=\"subtitle\">Constitutional governance ledger &mdash; read-only</p>\n"
         "</header>\n"
         "<section class=\"banner\" aria-label=\"Statistics\">\n"
-        f"  <div class=\"tile\"><div class=\"label\">Total changes</div><div class=\"value\">{total}</div></div>\n"
+        f"  <div class=\"tile\"><div class=\"label\">Governed changes</div><div class=\"value\">{adjudicated}</div></div>\n"
         f"  <div class=\"tile\"><div class=\"label\">Passed</div><div class=\"value ok\">{passed} <span class=\"pct\">({passed_pct})</span></div></div>\n"
         f"  <div class=\"tile\"><div class=\"label\">Vetoed</div><div class=\"value err\">{vetoed} <span class=\"pct\">({vetoed_pct})</span></div></div>\n"
         f"  <div class=\"tile\"><div class=\"label\">Most cited</div><div class=\"value mono small\">{cited_label}</div></div>\n"

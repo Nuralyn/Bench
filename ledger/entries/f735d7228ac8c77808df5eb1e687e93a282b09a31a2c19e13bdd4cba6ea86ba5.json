@@ -1,0 +1,101 @@
+{
+  "entry_id": "321268f9-d3fe-4bf0-bc9c-c8e1a555ab5c",
+  "timestamp": "2026-08-06T04:06:16.757469+00:00",
+  "previous_hash": [
+    "bd5dddf556a8c714785c2668fa13cf210307766ba0d8a794d19a9827a1c66bfe"
+  ],
+  "constitution_hash": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3",
+  "constitution_sources": [
+    {
+      "layer": "core",
+      "path": "C:\\Users\\mstar\\Bench\\bench.json",
+      "sha256": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3"
+    }
+  ],
+  "verdict": "PASS",
+  "pipeline_error": false,
+  "change": {
+    "file": "tests\\test_viewer.py",
+    "tool": "Edit",
+    "diff_summary": {
+      "file_path": "tests\\test_viewer.py",
+      "change_type": "modify",
+      "old_string": "    def test_generation_failure_returns_error_page(self) -> None:\n        with patch(\n            \"utils.viewer.load_ledger\", side_effect=RuntimeError(\"boom\")\n        ):\n            html_out: str = generate_viewer_html(self._path())\n        self.assertIn(\"generation failed\", html_out)\n        self.assertIn(\"RuntimeError: boom\", html_out)\n\n\nif __name__ == \"__main__\":\n    unittest.main()",
+      "new_string": "    def test_generation_failure_returns_error_page(self) -> None:\n        with patch(\n            \"utils.viewer.load_ledger\", side_effect=RuntimeError(\"boom\")\n        ):\n            html_out: str = generate_viewer_html(self._path())\n        self.assertIn(\"generation failed\", html_out)\n        self.assertIn(\"RuntimeError: boom\", html_out)\n\n\nclass ViewerStatsParityTests(unittest.TestCase):\n    \"\"\"The viewer banner and cmd_stats must report identical rates.\n\n    Both surfaces consume utils.stats.compute_ledger_stats, which exists so\n    they cannot drift apart; these tests lock the contract that both compute\n    pass/veto percentages over adjudicated entries (excluding chain-retirement\n    anchors), and pin pct() behavior when a chain holds only an anchor.\n    \"\"\"\n\n    def setUp(self) -> None:\n        self._tmp: str = tempfile.mkdtemp()\n        self.addCleanup(shutil.rmtree, self._tmp)\n\n    def _path(self) -> str:\n        return os.path.join(self._tmp, \"ledger.json\")\n\n    def _write_chain(self, chain: list[dict]) -> None:\n        Path(self._path()).write_text(json.dumps(chain), encoding=\"utf-8\")\n\n    @staticmethod\n    def _append_anchor(chain: list[dict]) -> None:\n        \"\"\"Append a chain-retirement anchor entry, correctly linked.\"\"\"\n        anchor: dict = {\n            \"entry_id\": \"id-anchor\",\n            \"timestamp\": \"2026-01-01T00:01:00+00:00\",\n            \"previous_hash\": (\n                chain[-1][\"entry_hash\"] if chain else \"GENESIS\"\n            ),\n            \"constitution_hash\": \"abc\",\n            \"verdict\": ANCHOR_VERDICT,\n            \"change\": {\n                \"file\": \"ledger/bench-ledger.json\",\n                \"tool\": ANCHOR_TOOL,\n            },\n            \"oracle\": {},\n        }\n        anchor[\"entry_hash\"] = compute_entry_hash(anchor)\n        chain.append(anchor)\n\n    def test_banner_rates_match_cmd_stats_with_anchor_present(self) -> None:\n        chain: list[dict] = _build_valid_chain(\n            3, verdicts=[\"PASS\", \"VETO\", \"PASS\"]\n        )\n        self._append_anchor(chain)\n        self._write_chain(chain)\n        html_out: str = generate_viewer_html(self._path())\n\n        stats: dict = compute_ledger_stats(chain)\n        self.assertEqual(stats[\"adjudicated\"], 3)\n        expected_passed: str = f\"({pct(stats['passed'], stats['adjudicated'])})\"\n        expected_vetoed: str = f\"({pct(stats['vetoed'], stats['adjudicated'])})\"\n        self.assertIn(expected_passed, html_out)  # (66.7%)\n        self.assertIn(expected_vetoed, html_out)  # (33.3%)\n        # Rates over total (4, anchor included) would be 50.0% and 25.0%;\n        # their absence proves the anchor is excluded from the denominator.\n        self.assertNotIn(\"(50.0%)\", html_out)\n        self.assertNotIn(\"(25.0%)\", html_out)\n        self.assertIn(\n            '<div class=\"label\">Governed changes</div>'\n            '<div class=\"value\">3</div>',\n            html_out,\n        )\n\n        buf: io.StringIO = io.StringIO()\n        with patch(\"cli.commands.load_ledger\", return_value=chain), patch(\n            \"cli.commands.verify_chain\", return_value={\"valid\": True}\n        ), contextlib.redirect_stdout(buf):\n            cmd_stats()\n        cli_out: str = buf.getvalue()\n        self.assertIn(expected_passed, cli_out)\n        self.assertIn(expected_vetoed, cli_out)\n\n    def test_anchor_only_ledger_renders_zero_rates(self) -> None:\n        chain: list[dict] = []\n        self._append_anchor(chain)\n        self._write_chain(chain)\n        html_out: str = generate_viewer_html(self._path())\n        self.assertNotIn(\"generation failed\", html_out)\n        self.assertIn(\"(0.0%)\", html_out)\n        self.assertIn(\n            '<div class=\"label\">Governed changes</div>'\n            '<div class=\"value\">0</div>',\n            html_out,\n        )\n\n\nif __name__ == \"__main__\":\n    unittest.main()"
+    }
+  },
+  "challenger": {
+    "status": "CLEAR",
+    "findings": [],
+    "_tokens": {
+      "input": 10734,
+      "output": 2795
+    }
+  },
+  "defender": {
+    "status": "CONFIRM_CLEAR",
+    "rebuttals": [],
+    "summary": "Challenger found no issues.",
+    "_tokens": {
+      "input": 0,
+      "output": 0
+    }
+  },
+  "oracle": {
+    "verdict": "PASS",
+    "reasoning": "The change adds two new test cases (class ViewerStatsParityTests) to tests/test_viewer.py that lock the contract that the viewer banner and cmd_stats report identical pass/veto rates via the shared utils.stats.compute_ledger_stats helper, and pin pct() behavior for anchor-only chains. Both the Challenger (status CLEAR, no findings) and Defender (CONFIRM_CLEAR) reported no issues, and my independent review of the constitution confirms this. C-001 (no silent error swallowing) is not applicable: no catch blocks are introduced. C-002 (scope) is satisfied: the edit is a single coherent addition of parity tests to one test file, consistent with the repository's stated architecture where utils/stats.py exists specifically so the CLI and viewer cannot drift. C-003 (dependency declaration) is satisfied: the new code uses only standard-library modules (tempfile, shutil, os, json, io, contextlib, pathlib) and internal project symbols, none of which require requirements.txt entries. C-004 (type safety) is satisfied and in fact reinforced: the added code carries explicit type annotations (-> None, str, list[dict], dict, io.StringIO). C-005 (test coverage) is a warning-severity constraint and is affirmatively advanced, not violated, since this change adds tests. C-006 (secrets) is not applicable: only literal test fixtures ('abc', 'boom', hash placeholders) appear, no credentials. C-007 (governance pipeline integrity) is satisfied: a test file is not one of the enumerated pipeline files (challenger, defender, oracle, ledger, constitution), and the change tightens rather than weakens enforcement by pinning the shared-stats contract. C-008 (ledger immutability) is not applicable: the tests write and read a temporary ledger.json fixture in a per-test tmpdir and never touch the real ledger, entries, or hash chain; anchor entries are constructed only as in-memory fixtures.",
+    "constraint_citations": [
+      {
+        "constraint_id": "C-001",
+        "disposition": "NOT_APPLICABLE",
+        "note": "No exception-handling blocks are introduced; only patch context managers and stdout redirection."
+      },
+      {
+        "constraint_id": "C-002",
+        "disposition": "SATISFIED",
+        "note": "Single coherent scope: adds parity tests to one test file, aligned with the shared utils/stats.py design described in repo context."
+      },
+      {
+        "constraint_id": "C-003",
+        "disposition": "SATISFIED",
+        "note": "Only stdlib and internal project symbols are used; neither requires requirements.txt declaration."
+      },
+      {
+        "constraint_id": "C-004",
+        "disposition": "SATISFIED",
+        "note": "All new signatures carry explicit annotations; no precision discarded and no bare Any introduced."
+      },
+      {
+        "constraint_id": "C-005",
+        "disposition": "SATISFIED",
+        "note": "Change adds test coverage, directly advancing this constraint's intent."
+      },
+      {
+        "constraint_id": "C-006",
+        "disposition": "NOT_APPLICABLE",
+        "note": "Only test fixture literals appear; no credentials or secrets."
+      },
+      {
+        "constraint_id": "C-007",
+        "disposition": "SATISFIED",
+        "note": "Test file is not an enumerated pipeline file; change strengthens the stats-parity contract rather than weakening enforcement."
+      },
+      {
+        "constraint_id": "C-008",
+        "disposition": "NOT_APPLICABLE",
+        "note": "Tests operate on a throwaway tmpdir ledger fixture; the real ledger, entries directory, and hash chain are untouched."
+      }
+    ],
+    "advisories": [
+      "The new test code references symbols (tempfile, shutil, os, json, io, contextlib, Path, ANCHOR_VERDICT, ANCHOR_TOOL, compute_entry_hash, compute_ledger_stats, pct, cmd_stats, _build_valid_chain) that must already be imported at the top of tests/test_viewer.py. The diff does not show the import section, so confirm these imports exist; otherwise the tests will fail to collect. This is a correctness note, not a constitutional violation.",
+      "Per repository rule 13, run these specific test cases individually rather than a bulk pytest invocation when verifying locally."
+    ],
+    "remediation": null,
+    "confidence": "HIGH",
+    "_tokens": {
+      "input": 10774,
+      "output": 2037
+    }
+  },
+  "entry_hash": "f735d7228ac8c77808df5eb1e687e93a282b09a31a2c19e13bdd4cba6ea86ba5"
+}
