@@ -1,0 +1,129 @@
+{
+  "entry_id": "9a95bd96-ac67-4d22-85dd-0c681e1027d3",
+  "timestamp": "2026-08-06T04:45:09.563111+00:00",
+  "previous_hash": [
+    "83483e16cdd81fd4abe5900dd9bae1ca37d06dd21ee2094f90dc3cf665e55b30"
+  ],
+  "constitution_hash": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3",
+  "constitution_sources": [
+    {
+      "layer": "core",
+      "path": "C:\\Users\\mstar\\Bench\\bench.json",
+      "sha256": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3"
+    }
+  ],
+  "verdict": "PASS",
+  "pipeline_error": false,
+  "change": {
+    "file": "scripts\\githooks\\pre-commit",
+    "tool": "Write",
+    "diff_summary": {
+      "file_path": "scripts\\githooks\\pre-commit",
+      "change_type": "create",
+      "content": "#!/bin/sh\n# Bench pre-commit guard: refuse a commit that stages ledger entry files\n# while other entry files remain untracked.\n#\n# Under DAG storage (ledger/entries/, one file per entry), append_entry\n# sets each new entry's previous_hash to every current tip, including\n# tips that exist only as untracked files. Committing a partial set of\n# entries therefore publishes children whose parents are not in git, and\n# a fresh clone fails `python -m cli verify` with MISSING_PARENT. The\n# discipline is: commit ALL untracked ledger entries (after reading\n# them) or none. This hook makes that mechanical at the only moment it\n# matters. Untracked entries that accumulate mid-session are fine; they\n# only become a hazard when a commit publishes some of them.\n#\n# tests/test_ledger_hygiene.py holds the CI-side backstop: on a clean\n# checkout, a partial commit surfaces as a chain that does not verify.\n#\n# Enable once per clone:  git config core.hooksPath scripts/githooks\n\nstaged=$(git diff --cached --name-only -- ledger/entries)\nif [ -z \"$staged\" ]; then\n    exit 0\nfi\n\nuntracked=$(git ls-files --others --exclude-standard -- ledger/entries)\nif [ -n \"$untracked\" ]; then\n    echo \"pre-commit: this commit stages ledger entries while other entry files remain untracked:\" >&2\n    echo \"$untracked\" | sed 's/^/  /' >&2\n    echo \"\" >&2\n    echo \"Commit ALL untracked ledger entries (after reading them) or none.\" >&2\n    echo \"A partial set publishes entries whose parents are not in git, and\" >&2\n    echo \"a fresh clone then fails 'python -m cli verify' with MISSING_PARENT.\" >&2\n    exit 1\nfi\n\nexit 0\n",
+      "formatted_diff": "+#!/bin/sh\n+# Bench pre-commit guard: refuse a commit that stages ledger entry files\n+# while other entry files remain untracked.\n+#\n+# Under DAG storage (ledger/entries/, one file per entry), append_entry\n+# sets each new entry's previous_hash to every current tip, including\n+# tips that exist only as untracked files. Committing a partial set of\n+# entries therefore publishes children whose parents are not in git, and\n+# a fresh clone fails `python -m cli verify` with MISSING_PARENT. The\n+# discipline is: commit ALL untracked ledger entries (after reading\n+# them) or none. This hook makes that mechanical at the only moment it\n+# matters. Untracked entries that accumulate mid-session are fine; they\n+# only become a hazard when a commit publishes some of them.\n+#\n+# tests/test_ledger_hygiene.py holds the CI-side backstop: on a clean\n+# checkout, a partial commit surfaces as a chain that does not verify.\n+#\n+# Enable once per clone:  git config core.hooksPath scripts/githooks\n+\n+staged=$(git diff --cached --name-only -- ledger/entries)\n+if [ -z \"$staged\" ]; then\n+    exit 0\n+fi\n+\n+untracked=$(git ls-files --others --exclude-standard -- ledger/entries)\n+if [ -n \"$untracked\" ]; then\n+    echo \"pre-commit: this commit stages ledger entries while other entry files remain untracked:\" >&2\n+    echo \"$untracked\" | sed 's/^/  /' >&2\n+    echo \"\" >&2\n+    echo \"Commit ALL untracked ledger entries (after reading them) or none.\" >&2\n+    echo \"A partial set publishes entries whose parents are not in git, and\" >&2\n+    echo \"a fresh clone then fails 'python -m cli verify' with MISSING_PARENT.\" >&2\n+    exit 1\n+fi\n+\n+exit 0\n"
+    }
+  },
+  "challenger": {
+    "status": "FINDINGS",
+    "findings": [
+      {
+        "constraint_id": "C-007",
+        "severity": "CONCERN",
+        "location": "scripts/githooks/pre-commit (new file)",
+        "evidence": "\"Enable once per clone:  git config core.hooksPath scripts/githooks\"",
+        "reasoning": "This hook is presented as the mechanism that makes the DAG ledger's parent-availability discipline 'mechanical', but it only takes effect if each contributor manually runs `git config core.hooksPath scripts/githooks` in their local clone. Git hooks are never transmitted by the repository itself and this isn't wired into CI in this diff. A governance-adjacent control that is silently inert by default (no error, no warning, exit 0 everywhere if not configured) risks being mistaken for enforced protection when it is actually opt-in convention. This isn't a violation since the comment is honest about the opt-in nature and a CI-side backstop (test_ledger_hygiene.py) is cited, but the Oracle may want to confirm that backstop actually exists and covers the partial-commit scenario, since this file alone does not enforce anything on a machine where the hooksPath was never configured."
+      },
+      {
+        "constraint_id": "C-005",
+        "severity": "OBSERVATION",
+        "location": "scripts/githooks/pre-commit (new file)",
+        "evidence": "Entire shell script logic (staged/untracked diff against ledger/entries) has no accompanying test in this diff.",
+        "reasoning": "New branching logic (the staged-vs-untracked check and its exit codes) has no direct test exercising the hook script itself. The diff defers to test_ledger_hygiene.py as justification, which plausibly tests the downstream symptom (a chain that fails verify) rather than the hook's own control flow. This is a warning-level constraint and the justification given is reasonable, so it's noted rather than treated as a gap requiring action."
+      }
+    ],
+    "_tokens": {
+      "input": 10234,
+      "output": 2848
+    }
+  },
+  "defender": {
+    "status": "REBUTTAL",
+    "rebuttals": [
+      {
+        "finding_index": 0,
+        "position": "MITIGATE",
+        "argument": "The Challenger's own framing already concedes this is not a violation, and I agree. Git hooks are opt-in by design; there is no mechanism by which a repository can force a client-side hook to run automatically, so 'opt-in unless configured' is not a defect in this implementation, it's an inherent property of the git hooks system. The real invariant, that a fresh clone must not fail verify_chain with MISSING_PARENT, is enforced server-side by test_ledger_hygiene.py in CI regardless of whether any individual contributor enabled the local hook. The pre-commit script is a fast-fail convenience that catches the mistake before it's pushed, not the sole line of defense. The header comment is transparent about this ('Enable once per clone'), which directly addresses the Challenger's stated worry that the control might be 'mistaken for enforced protection' \u2014 a reader of this file cannot come away thinking it runs by default. I'd flag one legitimate follow-up the Challenger raises correctly: the Oracle should confirm test_ledger_hygiene.py actually exists and covers the partial-commit-then-clone scenario, since that file isn't part of this diff and its existence is asserted rather than shown. If it doesn't exist yet, the comment's claim of a 'CI-side backstop' is aspirational rather than real, which would matter more than the hook's opt-in nature.",
+        "evidence": "Header comment: 'tests/test_ledger_hygiene.py holds the CI-side backstop: on a clean checkout, a partial commit surfaces as a chain that does not verify.' and 'Enable once per clone: git config core.hooksPath scripts/githooks' \u2014 both statements are visible in the file itself, so no reader is misled about scope."
+      },
+      {
+        "finding_index": 1,
+        "position": "REBUT",
+        "argument": "C-005 explicitly permits either test cases OR 'an explicit justification for why testing is deferred.' The file's header comment supplies exactly that: it names test_ledger_hygiene.py as the mechanism that verifies the invariant this hook exists to prevent violating, and explains the relationship (the hook is a local, early, convenience check; the CI test is the authoritative backstop that runs unconditionally). That's not a vague hand-wave, it's a specific, checkable claim about where coverage lives and why a duplicate unit test of the shell script's branching would be redundant with a test that already exercises the failure mode end-to-end (partial commit -> clone -> verify fails). The Challenger's own conclusion is that this is 'noted rather than treated as a gap requiring action,' which is consistent with C-005 being satisfied, not merely a low-severity miss.",
+        "evidence": "Constraint text: 'New functions or branches of logic must have corresponding test cases or an explicit justification for why testing is deferred.' Diff comment: 'tests/test_ledger_hygiene.py holds the CI-side backstop: on a clean checkout, a partial commit surfaces as a chain that does not verify.'"
+      }
+    ],
+    "summary": "The hook is a sound, narrowly-scoped addition that adds a client-side fail-fast check without weakening any existing enforcement, and its stated reliance on a CI-side test satisfies C-005's justification clause, though the Oracle should confirm test_ledger_hygiene.py actually exists and covers this scenario before treating that backstop as established fact.",
+    "_tokens": {
+      "input": 11063,
+      "output": 2884
+    }
+  },
+  "oracle": {
+    "verdict": "PASS",
+    "reasoning": "The change creates a new client-side git pre-commit hook (scripts/githooks/pre-commit) that fast-fails commits which stage some ledger entry files while leaving sibling entry files untracked, a condition that would produce MISSING_PARENT failures under the DAG ledger storage model described in CLAUDE.md. I evaluated the change against the full constitution, not only the constraints the Challenger cited. C-007 (Governance Pipeline Integrity) is the most relevant: the hook strengthens rather than weakens enforcement, adds no bypass, and disables no logging. The Challenger's own finding (index 0) is explicitly a CONCERN, not a violation, and concedes the header comment is honest about the opt-in nature ('Enable once per clone'). The Defender correctly notes (rebuttal 0) that opt-in behavior is an inherent property of git's client-side hook system, not a defect introduced here, and that the file's comments prevent any reader from mistaking it for automatic enforcement. C-005 (Test Coverage, warning severity) is satisfied via the constraint's explicit justification clause: the header names tests/test_ledger_hygiene.py as the CI-side backstop and explains why duplicating the shell branching in a unit test would be redundant with an end-to-end failure-mode test; the Challenger rated this an OBSERVATION 'noted rather than treated as a gap.' No secrets appear (C-006 N/A), no dependencies are added (C-003 N/A), no type annotations are touched (C-004 N/A, shell script), no catch blocks exist to swallow errors (C-001 N/A), no ledger entries are modified or deleted (C-008 satisfied; the hook in fact defends chain integrity), and the change is a single coherent scope (C-002 satisfied). No veto-severity constraint is clearly violated.",
+    "constraint_citations": [
+      {
+        "constraint_id": "C-001",
+        "disposition": "NOT_APPLICABLE",
+        "note": "Shell script with no exception-handling constructs; nothing to swallow."
+      },
+      {
+        "constraint_id": "C-002",
+        "disposition": "SATISFIED",
+        "note": "Single coherent scope: one pre-commit hook addressing ledger partial-commit hazard, consistent with the DAG storage model described in CLAUDE.md."
+      },
+      {
+        "constraint_id": "C-003",
+        "disposition": "NOT_APPLICABLE",
+        "note": "No new imports or dependencies; uses stock git and sed."
+      },
+      {
+        "constraint_id": "C-004",
+        "disposition": "NOT_APPLICABLE",
+        "note": "No Python type annotations involved; shell script."
+      },
+      {
+        "constraint_id": "C-005",
+        "disposition": "SATISFIED",
+        "note": "Warning-severity. Explicit justification for deferred hook-level testing is supplied, pointing to tests/test_ledger_hygiene.py as the CI backstop for the end-to-end failure mode."
+      },
+      {
+        "constraint_id": "C-006",
+        "disposition": "NOT_APPLICABLE",
+        "note": "No credentials, keys, or tokens present."
+      },
+      {
+        "constraint_id": "C-007",
+        "disposition": "SATISFIED",
+        "note": "Adds a client-side fail-fast control that reinforces ledger parent-availability discipline; weakens no existing enforcement, adds no bypass, disables no logging. Challenger's concern is a CONCERN, not a violation."
+      },
+      {
+        "constraint_id": "C-008",
+        "disposition": "SATISFIED",
+        "note": "Hook only reads git staging/untracked state and blocks partial publishes; it never modifies, deletes, or reorders ledger entries, and it actively protects hash-chain integrity."
+      }
+    ],
+    "advisories": [
+      "The header comment and the Defender's summary both assert that tests/test_ledger_hygiene.py exists and covers the partial-commit-then-clone scenario. That file is not part of this diff, so its existence and coverage are asserted rather than demonstrated. If that backstop does not yet exist, the hook's only enforcement is the opt-in client-side check, and the 'CI-side backstop' claim would be aspirational. Confirm the test exists and exercises the MISSING_PARENT failure mode.",
+      "The hook is inert unless each contributor runs 'git config core.hooksPath scripts/githooks' locally. This is inherent to git and honestly documented, but the true invariant must remain enforced server-side in CI, not by this convenience check."
+    ],
+    "remediation": null,
+    "confidence": "HIGH",
+    "_tokens": {
+      "input": 12063,
+      "output": 1880
+    }
+  },
+  "entry_hash": "aff08e93befa443b49f2a22b42d94ecbd2df0466bdc9a4e021342827e2ebd7c0"
+}

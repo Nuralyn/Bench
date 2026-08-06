@@ -1,0 +1,4 @@
+# Git hooks are executed by sh, which does not tolerate CRLF line endings.
+# Without this pin, a Windows clone with core.autocrlf=true checks the hook
+# out with CRLF and it fails at the shebang or on stray \r in every branch.
+scripts/githooks/* text eol=lf

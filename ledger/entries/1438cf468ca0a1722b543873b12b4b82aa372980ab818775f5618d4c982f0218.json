@@ -1,0 +1,124 @@
+{
+  "entry_id": "708400df-437e-4d71-b171-51137cb67b75",
+  "timestamp": "2026-08-06T04:04:53.766711+00:00",
+  "previous_hash": [
+    "d07faa74dadec6d6c0118839d64502cff41a9f4f2a896620c920b29529f8909c"
+  ],
+  "constitution_hash": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3",
+  "constitution_sources": [
+    {
+      "layer": "core",
+      "path": "C:\\Users\\mstar\\Bench\\bench.json",
+      "sha256": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3"
+    }
+  ],
+  "verdict": "PASS",
+  "pipeline_error": false,
+  "change": {
+    "file": "tests\\test_viewer.py",
+    "tool": "Edit",
+    "diff_summary": {
+      "file_path": "tests\\test_viewer.py",
+      "change_type": "modify",
+      "old_string": "import json\nimport os\nimport shutil\nimport sys\nimport tempfile\nimport unittest\nfrom pathlib import Path\nfrom unittest.mock import patch\n\n_REPO_ROOT: Path = Path(__file__).resolve().parent.parent\nif str(_REPO_ROOT) not in sys.path:\n    sys.path.insert(0, str(_REPO_ROOT))\n\nfrom tests._ledger_fixtures import build_valid_chain as _build_valid_chain  # noqa: E402\nfrom ledger.chain import compute_entry_hash  # noqa: E402\nfrom utils.viewer import generate_viewer_html  # noqa: E402",
+      "new_string": "import contextlib\nimport io\nimport json\nimport os\nimport shutil\nimport sys\nimport tempfile\nimport unittest\nfrom pathlib import Path\nfrom unittest.mock import patch\n\n_REPO_ROOT: Path = Path(__file__).resolve().parent.parent\nif str(_REPO_ROOT) not in sys.path:\n    sys.path.insert(0, str(_REPO_ROOT))\n\nfrom tests._ledger_fixtures import build_valid_chain as _build_valid_chain  # noqa: E402\nfrom cli.commands import cmd_stats  # noqa: E402\nfrom ledger.chain import ANCHOR_VERDICT, compute_entry_hash  # noqa: E402\nfrom ledger.retire import ANCHOR_TOOL  # noqa: E402\nfrom utils.stats import compute_ledger_stats, pct  # noqa: E402\nfrom utils.viewer import generate_viewer_html  # noqa: E402"
+    }
+  },
+  "challenger": {
+    "status": "FINDINGS",
+    "findings": [
+      {
+        "constraint_id": "C-002",
+        "severity": "CONCERN",
+        "location": "tests/test_viewer.py: import block",
+        "evidence": "from cli.commands import cmd_stats  # noqa: E402\nfrom ledger.chain import ANCHOR_VERDICT, compute_entry_hash  # noqa: E402\nfrom ledger.retire import ANCHOR_TOOL  # noqa: E402\nfrom utils.stats import compute_ledger_stats, pct  # noqa: E402",
+        "reasoning": "The file is test_viewer.py, whose existing imports (build_valid_chain, compute_entry_hash, generate_viewer_html) suggest a single coherent scope: testing utils/viewer.py's HTML generation against ledger chains. The new imports pull in cli.commands.cmd_stats (CLI layer), ledger.retire.ANCHOR_TOOL (chain retirement, a distinct governed subsystem under C-008), and utils.stats (stats computation). Only the import statements are visible in this diff, not the test bodies that use them, but the breadth of unrelated modules being imported into a viewer-focused test file is a signal of possible scope bundling (viewer tests + stats tests + retirement-anchor tests in one file/change) rather than one coherent addition. This is not a clear violation since the corresponding test logic isn't shown, but it warrants confirming that the accompanying test additions are genuinely about viewer behavior (e.g., rendering ANCHOR entries or stats in the viewer) and not an unrelated bundle of stats/retire unit tests riding along in this file."
+      },
+      {
+        "constraint_id": "C-007",
+        "severity": "OBSERVATION",
+        "location": "tests/test_viewer.py: import block",
+        "evidence": "from ledger.retire import ANCHOR_TOOL  # noqa: E402",
+        "reasoning": "This diff imports from ledger/retire.py, a governance-pipeline module under C-007's scope. The change itself is test-only (adding an import), does not modify the pipeline, weaken enforcement, or bypass verification, so it does not implicate C-007 as a violation. Noted only because tests exercising retirement/anchor logic should be scrutinized carefully given the sensitivity of that subsystem under C-008, once the actual test bodies are visible."
+      }
+    ],
+    "_tokens": {
+      "input": 9413,
+      "output": 1989
+    }
+  },
+  "defender": {
+    "status": "REBUTTAL",
+    "rebuttals": [
+      {
+        "finding_index": 0,
+        "position": "REBUT",
+        "argument": "The Challenger's own reasoning undermines its concern: it correctly notes test_viewer.py's coherent scope is 'testing utils/viewer.py's HTML generation against ledger chains,' and every new import serves exactly that. ANCHOR_VERDICT (ledger.chain) and ANCHOR_TOOL (ledger.retire) are the constants needed to construct an ANCHOR entry as a test fixture \u2014 and per this repo's own CLAUDE.md, anchor entries are first-class ledger content ('an anchor entry opening the successor chain that records the retired chain's tip hash...') that a ledger viewer must be able to render. Testing that generate_viewer_html correctly displays an anchor entry is squarely within the viewer's scope, not a bundled retirement test. Similarly, utils/stats.py is explicitly documented in CLAUDE.md's Project Structure as 'Shared ledger stats helpers (CLI + viewer)' \u2014 it is not a foreign module being dragged in, it is the viewer's own stats dependency, shared by design with the CLI. Importing compute_ledger_stats and pct into test_viewer.py is therefore testing the viewer's actual computation path, not scope creep. cmd_stats from cli.commands is the natural cross-check for stats-parity between the CLI's rendering and the viewer's rendering of the same shared computation, which is a legitimate and narrow addition to a viewer test suite, not an unrelated CLI test riding along.",
+        "evidence": "CLAUDE.md Project Structure: 'utils/stats.py  # Shared ledger stats helpers (CLI + viewer)'; CLAUDE.md ledger section describes ANCHOR entries as ledger content with specific fields the viewer would need to render; the diff's own existing imports (build_valid_chain, compute_entry_hash) already establish this file constructs and inspects full ledger chains, of which anchor entries are a documented member type."
+      },
+      {
+        "finding_index": 1,
+        "position": "CONCEDE",
+        "argument": "The Challenger correctly classifies this as a non-violation and only an observation for future scrutiny once test bodies are visible. I agree with that assessment: importing a read-only constant from ledger/retire.py into a test file does not modify, weaken, or bypass the governance pipeline, and C-007 is not implicated by an import statement alone.",
+        "evidence": "Finding text: 'does not modify the pipeline, weaken enforcement, or bypass verification, so it does not implicate C-007 as a violation.'"
+      }
+    ],
+    "summary": "The diff is a minimal, well-justified extension of test_viewer.py's import surface to cover the viewer's documented dependency on shared stats helpers and its need to render anchor-entry ledger content, and neither Challenger finding rises to a constitutional violation.",
+    "_tokens": {
+      "input": 10402,
+      "output": 2293
+    }
+  },
+  "oracle": {
+    "verdict": "PASS",
+    "reasoning": "The diff adds import statements to tests/test_viewer.py: two stdlib modules (contextlib, io) and internal-module symbols (cli.commands.cmd_stats, ledger.chain.ANCHOR_VERDICT, ledger.retire.ANCHOR_TOOL, utils.stats.compute_ledger_stats/pct). No test bodies, production code, or dependency manifests are altered. The Challenger raised only a CONCERN under C-002 and an OBSERVATION under C-007, neither asserted as a clear violation. On C-002, the Defender's rebuttal is well-grounded in the untrusted-but-informative CLAUDE.md, which documents utils/stats.py as 'Shared ledger stats helpers (CLI + viewer)' and describes ANCHOR entries as first-class ledger content a viewer must render. Importing anchor constants and shared stats helpers into a viewer test file is therefore consistent with the file's stated coherent scope (testing viewer HTML generation against ledger chains), not an unrelated bundle. The cmd_stats import is plausibly a CLI/viewer stats-parity cross-check within that same scope. On C-007, both parties agree an import of a read-only constant does not modify, weaken, bypass, or disable any governance enforcement. No other constraint is implicated: the imports are internal modules and stdlib, so C-003 is not triggered (no external dependency added); there is no error handling (C-001), no type annotations weakened (C-004), no secrets (C-006), and no ledger mutation (C-008).",
+    "constraint_citations": [
+      {
+        "constraint_id": "C-002",
+        "disposition": "SATISFIED",
+        "note": "New imports serve the file's documented coherent scope (viewer rendering of ledger content including anchor entries and shared stats). Challenger's concern was speculative and rebutted with CLAUDE.md evidence; test bodies not shown but imports alone do not constitute scope bundling."
+      },
+      {
+        "constraint_id": "C-003",
+        "disposition": "SATISFIED",
+        "note": "contextlib and io are stdlib; all other imports are internal repo modules. No new external dependency requiring declaration in requirements.txt."
+      },
+      {
+        "constraint_id": "C-007",
+        "disposition": "NOT_APPLICABLE",
+        "note": "Test-only import of a read-only constant from ledger/retire.py does not modify the pipeline, weaken enforcement, bypass verification, or disable logging. Both Challenger and Defender concur."
+      },
+      {
+        "constraint_id": "C-001",
+        "disposition": "NOT_APPLICABLE",
+        "note": "No catch/except blocks introduced."
+      },
+      {
+        "constraint_id": "C-004",
+        "disposition": "NOT_APPLICABLE",
+        "note": "No type annotations added, removed, or weakened."
+      },
+      {
+        "constraint_id": "C-006",
+        "disposition": "NOT_APPLICABLE",
+        "note": "No credentials or secrets present."
+      },
+      {
+        "constraint_id": "C-008",
+        "disposition": "NOT_APPLICABLE",
+        "note": "No ledger entries modified, deleted, reordered, or appended."
+      }
+    ],
+    "advisories": [
+      "Only the import block is visible in this diff. The accompanying test bodies were not presented. The PASS certifies the imports do not violate the constitution; the follow-on test logic should genuinely exercise viewer behavior (e.g., rendering ANCHOR entries and stats parity) rather than smuggle unrelated stats/retire unit tests into a viewer-focused file, per the C-002 concern.",
+      "C-005 (warning severity): if these imports support new test coverage for viewer rendering of anchor/stats content, that is positive; ensure the added tests actually cover the new viewer logic paths."
+    ],
+    "remediation": null,
+    "confidence": "HIGH",
+    "_tokens": {
+      "input": 11224,
+      "output": 1723
+    }
+  },
+  "entry_hash": "1438cf468ca0a1722b543873b12b4b82aa372980ab818775f5618d4c982f0218"
+}

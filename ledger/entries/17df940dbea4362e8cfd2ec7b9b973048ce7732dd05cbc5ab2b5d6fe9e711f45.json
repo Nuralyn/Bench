@@ -1,0 +1,128 @@
+{
+  "entry_id": "88e3bd5a-9d87-4090-acc6-e54dc3e8c9b4",
+  "timestamp": "2026-08-06T04:06:48.982813+00:00",
+  "previous_hash": [
+    "f735d7228ac8c77808df5eb1e687e93a282b09a31a2c19e13bdd4cba6ea86ba5"
+  ],
+  "constitution_hash": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3",
+  "constitution_sources": [
+    {
+      "layer": "core",
+      "path": "C:\\Users\\mstar\\Bench\\bench.json",
+      "sha256": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3"
+    }
+  ],
+  "verdict": "PASS",
+  "pipeline_error": false,
+  "change": {
+    "file": "tests\\test_viewer.py",
+    "tool": "Edit",
+    "diff_summary": {
+      "file_path": "tests\\test_viewer.py",
+      "change_type": "modify",
+      "old_string": "    def test_generation_failure_returns_error_page(self) -> None:\n        with patch(\n            \"utils.viewer.load_ledger\", side_effect=RuntimeError(\"boom\")\n        ):\n            html_out: str = generate_viewer_html(self._path())\n        self.assertIn(\"generation failed\", html_out)\n        self.assertIn(\"RuntimeError: boom\", html_out)\n\n\nif __name__ == \"__main__\":\n    unittest.main()",
+      "new_string": "    def test_generation_failure_returns_error_page(self) -> None:\n        with patch(\n            \"utils.viewer.load_ledger\", side_effect=RuntimeError(\"boom\")\n        ):\n            html_out: str = generate_viewer_html(self._path())\n        self.assertIn(\"generation failed\", html_out)\n        self.assertIn(\"RuntimeError: boom\", html_out)\n\n\nclass ViewerStatsParityTests(unittest.TestCase):\n    \"\"\"The viewer banner and cmd_stats must report identical rates.\n\n    Both surfaces consume utils.stats.compute_ledger_stats, which exists so\n    they cannot drift apart; these tests lock the contract that both compute\n    pass/veto percentages over adjudicated entries (excluding chain-retirement\n    anchors), and pin pct() behavior when a chain holds only an anchor.\n    \"\"\"\n\n    def setUp(self) -> None:\n        self._tmp: str = tempfile.mkdtemp()\n        self.addCleanup(shutil.rmtree, self._tmp)\n\n    def _path(self) -> str:\n        return os.path.join(self._tmp, \"ledger.json\")\n\n    def _write_chain(self, chain: list[dict]) -> None:\n        Path(self._path()).write_text(json.dumps(chain), encoding=\"utf-8\")\n\n    @staticmethod\n    def _append_anchor(chain: list[dict]) -> None:\n        \"\"\"Append a chain-retirement anchor entry, correctly linked.\"\"\"\n        anchor: dict = {\n            \"entry_id\": \"id-anchor\",\n            \"timestamp\": \"2026-01-01T00:01:00+00:00\",\n            \"previous_hash\": (\n                chain[-1][\"entry_hash\"] if chain else \"GENESIS\"\n            ),\n            \"constitution_hash\": \"abc\",\n            \"verdict\": ANCHOR_VERDICT,\n            \"change\": {\n                \"file\": \"ledger/bench-ledger.json\",\n                \"tool\": ANCHOR_TOOL,\n            },\n            \"oracle\": {},\n        }\n        anchor[\"entry_hash\"] = compute_entry_hash(anchor)\n        chain.append(anchor)\n\n    def test_banner_rates_match_cmd_stats_with_anchor_present(self) -> None:\n        chain: list[dict] = _build_valid_chain(\n            3, verdicts=[\"PASS\", \"VETO\", \"PASS\"]\n        )\n        self._append_anchor(chain)\n        self._write_chain(chain)\n        html_out: str = generate_viewer_html(self._path())\n\n        stats: dict = compute_ledger_stats(chain)\n        self.assertEqual(stats[\"adjudicated\"], 3)\n        expected_passed: str = f\"({pct(stats['passed'], stats['adjudicated'])})\"\n        expected_vetoed: str = f\"({pct(stats['vetoed'], stats['adjudicated'])})\"\n        self.assertIn(expected_passed, html_out)  # (66.7%)\n        self.assertIn(expected_vetoed, html_out)  # (33.3%)\n        # Rates over total (4, anchor included) would be 50.0% and 25.0%;\n        # their absence proves the anchor is excluded from the denominator.\n        self.assertNotIn(\"(50.0%)\", html_out)\n        self.assertNotIn(\"(25.0%)\", html_out)\n        self.assertIn(\n            '<div class=\"label\">Governed changes</div>'\n            '<div class=\"value\">3</div>',\n            html_out,\n        )\n\n        buf: io.StringIO = io.StringIO()\n        with patch(\"cli.commands.load_ledger\", return_value=chain), patch(\n            \"cli.commands.verify_chain\", return_value={\"valid\": True}\n        ), contextlib.redirect_stdout(buf):\n            cmd_stats()\n        cli_out: str = buf.getvalue()\n        self.assertIn(expected_passed, cli_out)\n        self.assertIn(expected_vetoed, cli_out)\n\n    def test_anchor_only_ledger_renders_zero_rates(self) -> None:\n        chain: list[dict] = []\n        self._append_anchor(chain)\n        self._write_chain(chain)\n        html_out: str = generate_viewer_html(self._path())\n        self.assertNotIn(\"generation failed\", html_out)\n        self.assertIn(\"(0.0%)\", html_out)\n        self.assertIn(\n            '<div class=\"label\">Governed changes</div>'\n            '<div class=\"value\">0</div>',\n            html_out,\n        )\n\n\nif __name__ == \"__main__\":\n    unittest.main()"
+    }
+  },
+  "challenger": {
+    "status": "FINDINGS",
+    "findings": [
+      {
+        "constraint_id": "C-005",
+        "severity": "OBSERVATION",
+        "location": "tests/test_viewer.py: new ViewerStatsParityTests class",
+        "evidence": "Uses tempfile, shutil, io, contextlib, json, os, pathlib.Path, ANCHOR_VERDICT, ANCHOR_TOOL, compute_entry_hash, _build_valid_chain, compute_ledger_stats, pct, and cmd_stats without any import statements visible in the diff.",
+        "reasoning": "The diff is a targeted old_string/new_string replacement and does not show whether these names (several of which are project-internal symbols from ledger/chain.py, ledger/verify.py or a test-helper module, plus utils/stats.py and cli/commands.py) are already imported at the top of test_viewer.py. If any are missing, the new tests would fail at collection rather than at assertion, which undercuts the verification purpose C-005 exists to serve. This is not a constitutional violation on the evidence available \u2014 stdlib imports need no declaration under C-003, and internal symbols are not 'dependencies' in that sense \u2014 but it is worth the Oracle confirming the full file's import block covers every name used here before treating this test addition as verified."
+      },
+      {
+        "constraint_id": "C-002",
+        "severity": "OBSERVATION",
+        "location": "tests/test_viewer.py: entire diff",
+        "evidence": "The whole change is additive test code for a single behavioral contract (viewer banner vs. cmd_stats rate parity).",
+        "reasoning": "Noted only to confirm scope coherence was checked and found sound: the change stays within one file, one purpose (locking a stats-parity contract), and does not bundle unrelated edits. No production code is touched. This supports a CLEAR reading on C-002 rather than raising a concern."
+      }
+    ],
+    "_tokens": {
+      "input": 10734,
+      "output": 2845
+    }
+  },
+  "defender": {
+    "status": "CONFIRM_CLEAR",
+    "rebuttals": [
+      {
+        "finding_index": 0,
+        "position": "MITIGATE",
+        "argument": "The Challenger is correct that the diff, being a targeted old_string/new_string replacement rather than a full-file view, does not show the import block, and is right to flag that as worth confirming rather than as a violation \u2014 which is exactly what it did. The practical risk is low for two structural reasons. First, this is additive test code appended to an existing test module (test_viewer.py) that already exercises generate_viewer_html and presumably already imports tempfile/shutil/os/json/Path and viewer-adjacent helpers for the pre-existing tests in the same file (e.g. test_generation_failure_returns_error_page uses tempfile-style patterns via self._path()). Second, and more importantly, if any of ANCHOR_VERDICT, ANCHOR_TOOL, compute_entry_hash, _build_valid_chain, compute_ledger_stats, pct, or cmd_stats were genuinely missing an import, the failure mode is a loud collection-time ImportError/NameError, not a silent pass \u2014 the opposite of what C-001 (which governs runtime error handling, not test authorship) is worried about, and precisely the kind of fail-visibly outcome the constitution favors. This is a legitimate verification gap for the Oracle to close by checking the full file, but it is not evidence of a defect in the change itself.",
+        "evidence": "The new_string block references _build_valid_chain, ANCHOR_VERDICT, ANCHOR_TOOL, compute_entry_hash, compute_ledger_stats, pct, and cmd_stats without any accompanying import statements in the diff, because the diff is scoped to the old_string/new_string region and does not include the file's top-level import block."
+      },
+      {
+        "finding_index": 1,
+        "position": "CONCEDE",
+        "argument": "Agreed without qualification. The change is a single additive test class in one file, locking a stats-parity contract between the viewer banner and cmd_stats, with no production code touched and no unrelated edits bundled in.",
+        "evidence": "The entire diff modifies only tests/test_viewer.py, adding ViewerStatsParityTests immediately before the existing `if __name__ == \"__main__\":` block, with no changes outside that test file."
+      }
+    ],
+    "summary": "The change is a well-scoped, additive test suite that strengthens C-005 coverage for the viewer/cmd_stats parity contract, with only a minor unverifiable-from-diff import concern that carries low practical risk since any gap would fail loudly at collection rather than silently.",
+    "_tokens": {
+      "input": 11557,
+      "output": 2687
+    }
+  },
+  "oracle": {
+    "verdict": "PASS",
+    "reasoning": "The change is purely additive test code appended to tests/test_viewer.py, adding a ViewerStatsParityTests class that locks a contract between the viewer banner and cmd_stats (both consuming utils.stats.compute_ledger_stats) so they cannot drift on pass/veto rate reporting. No production code is touched. I evaluated every constraint, not only those cited. C-002 is satisfied: the Challenger's OBSERVATION and the Defender's CONCEDE both confirm the change stays within one file and one coherent purpose with no unrelated edits bundled in. C-005 (warning severity) is affirmatively strengthened rather than violated, since the change adds coverage. C-007 is not violated and is arguably reinforced: tests/ is not a pipeline file under Rule 16 (pipeline/, ledger/, hooks/), and locking the stats-parity contract hardens auditability rather than weakening enforcement. C-008 is not implicated: the tests write only to tempfile-backed paths (self._path() under a mkdtemp cleaned up via addCleanup), never the real ledger. The only open item is the Challenger's C-005 OBSERVATION that the targeted old_string/new_string diff does not show the file's import block for names like ANCHOR_VERDICT, ANCHOR_TOOL, compute_entry_hash, _build_valid_chain, compute_ledger_stats, pct, and cmd_stats. As both the Challenger and Defender (MITIGATE) agree, this is not a constitutional violation: stdlib imports need no C-003 declaration, internal symbols are not 'dependencies', and any genuinely missing import fails loudly at collection with an ImportError/NameError rather than silently, which is the fail-visibly behavior the constitution favors (consistent with C-001's intent, though C-001 governs runtime catch blocks, not test authorship). No veto-severity constraint is clearly violated.",
+    "constraint_citations": [
+      {
+        "constraint_id": "C-001",
+        "disposition": "NOT_APPLICABLE",
+        "note": "No catch blocks or error-handling logic introduced; this is additive test code."
+      },
+      {
+        "constraint_id": "C-002",
+        "disposition": "SATISFIED",
+        "note": "Single file, single coherent purpose (stats-parity contract). Challenger OBSERVATION and Defender CONCEDE both confirm scope coherence."
+      },
+      {
+        "constraint_id": "C-003",
+        "disposition": "SATISFIED",
+        "note": "Only stdlib modules (tempfile, shutil, io, contextlib, json, os, pathlib) and existing project-internal symbols are used; no new third-party dependency requiring declaration."
+      },
+      {
+        "constraint_id": "C-004",
+        "disposition": "SATISFIED",
+        "note": "New test code carries type annotations (list[dict], dict, str, io.StringIO) and removes/weakens no existing annotations."
+      },
+      {
+        "constraint_id": "C-005",
+        "disposition": "SATISFIED",
+        "note": "Change adds test coverage rather than removing it; warning-severity constraint is affirmatively strengthened. Import-visibility concern is a verification note, not a defect."
+      },
+      {
+        "constraint_id": "C-006",
+        "disposition": "NOT_APPLICABLE",
+        "note": "No credentials, keys, or tokens present."
+      },
+      {
+        "constraint_id": "C-007",
+        "disposition": "SATISFIED",
+        "note": "tests/ is not a governance pipeline file (pipeline/, ledger/, hooks/ per Rule 16); the test hardens the stats-parity contract rather than weakening enforcement."
+      },
+      {
+        "constraint_id": "C-008",
+        "disposition": "SATISFIED",
+        "note": "Tests operate on tempfile-backed paths with cleanup; no real ledger entry is modified, deleted, or reordered."
+      }
+    ],
+    "advisories": [
+      "Per the Challenger C-005 OBSERVATION and Defender MITIGATE, confirm that the full test_viewer.py import block already provides io, contextlib, json, Path, ANCHOR_VERDICT, ANCHOR_TOOL, compute_entry_hash, _build_valid_chain, compute_ledger_stats, pct, and cmd_stats. Any gap fails loudly at collection, so it is a verification item rather than a governance risk, but it should be closed before treating the suite as passing."
+    ],
+    "remediation": null,
+    "confidence": "HIGH",
+    "_tokens": {
+      "input": 12266,
+      "output": 2022
+    }
+  },
+  "entry_hash": "17df940dbea4362e8cfd2ec7b9b973048ce7732dd05cbc5ab2b5d6fe9e711f45"
+}
