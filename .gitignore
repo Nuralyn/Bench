@@ -23,6 +23,9 @@ htmlcov/
 # for the shared hook config)
 .claude/settings.local.json
 
+# graphify knowledge-graph output (embeds absolute local paths; regenerate with /graphify)
+graphify-out/
+
 # IDE / editor
 .idea/
 .vscode/
