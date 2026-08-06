@@ -34,10 +34,10 @@ if str(_REPO_ROOT) not in sys.path:
 
 try:
     from pipeline.runner import run_governance_pipeline
-except Exception as _e:  # pragma: no cover — import-time fail-open
+except Exception as _e:  # pragma: no cover: deferred to fail-closed VETO in main()
     print(
-        f"[bench hook] pipeline import failed, failing open: "
-        f"{type(_e).__name__}: {_e}",
+        f"[bench hook] pipeline import failed, failing closed (changes will "
+        f"be denied): {type(_e).__name__}: {_e}",
         file=sys.stderr,
     )
     traceback.print_exc(file=sys.stderr)
@@ -49,7 +49,7 @@ except Exception as _e:  # pragma: no cover — import-time fail-open
 # so the fallback path below can engage independently of pipeline import.
 try:
     from utils.diff import build_diff_info as _build_diff_info_hardened
-except Exception as _diff_e:  # pragma: no cover — import-time fail-open
+except Exception as _diff_e:  # pragma: no cover: degrades to the inline fallback below
     print(
         f"[bench hook] utils.diff import failed, extraction will run in "
         f"degraded mode: {type(_diff_e).__name__}: {_diff_e}",

@@ -125,7 +125,8 @@ def build_diff_info(tool_name: str, tool_input: dict) -> dict[str, Any]:
 
     Unexpected exceptions are caught, logged to stderr with a full
     traceback, and surfaced as a ``change_type: "error"`` dict. A broken
-    helper must not be the reason the hook fails (C-007 fail-open).
+    helper must not crash the hook: the error dict keeps the failure
+    visible so the pipeline can still adjudicate and record it (C-001).
     """
     try:
         if not isinstance(tool_input, dict):
