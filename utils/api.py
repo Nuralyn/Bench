@@ -292,8 +292,9 @@ def _anthropic_call(
             # Concatenate the text blocks. Adaptive-thinking models (Sonnet 5
             # runs adaptive thinking by default when `thinking` is unset) can
             # return a thinking block as content[0]; reading content[0].text
-            # would then yield "" and force a spurious PARSE_FAILURE that the
-            # runner fails open into a PASS. Anchor selection to the documented
+            # would then yield "" and force a spurious PARSE_FAILURE, which the
+            # stage reports as PIPELINE_ERROR and the runner fails closed on,
+            # denying a legitimate change. Anchor selection to the documented
             # "text" block type (and require non-empty text) so thinking,
             # tool_use, or any future non-text block cannot leak into the
             # governed reply body.
