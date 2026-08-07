@@ -1,0 +1,95 @@
+{
+  "entry_id": "849eedcd-6642-4448-8930-8e0b8059954c",
+  "timestamp": "2026-08-07T07:20:29.638207+00:00",
+  "previous_hash": [
+    "100a53dd77efe196a9e458cc1e66980c8653276ca84e0ca0dc9206299bbc34e3"
+  ],
+  "constitution_hash": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3",
+  "constitution_sources": [
+    {
+      "layer": "core",
+      "path": "C:\\Users\\mstar\\Bench\\bench.json",
+      "sha256": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3"
+    }
+  ],
+  "verdict": "PASS",
+  "pipeline_error": false,
+  "change": {
+    "file": "ledger\\chain.py",
+    "tool": "Edit",
+    "diff_summary": {
+      "file_path": "ledger\\chain.py",
+      "change_type": "modify",
+      "old_string": "    \"\"\"Read the frozen legacy array, raising rather than degrading.\n\n    An absent file is normal and returns ``[]``. Every other failure raises\n    ``LedgerReadError``. Treating a corrupt array as an empty chain is exactly\n    what let the next append restart from GENESIS and overwrite the damaged\n    file, destroying the evidence (C-008).\n    \"\"\"",
+      "new_string": "    \"\"\"Read the frozen legacy array, raising rather than degrading.\n\n    An absent file is normal and returns ``[]``. Every other failure raises\n    ``LedgerReadError`` (see that class for why degrading to an empty chain\n    is forbidden).\n    \"\"\""
+    }
+  },
+  "challenger": {
+    "status": "CLEAR",
+    "findings": [],
+    "_tokens": {
+      "input": 9058,
+      "output": 19
+    }
+  },
+  "defender": {
+    "status": "CONFIRM_CLEAR",
+    "rebuttals": [],
+    "summary": "Challenger found no issues.",
+    "_tokens": {
+      "input": 0,
+      "output": 0
+    }
+  },
+  "oracle": {
+    "verdict": "PASS",
+    "reasoning": "The change is a docstring-only edit in ledger/chain.py. It replaces a verbose explanation of why a corrupt legacy array must raise LedgerReadError (with an inline reference to C-008) with a shorter form that redirects the reader to the LedgerReadError class itself. No executable logic changes: the function still 'raises rather than degrading,' still returns [] for an absent file, and still refuses to treat a corrupt array as an empty chain. The Challenger returned CLEAR and the Defender CONFIRM_CLEAR. I independently evaluated the full constitution. C-007 applies because chain.py is a governance/ledger file, but the enforcement behavior is unchanged; only descriptive prose was condensed, so enforcement is neither weakened nor bypassed and no logging is disabled. C-008 is not touched: no ledger entry is modified, deleted, reordered, or overwritten, and the anti-degradation guarantee the docstring describes remains intact in code. C-001 is not implicated: no catch block is altered. The edit is confined to a single coherent scope (C-002) and adds no imports (C-003), removes no type annotations (C-004), and introduces no secrets (C-006).",
+    "constraint_citations": [
+      {
+        "constraint_id": "C-001",
+        "disposition": "NOT_APPLICABLE",
+        "note": "No error-handling logic changed; only a docstring was edited."
+      },
+      {
+        "constraint_id": "C-002",
+        "disposition": "SATISFIED",
+        "note": "Single coherent scope: one docstring in one file."
+      },
+      {
+        "constraint_id": "C-003",
+        "disposition": "NOT_APPLICABLE",
+        "note": "No imports or dependencies added."
+      },
+      {
+        "constraint_id": "C-004",
+        "disposition": "NOT_APPLICABLE",
+        "note": "No type annotations added, removed, or weakened."
+      },
+      {
+        "constraint_id": "C-006",
+        "disposition": "NOT_APPLICABLE",
+        "note": "No credentials introduced."
+      },
+      {
+        "constraint_id": "C-007",
+        "disposition": "SATISFIED",
+        "note": "chain.py is a governance file, but the edit is prose-only and does not weaken enforcement, bypass verification, or disable logging."
+      },
+      {
+        "constraint_id": "C-008",
+        "disposition": "SATISFIED",
+        "note": "No ledger entry modified/deleted/overwritten; the anti-degradation guarantee preserving evidence remains intact in code."
+      }
+    ],
+    "advisories": [
+      "The removed docstring dropped the explicit '(C-008)' citation and the concrete rationale about restarting from GENESIS. The redirect to LedgerReadError preserves the reasoning only if that class docstring actually documents why degrading to an empty chain is forbidden; confirm that documentation exists so the constitutional linkage is not lost."
+    ],
+    "remediation": null,
+    "confidence": "HIGH",
+    "_tokens": {
+      "input": 9097,
+      "output": 1239
+    }
+  },
+  "entry_hash": "58dac62390b93601259b7404e7dde85b0919ad558356bbf8efef794ee1442493"
+}

@@ -42,10 +42,12 @@ from utils.project import BENCH_ROOT, project_root
 # must agree on which project a run belongs to; if they could disagree, a
 # change could be judged against one project's constitution while being
 # recorded in another project's ledger. utils.project is the single definition
-# all three resolve through. This alias preserves the existing internal name.
+# all three resolve through.
 _BENCH_ROOT: Path = BENCH_ROOT
 _DEFAULT_LEDGER_PATH: str = str(_BENCH_ROOT / "ledger" / "bench-ledger.json")
 _PROJECT_LEDGER_DIRNAME: str = ".bench"
+# Frozen pin on the legacy segment; never written here. verify.py imports
+# this name to check the pin.
 META_FILENAME: str = "ledger-meta.json"
 _GENESIS_MARKER: str = "GENESIS"
 ANCHOR_VERDICT: str = "ANCHOR"
@@ -62,12 +64,9 @@ _MAX_STAGE_CHARS: int = 50_000
 ENTRIES_DIRNAME: str = "entries"
 """Directory holding one JSON file per entry, named ``<entry_hash>.json``.
 
-A single JSON array had to be rewritten in full on every append, so two
-branches that both recorded verdicts produced divergent chains that could not
-be merged: interleaving breaks the hash links and rebasing rewrites hashes,
-which C-008 forbids. One file per entry means different branches write
-different filenames, so a merge is conflict-free, and because the filename is
-the content hash a merge cannot yield two files claiming the same identity.
+One file per entry makes branch merges conflict-free (the module docstring
+covers why the single array could not be), and because the filename is the
+content hash a merge cannot yield two files claiming the same identity.
 
 ``verify.py`` re-declares this name locally rather than importing it, keeping
 the auditor independent of the write path.
@@ -88,16 +87,12 @@ class LedgerReadError(RuntimeError):
 def _project_root() -> Path:
     """The root of the project currently being governed.
 
-    Ledger routing and out-of-project classification both anchor here, so a
-    change can never be routed to one project's ledger while being judged
-    against a different project's boundary. A working directory anywhere
-    inside the Bench repo counts as Bench governing itself, which is why
-    editing ``utils/api.py`` while sitting in ``tests/`` is still in-project.
-
-    Delegates to ``utils.project.project_root``, which the constitution
-    resolver also uses, so the two can never drift apart. The behavior is
-    unchanged, including the loud fallback to Bench's own root when the
-    working directory cannot be resolved (C-001).
+    A working directory anywhere inside the Bench repo counts as Bench
+    governing itself, which is why editing ``utils/api.py`` while sitting in
+    ``tests/`` is still in-project. Delegates to
+    ``utils.project.project_root`` (see the module-level note on why ledger
+    routing, external-change classification, and constitution resolution
+    share one root definition).
     """
     return project_root()
 
@@ -156,9 +151,7 @@ _EXTERNAL_REDACTION_NOTE: str = (
 def _is_external_change(file_ref: str) -> bool:
     """True when the governed file lies outside the project being governed.
 
-    Anchored on ``_project_root()``, the same root ledger routing uses, so a
-    change cannot be written to one project's ledger while being classified
-    against another's boundary.
+    Anchored on ``_project_root()``, the same root ledger routing uses.
 
     Relative paths are normalized against the project by the hook, so only
     absolute paths can escape. A path that cannot be compared to the project
@@ -283,9 +276,8 @@ def _load_legacy_strict(file_path: Path) -> list[dict]:
     """Read the frozen legacy array, raising rather than degrading.
 
     An absent file is normal and returns ``[]``. Every other failure raises
-    ``LedgerReadError``. Treating a corrupt array as an empty chain is exactly
-    what let the next append restart from GENESIS and overwrite the damaged
-    file, destroying the evidence (C-008).
+    ``LedgerReadError`` (see that class for why degrading to an empty chain
+    is forbidden).
     """
     if not file_path.exists():
         return []
@@ -456,8 +448,7 @@ def load_ledger(path: str | None = None) -> list[dict]:
 
     Returns the union of the frozen legacy array and the per-entry files
     beside it, deduplicated by ``entry_hash`` (the array wins a collision), in
-    deterministic order. The signature and return type are unchanged, so the
-    CLI, the viewer, and stats consume this exactly as before.
+    deterministic order.
 
     Read failures are logged to stderr and the readable remainder is returned,
     without touching anything on disk — a damaged ledger is preserved for
@@ -491,12 +482,11 @@ def append_entry(
     pipeline_result: dict,
     path: str | None = None,
 ) -> dict:
-    """Append a governance verdict to the ledger and update ledger-meta.json.
+    """Append a governance verdict to the ledger.
 
     ``path`` defaults to ``resolve_ledger_path()``, which routes the verdict
     to the ledger of the project being governed rather than always to
-    Bench's own. ``ledger-meta.json`` is written alongside whichever ledger
-    is selected, so each chain carries its own anchor.
+    Bench's own.
 
     Expects ``pipeline_result`` to include the standard runner keys
     (``verdict``, ``pipeline_error``, ``constitution_hash``, ``challenger``,
@@ -516,9 +506,8 @@ def append_entry(
     directory: Path = file_path.parent
     directory.mkdir(parents=True, exist_ok=True)
 
-    # Strict on the write path. Appending onto a ledger that cannot be fully
-    # read risks a second genesis or a lost parent, and the old behaviour of
-    # treating an unreadable array as empty is what overwrote corrupt files.
+    # Strict on the write path: appending onto a ledger that cannot be fully
+    # read risks a second genesis or a lost parent.
     entries_dir: Path = Path(resolve_entries_dir(resolved))
     legacy: list[dict] = _load_legacy_strict(file_path)
     existing_new: list[dict] = _load_entry_files(entries_dir, strict=True)
@@ -578,19 +567,9 @@ def append_entry(
     }
     entry["entry_hash"] = compute_entry_hash(entry)
 
-    # Two-segment storage, described in CLAUDE.md under Architecture.
-    #
-    # What this code does: writes the entry to its own file named by its hash,
-    # refuses to write if that file already exists, and does not touch
-    # bench-ledger.json or ledger-meta.json. Those two are read on every append
-    # (above, via _load_legacy_strict) and are never rewritten, so the frozen
-    # segment and its pinned tip stay byte-identical.
-    #
-    # What the auditor does: verify_chain enumerates this directory itself,
-    # recomputes every hash, requires each filename to equal the hash it
-    # contains, and fails closed on MISSING_PARENT, ORPHAN_ENTRY,
-    # DUPLICATE_ENTRY and MULTIPLE_GENESIS, walking parent links across the
-    # frozen tip into these files. The legacy array keeps its positional walk.
+    # Two-segment storage (see module docstring): the entry gets its own file
+    # named by its hash; bench-ledger.json and ledger-meta.json are read above
+    # but never rewritten, so the frozen segment stays byte-identical.
     entries_dir.mkdir(parents=True, exist_ok=True)
     entry_file: Path = entries_dir / f"{entry['entry_hash']}.json"
     if entry_file.exists():
@@ -631,13 +610,3 @@ def _atomic_write_json(target: Path, data: Any) -> None:
                     file=sys.stderr,
                 )
         raise
-
-
-# _update_meta was removed here. ledger-meta.json is now frozen alongside the
-# legacy array (see CLAUDE.md, Architecture): it permanently pins that
-# segment's tip hash and entry count, and rewriting it on every append would
-# have reintroduced exactly the single-file conflict this change removes.
-# verify_chain still checks the pin against the legacy segment, so the
-# auditability signal is retained rather than dropped; it is now an assertion
-# about a fixed segment instead of a rolling one. META_FILENAME is kept because
-# verify.py imports it.
