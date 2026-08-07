@@ -6,6 +6,11 @@ Every code change Claude proposes is challenged, defended, ruled on, and
 recorded before it touches your files. Every verdict is hash-chained into
 an auditable ledger. Governance of AI reasoning is a primitive, not a feature.
 
+Website: [benchgov.com](https://benchgov.com). Annotated guides:
+[the constitution](https://benchgov.com/constitution.html),
+[the ledger](https://benchgov.com/ledger.html), and
+[how PreToolUse hooks work](https://benchgov.com/claude-code-hooks.html).
+
 ## The Problem
 
 AI coding tools ship unchallenged, unaudited, untraceable code. When Claude
