@@ -45,15 +45,10 @@ _REQUIRED_CONSTRAINT_FIELDS: tuple[str, ...] = ("id", "name", "rule", "severity"
 
 
 # Bench's own constitution, resolved absolutely from this file's location.
-#
-# The default was the bare relative "bench.json", which resolves against the
-# working directory. pipeline/runner.py always passes an absolute path, so the
-# pipeline was unaffected — but cli/commands.py calls this with no argument, so
-# `python -m cli constitution` read whatever bench.json happened to sit in the
-# cwd. Inside the Bench repo the two coincide and the split is invisible; from
-# any other project the auditor displayed a different constitution than the one
-# the pipeline enforced. Anchoring the default to this file removes that split
-# at the source, so every caller sees one constitution.
+# A cwd-relative default would let `python -m cli constitution`, run from a
+# governed project, display a different constitution than the one the
+# pipeline enforced; anchoring here means every caller sees one constitution
+# regardless of working directory.
 _BENCH_ROOT: Path = Path(__file__).resolve().parent.parent
 _DEFAULT_CONSTITUTION_PATH: str = str(_BENCH_ROOT / "bench.json")
 
