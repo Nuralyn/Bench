@@ -65,9 +65,7 @@ UTILITY_MODEL: str = "claude-haiku-4-5-20251001"
 # prefix, which is only correct when the first-party ID and the OpenRouter slug
 # coincide (as they do for claude-sonnet-5). A wrong slug would make the stage
 # return API_ERROR, which the stage reports as PIPELINE_ERROR and the runner
-# fails CLOSED on, returning a VETO. (An earlier version of this comment said
-# the runner fails open into a PASS; it does not, and misstating that in the
-# fail-safe direction is exactly the sort of thing C-001 exists to prevent.)
+# fails CLOSED on, returning a VETO.
 _OPENROUTER_SLUGS: dict[str, str] = {
     "claude-sonnet-5": "anthropic/claude-sonnet-5",
     "claude-opus-4-8": "anthropic/claude-opus-4.8",
@@ -252,13 +250,10 @@ def _anthropic_call(
     construction failures and all API-call exceptions) and on any
     unexpected response shape, so callers never see a raw exception.
     """
-    # Imported lazily so the SDK is a soft dependency, mirroring the openai
-    # treatment in requirements.txt: BENCH_PROVIDER=claude_code and
-    # =openrouter never reach this function and must not require it. A missing
-    # SDK becomes a typed _ProviderError here, which the stage reports as
-    # API_ERROR and the runner fails closed on with a readable reason —
-    # instead of an ImportError at module load, which would crash the hook
-    # before it can emit JSON and lock out every edit with no explanation.
+    # Imported lazily so the SDK stays a soft dependency (see the module-level
+    # note above the top-level import): a missing SDK becomes a typed
+    # _ProviderError that fails closed legibly instead of an ImportError at
+    # module load.
     try:
         import anthropic
     except ImportError as e:

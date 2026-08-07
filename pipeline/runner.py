@@ -128,17 +128,12 @@ def run_governance_pipeline(
     accumulated: dict[str, int] = {"input": 0, "output": 0}
 
     try:
-        # NOT a rename: load_constitution_snapshot still exists and is still
-        # the single-file loader. load_governing_constitution wraps it, adding
-        # the optional per-project layer stacked on Bench's core floor, and
-        # returns the contributing files' paths and raw hashes for the receipt.
-        #
-        # Snapshot semantics are unchanged and Rule 4 still holds: this is the
-        # same single call at the same point in the run, before any stage
-        # executes. It reads each contributing file exactly once, and the
-        # resulting dict is passed by reference to Challenger, Defender, and
-        # Oracle alike, so all three stages see one frozen version. Nothing
-        # re-reads the constitution mid-run.
+        # Single snapshot per run (Rule 4): loaded once here before any stage
+        # executes and passed by reference to all three stages, so they judge
+        # one frozen version and nothing re-reads the constitution mid-run.
+        # load_governing_constitution wraps load_constitution_snapshot,
+        # stacking the optional per-project layer and returning the
+        # contributing files' paths and raw hashes for the receipt.
         (
             constitution,
             constitution_hash,

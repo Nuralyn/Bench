@@ -184,6 +184,26 @@ non-Anthropic model families remain out of scope.
               `[bench] ledger: implement chain verification`
               `[bench] constitution: add C-009 logging constraint`
 
+## Code Navigation: graphify
+
+A knowledge graph of this repo lives in `graphify-out/` (`graph.json`,
+`GRAPH_REPORT.md`, `graph.html`), built by the graphify skill. For structural
+questions (what calls X, what depends on Y, trace a data flow), query the
+graph before reaching for grep:
+
+```
+graphify query "<question>"   # BFS context; --dfs to trace, --budget N to raise the output cap
+graphify path "A" "B"         # shortest path between two symbols, edges tagged with provenance
+graphify explain "<node>"     # plain-language explanation of one node
+```
+
+The graph replaces exploratory grepping, not verification: read the cited
+files before editing, and use grep for exact strings or anything newer than
+the last build. After a stretch of commits, refresh with `/graphify . --update`.
+Do not use `graphify claude install` here; it writes this file directly,
+bypassing governance. Edit this section through governed tools like any other
+change.
+
 ## Constitution Reference
 
 The constitution lives in bench.json. Current constraints:
