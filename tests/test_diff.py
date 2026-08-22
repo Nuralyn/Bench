@@ -9,9 +9,11 @@ requirements.txt.
 Run: python -m unittest tests.test_diff -v
 """
 
+import json
 import os
 import sys
 import unittest
+import unittest.mock
 from pathlib import Path
 
 _REPO_ROOT: Path = Path(__file__).resolve().parent.parent
@@ -20,8 +22,11 @@ if str(_REPO_ROOT) not in sys.path:
 
 from utils.diff import (  # noqa: E402
     BINARY_LABEL,
+    MAX_DIFF_CHARS,
     MAX_DIFF_LINES,
+    MAX_LINE_CHARS,
     _PROJECT_ROOT,
+    _cap_line,
     _is_binary,
     _normalize_path,
     _truncate_preserving,
@@ -333,6 +338,217 @@ class MalformedInputTests(unittest.TestCase):
         self.assertEqual(
             result["edits"][1], {"old_string": "a", "new_string": "b"}
         )
+
+
+class CharacterBudgetTests(unittest.TestCase):
+    """Covers the character-based caps added alongside MAX_DIFF_LINES.
+
+    Line count alone did not bound payload size: a generated JSON or
+    minified asset can sit far under MAX_DIFF_LINES while carrying tens of
+    thousands of characters on a few very long lines. That shape reached
+    the ledger untruncated, so these lock in the per-line cap, the
+    whole-body clamp, and the widened trigger.
+    """
+
+    def test_cap_line_under_limit_unchanged(self) -> None:
+        line: str = "a" * (MAX_LINE_CHARS - 1)
+        capped, was_capped = _cap_line(line)
+        self.assertFalse(was_capped)
+        self.assertEqual(capped, line)
+
+    def test_cap_line_exactly_at_limit_unchanged(self) -> None:
+        line: str = "a" * MAX_LINE_CHARS
+        capped, was_capped = _cap_line(line)
+        self.assertFalse(was_capped)
+        self.assertEqual(capped, line)
+
+    def test_cap_line_one_over_limit_marks_omission(self) -> None:
+        line: str = "a" * (MAX_LINE_CHARS + 1)
+        capped, was_capped = _cap_line(line)
+        self.assertTrue(was_capped)
+        self.assertIn("[BENCH TRUNCATION: 1 chars omitted from line]", capped)
+        self.assertTrue(capped.startswith("a" * MAX_LINE_CHARS))
+
+    def test_short_but_wide_payload_is_capped(self) -> None:
+        """The graphify-chunk shape: few lines, very wide, over budget."""
+        content: str = "\n".join("x" * 600 for _ in range(50))
+        self.assertLess(len(content.splitlines()), MAX_DIFF_LINES)
+        self.assertGreater(len(content), MAX_DIFF_CHARS)
+        result = build_diff_info(
+            "Write", {"file_path": "chunk.json", "content": content}
+        )
+        self.assertIn("truncation", result)
+        self.assertTrue(result["truncation"]["line_capped"])
+        self.assertEqual(result["truncation"]["original_chars"], len(content))
+        self.assertIn("chars omitted from line", result["content"])
+        self.assertLess(len(result["content"]), len(content))
+
+    def test_many_narrow_lines_trigger_body_clamp(self) -> None:
+        """Lines under the per-line cap still need a total budget."""
+        content: str = "\n".join("y" * 400 for _ in range(100))
+        result = build_diff_info(
+            "Write", {"file_path": "wide.json", "content": content}
+        )
+        self.assertIn("truncation", result)
+        self.assertFalse(result["truncation"]["line_capped"])
+        self.assertTrue(result["truncation"]["body_clamped"])
+        self.assertIn("lines dropped to fit", result["content"])
+
+    def test_all_lines_kept_but_over_budget_still_clamps(self) -> None:
+        """Regression: the early return once let this shape through whole.
+
+        Every line is under MAX_LINE_CHARS so nothing is per-line capped,
+        and the line-preservation set covers all 50 lines so nothing is
+        dropped. Without the char-budget term on the early return, the
+        payload returned unbounded before the clamp could run.
+        """
+        content: str = "\n".join("v" * 400 for _ in range(50))
+        self.assertLess(len(content.splitlines()), MAX_DIFF_LINES)
+        self.assertGreater(len(content), MAX_DIFF_CHARS)
+        result = build_diff_info(
+            "Write", {"file_path": "escape.json", "content": content}
+        )
+        self.assertIn("truncation", result)
+        self.assertFalse(result["truncation"]["line_capped"])
+        self.assertTrue(result["truncation"]["body_clamped"])
+        self.assertLess(len(result["content"]), len(content))
+
+    def test_truncated_output_stays_within_budget(self) -> None:
+        content: str = "\n".join("z" * 600 for _ in range(400))
+        result = build_diff_info(
+            "Write", {"file_path": "huge.json", "content": content}
+        )
+        # Budget plus the clamp marker and the footer, which are appended
+        # after the clamp so evidence loss stays visible.
+        self.assertLess(len(result["content"]), MAX_DIFF_CHARS + 500)
+
+    def test_clamp_keeps_both_head_and_tail(self) -> None:
+        """Regression: a prefix-only clamp discarded everything it claimed.
+
+        The footer asserts preserved=...+last20, so cutting from the front
+        alone made the metadata wrong in the one direction that matters: it
+        hid the end of a change while reporting it had been shown.
+        """
+        lines: list[str] = [f"LINE{i:04d}" + "w" * 400 for i in range(100)]
+        content: str = "\n".join(lines)
+        result = build_diff_info(
+            "Write", {"file_path": "bound.json", "content": content}
+        )
+        body: str = result["content"]
+
+        self.assertIn("LINE0000", body, "head was dropped")
+        self.assertIn("LINE0099", body, "tail was dropped, the regression")
+        self.assertIn("lines dropped to fit", body)
+        # Whole lines survive on both sides; nothing is severed mid-line.
+        self.assertIn("LINE0000" + "w" * 400, body)
+        self.assertIn("LINE0099" + "w" * 400, body)
+
+    def test_clamp_output_stays_within_budget_including_marker(self) -> None:
+        """The marker is charged against the budget, not added after it."""
+        content: str = "\n".join("w" * 400 for _ in range(200))
+        result = build_diff_info(
+            "Write", {"file_path": "budget.json", "content": content}
+        )
+        body: str = result["content"]
+        marker_line: str = "[BENCH TRUNCATION: original_lines="
+        clamped_body: str = body.split(marker_line)[0]
+        self.assertLessEqual(len(clamped_body), MAX_DIFF_CHARS)
+
+    def test_single_line_over_budget_is_still_bounded(self) -> None:
+        """One line longer than the whole budget has no line boundary to cut."""
+        content: str = "q" * (MAX_DIFF_CHARS + 5000)
+        with unittest.mock.patch("utils.diff.MAX_LINE_CHARS", MAX_DIFF_CHARS * 2):
+            result = build_diff_info(
+                "Write", {"file_path": "oneline.json", "content": content}
+            )
+        self.assertIn("truncation", result)
+        self.assertTrue(result["truncation"]["body_clamped"])
+        self.assertLess(len(result["content"]), MAX_DIFF_CHARS + 500)
+
+    def test_at_char_limit_not_truncated(self) -> None:
+        line: str = "c" * 99
+        count: int = MAX_DIFF_CHARS // 100
+        content: str = "\n".join(line for _ in range(count))
+        self.assertLessEqual(len(content), MAX_DIFF_CHARS)
+        result = build_diff_info(
+            "Write", {"file_path": "atlimit.py", "content": content}
+        )
+        self.assertNotIn("truncation", result)
+        self.assertEqual(result["content"], content)
+
+    def test_line_truncation_still_fires_on_narrow_long_files(self) -> None:
+        """The pre-existing MAX_DIFF_LINES path is unaffected."""
+        content: str = "\n".join(f"line_{i}" for i in range(400))
+        result = build_diff_info(
+            "Write", {"file_path": "long.py", "content": content}
+        )
+        self.assertIn("truncation", result)
+        self.assertEqual(result["truncation"]["original_lines"], 400)
+        self.assertFalse(result["truncation"]["line_capped"])
+
+
+class MultiEditBudgetTests(unittest.TestCase):
+    """The aggregate budget across a MultiEdit's legs.
+
+    The per-string caps bound each leg but not their sum, so a MultiEdit
+    stayed unbounded: 100 legs each just under MAX_DIFF_CHARS serialized to
+    megabytes and reached the stages and the ledger in full.
+    """
+
+    def _edits(self, count: int, size: int) -> list[dict]:
+        return [
+            {"old_string": "o" * size, "new_string": "n" * size}
+            for _ in range(count)
+        ]
+
+    def _payload(self, count: int, size: int) -> dict:
+        return build_diff_info(
+            "MultiEdit",
+            {"file_path": "a.py", "edits": self._edits(count, size)},
+        )
+
+    def test_many_large_legs_are_bounded(self) -> None:
+        """The reported shape: 100 legs just under the per-string cap."""
+        result = self._payload(100, MAX_DIFF_CHARS - 1)
+        serialized: int = len(json.dumps(result))
+        self.assertLess(
+            serialized,
+            MAX_DIFF_CHARS * 2,
+            f"MultiEdit payload unbounded at {serialized} chars",
+        )
+
+    def test_small_legs_are_untouched(self) -> None:
+        result = self._payload(3, 50)
+        self.assertNotIn("omitted_edits", result)
+        self.assertNotIn("fitted_edits", result)
+        for edit in result["edits"]:
+            self.assertEqual(edit["old_string"], "o" * 50)
+
+    def test_legs_are_shrunk_before_any_is_dropped(self) -> None:
+        """Shrinking is preferred: the tool applies every leg on PASS.
+
+        A dropped leg reaches disk with no stage having read it, so it is
+        strictly worse evidence than a leg that was merely trimmed.
+        """
+        result = self._payload(10, 5000)
+        self.assertEqual(len(result["edits"]), 10)
+        self.assertNotIn("omitted_edits", result)
+        self.assertEqual(result["fitted_edits"], 10)
+
+    def test_omission_is_counted_and_labelled(self) -> None:
+        result = self._payload(100, MAX_DIFF_CHARS - 1)
+        self.assertIn("omitted_edits", result)
+        self.assertGreater(result["omitted_edits"], 0)
+        self.assertIn("will be applied", result["label"])
+        self.assertEqual(
+            result["omitted_edits"] + len(result["edits"]), 100
+        )
+
+    def test_first_leg_always_survives(self) -> None:
+        """Even one oversized leg must be represented, never an empty list."""
+        result = self._payload(1, MAX_DIFF_CHARS * 3)
+        self.assertEqual(len(result["edits"]), 1)
+        self.assertNotIn("omitted_edits", result)
 
 
 if __name__ == "__main__":
