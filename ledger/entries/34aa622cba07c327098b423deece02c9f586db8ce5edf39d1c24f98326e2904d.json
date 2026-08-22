@@ -1,0 +1,116 @@
+{
+  "entry_id": "da9b7935-764a-4030-b135-31994cf0d6d9",
+  "timestamp": "2026-08-22T19:39:50.218235+00:00",
+  "previous_hash": [
+    "7b41948c5ad7a9f4e828c75de20721a66a62dbf3ce941936ef3ca56ae266da86"
+  ],
+  "constitution_hash": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3",
+  "constitution_sources": [
+    {
+      "layer": "core",
+      "path": "C:\\Users\\mstar\\Bench\\bench.json",
+      "sha256": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3"
+    }
+  ],
+  "verdict": "PASS",
+  "pipeline_error": false,
+  "change": {
+    "file": "tests\\test_diff.py",
+    "tool": "Edit",
+    "diff_summary": {
+      "file_path": "tests\\test_diff.py",
+      "change_type": "modify",
+      "old_string": "if __name__ == \"__main__\":\n    unittest.main()",
+      "new_string": "class CharacterBudgetTests(unittest.TestCase):\n    \"\"\"Covers the character-based caps added alongside MAX_DIFF_LINES.\n\n    Line count alone did not bound payload size: a generated JSON or\n    minified asset can sit far under MAX_DIFF_LINES while carrying tens of\n    thousands of characters on a few very long lines. That shape reached\n    the ledger untruncated, so these lock in the per-line cap, the\n    whole-body clamp, and the widened trigger.\n    \"\"\"\n\n    def test_cap_line_under_limit_unchanged(self) -> None:\n        line: str = \"a\" * (MAX_LINE_CHARS - 1)\n        capped, was_capped = _cap_line(line)\n        self.assertFalse(was_capped)\n        self.assertEqual(capped, line)\n\n    def test_cap_line_exactly_at_limit_unchanged(self) -> None:\n        line: str = \"a\" * MAX_LINE_CHARS\n        capped, was_capped = _cap_line(line)\n        self.assertFalse(was_capped)\n        self.assertEqual(capped, line)\n\n    def test_cap_line_one_over_limit_marks_omission(self) -> None:\n        line: str = \"a\" * (MAX_LINE_CHARS + 1)\n        capped, was_capped = _cap_line(line)\n        self.assertTrue(was_capped)\n        self.assertIn(\"[BENCH TRUNCATION: 1 chars omitted from line]\", capped)\n        self.assertTrue(capped.startswith(\"a\" * MAX_LINE_CHARS))\n\n    def test_short_but_wide_payload_is_capped(self) -> None:\n        \"\"\"The graphify-chunk shape: few lines, very wide, over budget.\"\"\"\n        content: str = \"\\n\".join(\"x\" * 600 for _ in range(50))\n        self.assertLess(len(content.splitlines()), MAX_DIFF_LINES)\n        self.assertGreater(len(content), MAX_DIFF_CHARS)\n        result = build_diff_info(\n            \"Write\", {\"file_path\": \"chunk.json\", \"content\": content}\n        )\n        self.assertIn(\"truncation\", result)\n        self.assertTrue(result[\"truncation\"][\"line_capped\"])\n        self.assertEqual(result[\"truncation\"][\"original_chars\"], len(content))\n        self.assertIn(\"chars omitted from line\", result[\"content\"])\n        self.assertLess(len(result[\"content\"]), len(content))\n\n    def test_many_narrow_lines_trigger_body_clamp(self) -> None:\n        \"\"\"Lines under the per-line cap still need a total budget.\"\"\"\n        content: str = \"\\n\".join(\"y\" * 400 for _ in range(100))\n        result = build_diff_info(\n            \"Write\", {\"file_path\": \"wide.json\", \"content\": content}\n        )\n        self.assertIn(\"truncation\", result)\n        self.assertFalse(result[\"truncation\"][\"line_capped\"])\n        self.assertTrue(result[\"truncation\"][\"body_clamped\"])\n        self.assertIn(\"body clamped to\", result[\"content\"])\n\n    def test_truncated_output_stays_within_budget(self) -> None:\n        content: str = \"\\n\".join(\"z\" * 600 for _ in range(400))\n        result = build_diff_info(\n            \"Write\", {\"file_path\": \"huge.json\", \"content\": content}\n        )\n        # Budget plus the clamp marker and the footer, which are appended\n        # after the clamp so evidence loss stays visible.\n        self.assertLess(len(result[\"content\"]), MAX_DIFF_CHARS + 500)\n\n    def test_body_clamp_cuts_on_a_line_boundary(self) -> None:\n        content: str = \"\\n\".join(\"w\" * 400 for _ in range(100))\n        result = build_diff_info(\n            \"Write\", {\"file_path\": \"bound.json\", \"content\": content}\n        )\n        body: str = result[\"content\"]\n        marker: str = \"\\n[BENCH TRUNCATION: body clamped to\"\n        head: str = body.split(marker)[0]\n        # The cut lands at a newline, so the final retained line is whole.\n        self.assertTrue(head.endswith(\"w\" * 400))\n\n    def test_clamp_falls_back_when_no_newline_in_window(self) -> None:\n        \"\"\"rfind returns -1 when one line exceeds the whole-body budget.\n\n        Unreachable with the shipped constants, since the per-line cap\n        keeps every line far below MAX_DIFF_CHARS. Patched here so the\n        fallback slice is exercised rather than assumed.\n        \"\"\"\n        content: str = \"q\" * (MAX_DIFF_CHARS + 5000)\n        with unittest.mock.patch(\"utils.diff.MAX_LINE_CHARS\", MAX_DIFF_CHARS * 2):\n            result = build_diff_info(\n                \"Write\", {\"file_path\": \"oneline.json\", \"content\": content}\n            )\n        self.assertIn(\"truncation\", result)\n        self.assertTrue(result[\"truncation\"][\"body_clamped\"])\n        self.assertIn(\"body clamped to\", result[\"content\"])\n\n    def test_at_char_limit_not_truncated(self) -> None:\n        line: str = \"c\" * 99\n        count: int = MAX_DIFF_CHARS // 100\n        content: str = \"\\n\".join(line for _ in range(count))\n        self.assertLessEqual(len(content), MAX_DIFF_CHARS)\n        result = build_diff_info(\n            \"Write\", {\"file_path\": \"atlimit.py\", \"content\": content}\n        )\n        self.assertNotIn(\"truncation\", result)\n        self.assertEqual(result[\"content\"], content)\n\n    def test_line_truncation_still_fires_on_narrow_long_files(self) -> None:\n        \"\"\"The pre-existing MAX_DIFF_LINES path is unaffected.\"\"\"\n        content: str = \"\\n\".join(f\"line_{i}\" for i in range(400))\n        result = build_diff_info(\n            \"Write\", {\"file_path\": \"long.py\", \"content\": content}\n        )\n        self.assertIn(\"truncation\", result)\n        self.assertEqual(result[\"truncation\"][\"original_lines\"], 400)\n        self.assertFalse(result[\"truncation\"][\"line_capped\"])\n\n\nif __name__ == \"__main__\":\n    unittest.main()"
+    }
+  },
+  "challenger": {
+    "status": "FINDINGS",
+    "findings": [
+      {
+        "constraint_id": "C-005",
+        "severity": "OBSERVATION",
+        "location": "tests/test_diff.py: test_clamp_falls_back_when_no_newline_in_window",
+        "evidence": "with unittest.mock.patch(\"utils.diff.MAX_LINE_CHARS\", MAX_DIFF_CHARS * 2):",
+        "reasoning": "The diff only shows a replacement of the trailing `if __name__ == \"__main__\":` block, not the file's import section, so it isn't visible whether `unittest.mock` (or `from unittest import mock`) is imported anywhere in test_diff.py. Plain `import unittest` does not automatically expose the `mock` submodule as an attribute; if no explicit mock import exists elsewhere in the file, this line raises AttributeError at test time and the test intended to lock in the fallback-slice behavior would fail to run rather than verify anything, undermining the 'no theater' intent of C-005. This is not confirmed as a bug since the full file isn't in view, so it's flagged as an observation rather than a finding of violation."
+      }
+    ],
+    "_tokens": {
+      "input": 11387,
+      "output": 2718
+    }
+  },
+  "defender": {
+    "status": "REBUTTAL",
+    "rebuttals": [
+      {
+        "finding_index": 0,
+        "position": "MITIGATE",
+        "argument": "The Challenger flagged this correctly as an observation, not a violation, and for good reason: it admits it cannot confirm the bug because the diff is a partial view of the file. That caution should extend further than it did. First, even if `unittest.mock` were unavailable as an attribute (which is not guaranteed to be missing just because only `import unittest` is shown; `unittest.mock` may already be imported elsewhere in this file's untouched header, or via `from unittest import mock`, which the diff doesn't touch), the failure mode is an AttributeError at collection/run time, i.e. a loud, immediate, visible failure, not silent theater. C-005 exists to prevent untested logic from masquerading as verified; a test that errors out on import is the opposite of that; it is maximally visible and gets fixed on first CI run. Second, C-005 is a warning-severity constraint about the presence of coverage for new logic, not about import hygiene within a test file, so even a confirmed missing import would be a straightforward, easily-fixed test bug rather than a constitutional violation of the coverage requirement itself; the other nine new test methods in this diff do provide substantive, correctly-scoped coverage of _cap_line, build_diff_info, MAX_LINE_CHARS, MAX_DIFF_CHARS, and MAX_DIFF_LINES behavior, satisfying the intent of C-005 regardless of this one line's import status.",
+        "evidence": "The new test class references MAX_LINE_CHARS, MAX_DIFF_CHARS, _cap_line, and build_diff_info as already-resolvable names, consistent with an existing, working module header the diff doesn't reproduce. The one line in question, `unittest.mock.patch(...)`, is a single call inside a single test method (test_clamp_falls_back_when_no_newline_in_window); if it fails, only that one test fails loudly, it does not silently pass or mask absent coverage elsewhere."
+      }
+    ],
+    "summary": "The change adds substantial, well-targeted test coverage for the new character-budget truncation logic, and the sole finding raised is a speculative, self-flagged observation about a possibly-missing import that, even if true, would surface as an immediate loud test failure rather than a governance-relevant silent gap.",
+    "_tokens": {
+      "input": 11952,
+      "output": 2503
+    }
+  },
+  "oracle": {
+    "verdict": "PASS",
+    "reasoning": "This is a test-only change adding a CharacterBudgetTests class to tests/test_diff.py, exercising the new character-based truncation logic (_cap_line, build_diff_info, MAX_LINE_CHARS, MAX_DIFF_CHARS, MAX_DIFF_LINES). No veto-severity constraint is implicated. Per C-007, tests/test_diff.py is not part of the governance pipeline (pipeline/, ledger/, hooks/, constitution), and the change adds rather than weakens verification, so C-007 is satisfied. C-002 is satisfied: all ten methods form a single coherent scope around the character-budget caps, with no unrelated edits bundled in. C-003 is satisfied: unittest.mock is stdlib and no requirements.txt addition is needed. C-004 is satisfied: the new code adds precise annotations (-> None, : str, : int) and weakens nothing. C-001 and C-006 are not applicable (no catch blocks, no secrets). The Challenger raised a single OBSERVATION under C-005 (warning severity) about a possibly-missing unittest.mock import in test_clamp_falls_back_when_no_newline_in_window. The Defender's MITIGATE rebuttal is well-founded: C-005 is warning-severity and concerns the presence of coverage, which the other nine methods amply provide; and even if the import is absent, the failure mode is a loud AttributeError at collection/run time, the opposite of the silent untested-code masquerade C-005 guards against. No basis for veto exists.",
+    "constraint_citations": [
+      {
+        "constraint_id": "C-001",
+        "disposition": "NOT_APPLICABLE",
+        "note": "No catch/except blocks introduced in this test change."
+      },
+      {
+        "constraint_id": "C-002",
+        "disposition": "SATISFIED",
+        "note": "All new test methods target the single coherent scope of character-budget truncation; no unrelated edits bundled."
+      },
+      {
+        "constraint_id": "C-003",
+        "disposition": "SATISFIED",
+        "note": "unittest.mock is part of the Python standard library; no new dependency is introduced."
+      },
+      {
+        "constraint_id": "C-004",
+        "disposition": "SATISFIED",
+        "note": "New test methods carry explicit annotations (-> None, str, int); no existing annotation is removed or weakened."
+      },
+      {
+        "constraint_id": "C-005",
+        "disposition": "SATISFIED",
+        "note": "Substantive coverage added for the new logic. The Challenger's mock-import concern is a speculative, warning-severity observation that, per the Defender, would surface as a loud CI failure rather than silent absence of coverage."
+      },
+      {
+        "constraint_id": "C-006",
+        "disposition": "NOT_APPLICABLE",
+        "note": "No credentials or secrets present; test payloads are synthetic character strings."
+      },
+      {
+        "constraint_id": "C-007",
+        "disposition": "SATISFIED",
+        "note": "tests/test_diff.py is outside pipeline/, ledger/, hooks/, and the constitution; the change strengthens verification rather than weakening enforcement."
+      },
+      {
+        "constraint_id": "C-008",
+        "disposition": "NOT_APPLICABLE",
+        "note": "No ledger entries are modified, deleted, or reordered."
+      }
+    ],
+    "advisories": [
+      "Confirm that test_diff.py imports unittest.mock explicitly (import unittest.mock or from unittest import mock). A bare 'import unittest' does not guarantee the mock submodule is bound as an attribute, so test_clamp_falls_back_when_no_newline_in_window could raise AttributeError at run time. This is a warning-level test-hygiene item, not a governance violation, and would fail loudly on first CI run if the import is missing.",
+      "The full import header of test_diff.py is not visible in the diff; verify on the next CI run that all referenced names (MAX_LINE_CHARS, MAX_DIFF_CHARS, MAX_DIFF_LINES, _cap_line, build_diff_info) resolve as expected."
+    ],
+    "remediation": null,
+    "confidence": "HIGH",
+    "_tokens": {
+      "input": 12552,
+      "output": 1957
+    }
+  },
+  "entry_hash": "34aa622cba07c327098b423deece02c9f586db8ce5edf39d1c24f98326e2904d"
+}

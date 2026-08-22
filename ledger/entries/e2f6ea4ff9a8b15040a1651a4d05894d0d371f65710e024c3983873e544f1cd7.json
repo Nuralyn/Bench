@@ -1,0 +1,100 @@
+{
+  "entry_id": "f168f919-979a-4c85-b060-ea8a6e4e7421",
+  "timestamp": "2026-08-22T19:42:42.007847+00:00",
+  "previous_hash": [
+    "80c008c1d0e4c82dcd5de7c7064fa771f5735c0180fba8cead71961342bbd004"
+  ],
+  "constitution_hash": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3",
+  "constitution_sources": [
+    {
+      "layer": "core",
+      "path": "C:\\Users\\mstar\\Bench\\bench.json",
+      "sha256": "06ce31ba8f0cf1ebbab17172a8b41be1162dabcf3d473b83317e21e7d2893fd3"
+    }
+  ],
+  "verdict": "PASS",
+  "pipeline_error": false,
+  "change": {
+    "file": "tests\\test_diff.py",
+    "tool": "Edit",
+    "diff_summary": {
+      "file_path": "tests\\test_diff.py",
+      "change_type": "modify",
+      "old_string": "    def test_truncated_output_stays_within_budget(self) -> None:",
+      "new_string": "    def test_all_lines_kept_but_over_budget_still_clamps(self) -> None:\n        \"\"\"Regression: the early return once let this shape through whole.\n\n        Every line is under MAX_LINE_CHARS so nothing is per-line capped,\n        and the line-preservation set covers all 50 lines so nothing is\n        dropped. Without the char-budget term on the early return, the\n        payload returned unbounded before the clamp could run.\n        \"\"\"\n        content: str = \"\\n\".join(\"v\" * 400 for _ in range(50))\n        self.assertLess(len(content.splitlines()), MAX_DIFF_LINES)\n        self.assertGreater(len(content), MAX_DIFF_CHARS)\n        result = build_diff_info(\n            \"Write\", {\"file_path\": \"escape.json\", \"content\": content}\n        )\n        self.assertIn(\"truncation\", result)\n        self.assertFalse(result[\"truncation\"][\"line_capped\"])\n        self.assertTrue(result[\"truncation\"][\"body_clamped\"])\n        self.assertLess(len(result[\"content\"]), len(content))\n\n    def test_truncated_output_stays_within_budget(self) -> None:"
+    }
+  },
+  "challenger": {
+    "status": "CLEAR",
+    "findings": [],
+    "_tokens": {
+      "input": 9386,
+      "output": 542
+    }
+  },
+  "defender": {
+    "status": "CONFIRM_CLEAR",
+    "rebuttals": [],
+    "summary": "Challenger found no issues.",
+    "_tokens": {
+      "input": 0,
+      "output": 0
+    }
+  },
+  "oracle": {
+    "verdict": "PASS",
+    "reasoning": "The change adds a single regression test (`test_all_lines_kept_but_over_budget_still_clamps`) to tests/test_diff.py. The Challenger returned CLEAR with no findings and the Defender confirmed CLEAR. I independently evaluated the diff against the full constitution. The edit is confined to a single test file and one coherent purpose (guarding the diff char-budget clamp behavior), satisfying C-002. It introduces no new imports or dependencies, relying on symbols (build_diff_info, MAX_LINE_CHARS, MAX_DIFF_LINES, MAX_DIFF_CHARS) already used elsewhere in the file, so C-003 is not implicated. The new test method carries a proper `-> None` return annotation consistent with project code standards, so C-004 is satisfied and no precision is discarded. There are no catch blocks (C-001 N/A), no secrets or credentials (C-006 N/A). The file lives in tests/, not in pipeline/, ledger/, or hooks/, so it is not a modification to the governance pipeline itself (C-007 N/A) nor to the ledger or its hash chain (C-008 N/A). Rather than adding untested logic, this change strengthens verification by adding coverage, which is aligned with the intent of C-005.",
+    "constraint_citations": [
+      {
+        "constraint_id": "C-001",
+        "disposition": "NOT_APPLICABLE",
+        "note": "No exception handling introduced or altered."
+      },
+      {
+        "constraint_id": "C-002",
+        "disposition": "SATISFIED",
+        "note": "Single coherent scope: one regression test added to test_diff.py, within the tests boundary."
+      },
+      {
+        "constraint_id": "C-003",
+        "disposition": "SATISFIED",
+        "note": "No new imports or dependencies; reuses existing module symbols."
+      },
+      {
+        "constraint_id": "C-004",
+        "disposition": "SATISFIED",
+        "note": "New test method has explicit `-> None` annotation; no annotations weakened."
+      },
+      {
+        "constraint_id": "C-005",
+        "disposition": "SATISFIED",
+        "note": "Change adds test coverage rather than untested logic."
+      },
+      {
+        "constraint_id": "C-006",
+        "disposition": "NOT_APPLICABLE",
+        "note": "No credentials or secrets present."
+      },
+      {
+        "constraint_id": "C-007",
+        "disposition": "NOT_APPLICABLE",
+        "note": "Edit is in tests/, not pipeline/, ledger/, or hooks/; enforcement not affected."
+      },
+      {
+        "constraint_id": "C-008",
+        "disposition": "NOT_APPLICABLE",
+        "note": "No ledger entries modified, deleted, or reordered."
+      }
+    ],
+    "advisories": [
+      "The test asserts on the shape of build_diff_info's truncation dict (line_capped, body_clamped) and content length; if those keys or clamp semantics change, this regression test will need corresponding updates."
+    ],
+    "remediation": null,
+    "confidence": "HIGH",
+    "_tokens": {
+      "input": 9410,
+      "output": 1289
+    }
+  },
+  "entry_hash": "e2f6ea4ff9a8b15040a1651a4d05894d0d371f65710e024c3983873e544f1cd7"
+}
