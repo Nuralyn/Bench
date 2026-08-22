@@ -27,6 +27,25 @@ import traceback
 from typing import Any
 
 MAX_DIFF_LINES: int = 300
+# Line count alone does not bound payload size: a generated JSON, minified
+# asset, or CSV can sit far under MAX_DIFF_LINES while carrying tens of
+# thousands of characters on a handful of very long lines. Those two caps
+# bound the per-line and total character budget so an unbounded payload
+# cannot reach the LLM stages or the ledger.
+MAX_DIFF_CHARS: int = 20000
+MAX_LINE_CHARS: int = 500
+# Floor on the share of the budget allocated to each side of a MultiEdit
+# leg. This is an allocation minimum, never a threshold for omission: a leg
+# shorter than this is shown in full, and a longer one is trimmed to at
+# least this much rather than to nothing. A small edit can be the whole
+# point of a change (a flipped boolean, a removed credential), so no leg is
+# ever dropped for being short.
+_MIN_LEG_CHARS: int = 200
+# Charged against MAX_DIFF_CHARS before any line is kept, so the clamp
+# marker cannot push the result past the bound it enforces. Comfortably
+# larger than the marker's longest form, which is fixed text plus a line
+# count.
+_CLAMP_MARKER_RESERVE: int = 96
 BINARY_SNIFF_BYTES: int = 8192
 BINARY_LABEL: str = "[BINARY FILE — content not evaluated]"
 
@@ -208,6 +227,19 @@ def _build_multi_edit(file_path: str, tool_input: dict) -> dict[str, Any]:
             return _binary_metadata(file_path, old_leg + new_leg, "multi_modify")
     out_edits: list[dict[str, Any]] = []
     out_trunc: list[dict[str, Any]] = []
+    budget_used: int = 0
+    omitted: int = 0
+    fitted: int = 0
+
+    # Every leg gets a fair share of the budget rather than the first legs
+    # spending it all. Dropping a leg is worse than shrinking one: the tool
+    # still applies the whole edit list on PASS, so a dropped leg lands on
+    # disk with no stage having seen it, while a shrunk leg is at least
+    # represented. The drop below stays only as a backstop for a leg count
+    # so large that even the floor cannot fit.
+    leg_count: int = max(len(edits_raw), 1)
+    per_side: int = max(MAX_DIFF_CHARS // (2 * leg_count), _MIN_LEG_CHARS)
+
     for index, edit in enumerate(edits_raw):
         if not isinstance(edit, dict):
             out_edits.append(
@@ -222,6 +254,24 @@ def _build_multi_edit(file_path: str, tool_input: dict) -> dict[str, Any]:
         new: str = _coerce_str(edit.get("new_string"))
         old_trunc, old_meta = _truncate_preserving(old)
         new_trunc, new_meta = _truncate_preserving(new)
+
+        # The per-string caps bound each leg but not their sum. Without an
+        # aggregate budget a MultiEdit stays unbounded: 100 legs each just
+        # under MAX_DIFF_CHARS serialize to megabytes and reach the stages
+        # and the ledger in full, which is the growth this cap exists to
+        # stop. Each leg is trimmed to its fair share first, so shrinking
+        # is what absorbs the pressure and dropping stays a last resort.
+        old_trunc, old_fit = _fit_to(old_trunc, per_side)
+        new_trunc, new_fit = _fit_to(new_trunc, per_side)
+        if old_fit or new_fit:
+            fitted += 1
+
+        cost: int = len(old_trunc) + len(new_trunc)
+        if out_edits and budget_used + cost > MAX_DIFF_CHARS:
+            omitted = len(edits_raw) - index
+            break
+        budget_used += cost
+
         out_edits.append({"old_string": old_trunc, "new_string": new_trunc})
         if old_meta is not None or new_meta is not None:
             leg: dict[str, Any] = {"index": index}
@@ -235,6 +285,20 @@ def _build_multi_edit(file_path: str, tool_input: dict) -> dict[str, Any]:
         "change_type": "multi_modify",
         "edits": out_edits,
     }
+    if fitted:
+        result["fitted_edits"] = fitted
+    if omitted:
+        # Named as reduced coverage rather than as a size note. The tool
+        # still applies every edit on PASS, so an omitted leg reaches disk
+        # with no stage having read it. That is weaker evidence, and the
+        # Oracle should weigh it as such rather than reading a short list
+        # as a complete one.
+        result["omitted_edits"] = omitted
+        result["label"] = (
+            f"[BENCH TRUNCATION: {omitted} of {len(edits_raw)} edits were "
+            f"not shown to the pipeline, though all of them will be applied. "
+            f"Evidence for this change is incomplete.]"
+        )
     if out_trunc:
         result["truncation"] = out_trunc
     return result
@@ -301,6 +365,96 @@ def _binary_metadata(
     }
 
 
+def _cap_line(line: str) -> tuple[str, bool]:
+    """Cap a single line at MAX_LINE_CHARS, marking what was dropped.
+
+    Returns (possibly-capped-line, was_capped). The marker is visible in
+    the body for the same reason BINARY_LABEL is: evidence loss reaching
+    the Challenger or the ledger must be signaled, never silent (C-001).
+    """
+    if len(line) <= MAX_LINE_CHARS:
+        return line, False
+    omitted: int = len(line) - MAX_LINE_CHARS
+    return (
+        f"{line[:MAX_LINE_CHARS]}"
+        f"[BENCH TRUNCATION: {omitted} chars omitted from line]",
+        True,
+    )
+
+
+def _fit_to(text: str, budget: int) -> tuple[str, int]:
+    """Trim ``text`` to ``budget`` chars, keeping both ends.
+
+    Returns (text, dropped). Head and tail both survive for the same reason
+    they do in ``_clamp_to_budget``: the end of an edit is often where the
+    substance is, and a head-only slice would hide it. Returns the input
+    untouched when it already fits, so a short leg is never altered.
+    """
+    if len(text) <= budget:
+        return text, 0
+    keep: int = max(budget - _CLAMP_MARKER_RESERVE, 0)
+    dropped: int = len(text) - keep
+    marker: str = f"[BENCH TRUNCATION: {dropped} chars omitted]"
+    if keep == 0:
+        return marker, dropped
+    head_len: int = keep // 2
+    tail_len: int = keep - head_len
+    if tail_len == 0:
+        return text[:head_len] + marker, dropped
+    return text[:head_len] + marker + text[-tail_len:], dropped
+
+
+def _clamp_to_budget(lines: list[str]) -> tuple[list[str], int]:
+    """Fit ``lines`` into MAX_DIFF_CHARS while keeping both ends.
+
+    Returns (lines, dropped). A prefix-only slice would satisfy the budget
+    while discarding everything the selection just worked to keep: the last
+    20 lines, and every signature or exception handler past the cut. The
+    footer would still claim ``last20`` was preserved, so the metadata would
+    be wrong in the one direction that matters, hiding the end of a change
+    from all three stages while asserting it was shown.
+
+    Lines are therefore taken alternately from the front and the back until
+    the budget is spent, and what could not fit is named in the middle.
+    """
+    total: int = sum(len(line) + 1 for line in lines)
+    if total <= MAX_DIFF_CHARS:
+        return lines, 0
+
+    # The marker is part of the output, so it is charged against the budget
+    # before any line is taken. Reserving it afterwards would let the result
+    # exceed MAX_DIFF_CHARS by the marker's own length, breaking the bound
+    # this function exists to enforce.
+    budget: int = MAX_DIFF_CHARS - _CLAMP_MARKER_RESERVE
+    head: list[str] = []
+    tail: list[str] = []
+    used: int = 0
+    low: int = 0
+    high: int = len(lines) - 1
+    from_head: bool = True
+
+    while low <= high:
+        candidate: str = lines[low] if from_head else lines[high]
+        cost: int = len(candidate) + 1
+        if used + cost > budget:
+            break
+        if from_head:
+            head.append(candidate)
+            low += 1
+        else:
+            tail.append(candidate)
+            high -= 1
+        used += cost
+        from_head = not from_head
+
+    dropped: int = high - low + 1
+    marker: str = (
+        f"[BENCH TRUNCATION: {dropped} lines dropped to fit "
+        f"{MAX_DIFF_CHARS} chars]"
+    )
+    return head + [marker] + list(reversed(tail)), dropped
+
+
 def _truncate_preserving(
     text: str,
 ) -> tuple[str, dict[str, Any] | None]:
@@ -316,7 +470,8 @@ def _truncate_preserving(
     """
     lines: list[str] = text.splitlines()
     original: int = len(lines)
-    if original <= MAX_DIFF_LINES:
+    original_chars: int = len(text)
+    if original <= MAX_DIFF_LINES and original_chars <= MAX_DIFF_CHARS:
         return text, None
 
     keep: set[int] = set(range(0, min(_FIRST_N, original)))
@@ -329,32 +484,57 @@ def _truncate_preserving(
         if "except" in line or "catch" in line:
             keep.add(i)
 
-    if len(keep) >= original:
-        return text, None
-
     sorted_keep: list[int] = sorted(keep)
     out_lines: list[str] = []
     prev: int = -1
+    capped_any: bool = False
     for idx in sorted_keep:
         if prev != -1 and idx != prev + 1:
             gap: int = idx - prev - 1
             out_lines.append(f"[BENCH TRUNCATION: {gap} lines omitted]")
-        out_lines.append(lines[idx])
+        capped_line, was_capped = _cap_line(lines[idx])
+        capped_any = capped_any or was_capped
+        out_lines.append(capped_line)
         prev = idx
     kept: int = len(sorted_keep)
+
+    # Nothing was actually cut: every line survived, none needed capping, and
+    # the payload is inside the char budget so the clamp below would not fire
+    # either. Checked after assembly rather than before, because a short-but-
+    # wide payload keeps all its lines yet still needs per-line capping. The
+    # char-budget term is load-bearing: without it a payload whose lines are
+    # each under MAX_LINE_CHARS but whose total exceeds MAX_DIFF_CHARS (say 50
+    # lines of 400 chars) would return here unbounded, before the clamp ran.
+    if kept >= original and not capped_any and original_chars <= MAX_DIFF_CHARS:
+        return text, None
+
+    # Per-line caps bound each line but not their sum, so the assembled
+    # selection still needs a total budget. It is applied across the
+    # selection rather than as a prefix slice: cutting from the front alone
+    # would drop the last 20 lines and every signature past the cut, while
+    # the footer went on claiming they were preserved.
+    out_lines, dropped = _clamp_to_budget(out_lines)
+    clamped: bool = dropped > 0
+    body: str = "\n".join(out_lines)
+
     footer: str = (
         f"[BENCH TRUNCATION: original_lines={original}, "
-        f"truncated_lines={kept}, preserved={_PRESERVED_KINDS}]"
+        f"truncated_lines={kept}, original_chars={original_chars}, "
+        f"preserved={_PRESERVED_KINDS}]"
     )
-    out_lines.append(footer)
+    body = body + "\n" + footer
 
     tail: str = "\n" if text.endswith("\n") else ""
     meta: dict[str, Any] = {
         "original_lines": original,
         "truncated_lines": kept,
+        "original_chars": original_chars,
+        "truncated_chars": len(body) + len(tail),
+        "line_capped": capped_any,
+        "body_clamped": clamped,
         "preserved": _PRESERVED_KINDS,
     }
-    return "\n".join(out_lines) + tail, meta
+    return body + tail, meta
 
 
 def _format_as_create_diff(text: str) -> str:
