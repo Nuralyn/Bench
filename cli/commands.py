@@ -22,6 +22,7 @@ import webbrowser
 from typing import Any
 
 from ledger.chain import LedgerReadError, load_ledger, resolve_ledger_path
+from ledger.migrate import migrate_ledger
 from ledger.retire import (
     ANCHOR_TOOL,
     RetirementError,
@@ -124,6 +125,53 @@ def cmd_verify() -> int:
     print(f"  expected        : {result.get('expected', '-')}", file=sys.stderr)
     print(f"  found           : {result.get('found', '-')}", file=sys.stderr)
     print(f"  message         : {result.get('message', '-')}", file=sys.stderr)
+    return 1
+
+
+def cmd_migrate_ledger() -> int:
+    """Populate this clone's private chain from the pre-migration location.
+
+    Only needed once, and only by a clone that existed before the ledger
+    became private. Checking out that switch makes git delete the formerly
+    tracked chain under ``ledger/``, and nothing can repopulate ``.bench/``
+    from git because it is ignored by design. Without this the clone would
+    resolve to an empty chain and silently open a fresh GENESIS.
+    """
+    result: dict[str, Any] = migrate_ledger()
+    status: str = str(result.get("status", ""))
+
+    if status in ("already_migrated", "nothing_to_migrate"):
+        print(f"Migration: {status.upper()}")
+        print(f"  ledger : {_display_path(str(result.get('target', '-')))}")
+        print(f"  detail : {result.get('detail', '')}")
+        return 0
+
+    print(f"Migration: {status.upper()}")
+    print(f"  source   : {result.get('source', '-')}")
+    print(f"  ledger   : {_display_path(str(result.get('target', '-')))}")
+    print(f"  files    : {result.get('files', 0)} of {result.get('expected', 0)}")
+    print(f"  entries  : {result.get('entries', 0)}")
+    print(f"  genesis  : {result.get('genesis_hash', '-')}")
+
+    if status == "migrated":
+        print("  verified : chain verifies at the new location")
+        return 0
+
+    print(
+        "  verified : NO",
+        file=sys.stderr,
+    )
+    print(
+        f"  failure  : {result.get('failure_type') or 'incomplete restore'}",
+        file=sys.stderr,
+    )
+    print(
+        "The restored chain is incomplete or does not verify. It has been "
+        "left in place for inspection rather than deleted; resolve the "
+        "shortfall before making a governed edit, because appending to a "
+        "partial chain compounds the break.",
+        file=sys.stderr,
+    )
     return 1
 
 
