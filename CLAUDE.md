@@ -281,7 +281,11 @@ client = openai.OpenAI(
 # The child is spawned with BENCH_SUBPROCESS=1 so Bench's own PreToolUse hook
 # fails open instead of recursing. subprocess/shutil are stdlib, so this path
 # adds no dependency. Per-stage timeout is BENCH_CLAUDE_TIMEOUT seconds
-# (default 120).
+# (library default 120). This repo sets 300 in .claude/settings.json: at 120
+# the Oracle timed out on constitutionally heavy diffs, and because a timeout
+# fails closed it surfaced as a VETO carrying pipeline_error, which reads like
+# a ruling but is a pipeline failure. Raising the ceiling does not weaken
+# enforcement; it stops a slow judge from being mistaken for a strict one.
 
 # Model strings live in utils/api.py as CHALLENGER_MODEL, DEFENDER_MODEL,
 # ORACLE_MODEL, and UTILITY_MODEL (the single source of truth). This section

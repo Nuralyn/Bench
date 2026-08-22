@@ -1,6 +1,7 @@
 {
   "env": {
-    "BENCH_PROVIDER": "claude_code"
+    "BENCH_PROVIDER": "claude_code",
+    "BENCH_CLAUDE_TIMEOUT": "300"
   },
   "hooks": {
     "PreToolUse": [
