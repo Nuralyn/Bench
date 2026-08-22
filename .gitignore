@@ -26,6 +26,22 @@ htmlcov/
 # graphify knowledge-graph output (embeds absolute local paths; regenerate with /graphify)
 graphify-out/
 
+# Operational ledger. Every governed project keeps its chain here, Bench
+# included. An entry embeds the full diff body of the change it governs, so
+# committing this directory publishes every change the chain ever saw. It is
+# private by design: a fresh clone starts with no chain and opens a new one at
+# GENESIS on its first governed edit. Public verification is served by the
+# generated attestation artifact, not by this directory.
+.bench/
+
+# Pre-migration chain location. Bench's chain moved to .bench/ and these
+# copies are retained on disk, untracked, so an auditor can reconcile the
+# pre- and post-migration chains. They are ignored so they can never be
+# re-tracked; ledger/ holds code only.
+ledger/bench-ledger.json
+ledger/ledger-meta.json
+ledger/entries/
+
 # IDE / editor
 .idea/
 .vscode/

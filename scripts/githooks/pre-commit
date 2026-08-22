@@ -1,35 +1,41 @@
 #!/bin/sh
-# Bench pre-commit guard: refuse a commit that stages ledger entry files
-# while other entry files remain untracked.
+# Bench pre-commit guard: refuse a commit that stages operational ledger data.
 #
-# Under DAG storage (ledger/entries/, one file per entry), append_entry
-# sets each new entry's previous_hash to every current tip, including
-# tips that exist only as untracked files. Committing a partial set of
-# entries therefore publishes children whose parents are not in git, and
-# a fresh clone fails `python -m cli verify` with MISSING_PARENT. The
-# discipline is: commit ALL untracked ledger entries (after reading
-# them) or none. This hook makes that mechanical at the only moment it
-# matters. Untracked entries that accumulate mid-session are fine; they
-# only become a hazard when a commit publishes some of them.
+# A ledger entry embeds the full diff body of the change it governs, so a
+# committed chain publishes every change it ever saw. Between April and July
+# 2026 that is exactly what happened in this repository, across three
+# unrelated projects, because the chain was a tracked artifact of the repo it
+# governed. The chain is now private and project-local: every governed
+# project, Bench included, keeps it in .bench/, which is gitignored. A fresh
+# clone starts with no chain and opens a new one at GENESIS on its first
+# governed edit.
 #
-# tests/test_ledger_hygiene.py holds the CI-side backstop: on a clean
-# checkout, a partial commit surfaces as a chain that does not verify.
+# This hook is the commit-time gate. tests/test_ledger_hygiene.py holds the
+# CI-side backstop, which also catches a chain committed under another name.
+# Public verification is served by the generated attestation artifact, which
+# carries commitments rather than content.
 #
 # Enable once per clone:  git config core.hooksPath scripts/githooks
 
-staged=$(git diff --cached --name-only -- ledger/entries)
-if [ -z "$staged" ]; then
-    exit 0
-fi
+# --diff-filter=d excludes deletions: untracking a previously committed chain
+# stages the removal of those paths, and that is the direction this guard
+# wants, not something to block.
+staged=$(git diff --cached --name-only --diff-filter=d -- \
+    .bench \
+    ledger/bench-ledger.json \
+    ledger/ledger-meta.json \
+    ledger/entries)
 
-untracked=$(git ls-files --others --exclude-standard -- ledger/entries)
-if [ -n "$untracked" ]; then
-    echo "pre-commit: this commit stages ledger entries while other entry files remain untracked:" >&2
-    echo "$untracked" | sed 's/^/  /' >&2
+if [ -n "$staged" ]; then
+    echo "pre-commit: this commit stages operational ledger data:" >&2
+    echo "$staged" | sed 's/^/  /' >&2
     echo "" >&2
-    echo "Commit ALL untracked ledger entries (after reading them) or none." >&2
-    echo "A partial set publishes entries whose parents are not in git, and" >&2
-    echo "a fresh clone then fails 'python -m cli verify' with MISSING_PARENT." >&2
+    echo "The ledger is private. It records the full diff of every change it" >&2
+    echo "governs, so committing it publishes them all. Unstage these paths:" >&2
+    echo "" >&2
+    echo "  git rm --cached -r <path>" >&2
+    echo "" >&2
+    echo "Note that .gitignore does not untrack a file already committed." >&2
     exit 1
 fi
 

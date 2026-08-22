@@ -28,9 +28,20 @@ PreToolUse Hook -> Challenger (Sonnet) -> Defender (Sonnet) -> Oracle (Opus) -> 
 - Oracle verdict is PASS or VETO. VETO is binding.
 - Every verdict hashed and chained into bench-ledger.json
 - Ledger destination is project-scoped via `ledger.chain.resolve_ledger_path()`:
-  Bench's own repo uses `ledger/bench-ledger.json`, any other governed project
-  uses `<project>/.bench/bench-ledger.json`, and `BENCH_LEDGER_PATH` overrides
-  both. Readers (`load_ledger`, `verify_chain`, the viewer) resolve through the
+  every governed project, Bench included, uses
+  `<project>/.bench/bench-ledger.json`, and `BENCH_LEDGER_PATH` overrides it.
+  Bench has no exemption. An operational ledger records the full diff body of
+  every change it governs, so publishing one publishes every change it ever
+  saw; it is therefore never a tracked artifact of the repository it governs,
+  and dogfooding does not earn an exception. `.bench/` is gitignored. A fresh
+  clone starts with no chain, and its first governed edit opens a new one at
+  GENESIS.
+- Bench's own chain was migrated from `ledger/` to `.bench/` by copying the
+  legacy segment, `ledger-meta.json`, and every entry file unchanged, then
+  confirming `python -m cli verify` reported VALID at the new location with an
+  unchanged genesis hash. No entry was modified, reordered, or removed, so this
+  is a relocation rather than a retirement, which matters because a
+  storage-location change is not a permitted C-008 retirement trigger. Readers (`load_ledger`, `verify_chain`, the viewer) resolve through the
   same function, so the auditor never inspects a different file than the writer
   appends to.
 - The ledger is stored in two segments. `bench-ledger.json` is the **frozen**
@@ -82,10 +93,11 @@ bench/
     oracle.py             # Binding verdict (Opus)
     constitution.py       # Load, snapshot, hash
     runner.py             # Sequential orchestration
-  ledger/
+  ledger/                 # Code only. No chain data is tracked here.
     chain.py              # Hash-chaining, append
     verify.py             # Independent chain validation
     retire.py             # C-008 chain retirement: archive, anchor, audit
+  .bench/                 # Operational chain. Gitignored, never committed.
     bench-ledger.json     # Frozen legacy chain segment (read, never written)
     ledger-meta.json      # Frozen pin on that segment's tip and count
     entries/              # One JSON file per new entry, named <entry_hash>.json

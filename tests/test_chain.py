@@ -24,9 +24,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from ledger.chain import (  # noqa: E402
     _atomic_write_json,
-    _BENCH_ROOT,
     _cap_stage_fields,
-    _DEFAULT_LEDGER_PATH,
     _is_external_change,
     _redact_external_diff,
     append_entry,
@@ -37,6 +35,14 @@ from ledger.chain import (  # noqa: E402
     resolve_ledger_path,
 )
 from tests._ledger_fixtures import build_valid_chain  # noqa: E402
+from utils.project import BENCH_ROOT  # noqa: E402
+
+# Bench no longer has a special ledger location: it resolves to its own
+# project-local .bench/ exactly as any governed project does. chain.py
+# therefore exports no Bench-specific path constant, so the expected value is
+# derived here from the same project root the resolver uses.
+_BENCH_ROOT: Path = BENCH_ROOT
+_BENCH_LEDGER_PATH: str = str(BENCH_ROOT / ".bench" / "bench-ledger.json")
 
 
 class ComputeEntryHashTests(unittest.TestCase):
@@ -93,22 +99,22 @@ class ResolveLedgerPathTests(unittest.TestCase):
     def test_env_override_ignored_when_blank(self) -> None:
         os.environ["BENCH_LEDGER_PATH"] = "   "
         os.chdir(str(_BENCH_ROOT))
-        self.assertEqual(resolve_ledger_path(), _DEFAULT_LEDGER_PATH)
+        self.assertEqual(resolve_ledger_path(), _BENCH_LEDGER_PATH)
 
     def test_bench_repo_root_uses_bench_ledger(self) -> None:
         os.chdir(str(_BENCH_ROOT))
-        self.assertEqual(resolve_ledger_path(), _DEFAULT_LEDGER_PATH)
+        self.assertEqual(resolve_ledger_path(), _BENCH_LEDGER_PATH)
 
     def test_subdirectory_of_bench_repo_uses_bench_ledger(self) -> None:
         os.chdir(str(_BENCH_ROOT / "tests"))
-        self.assertEqual(resolve_ledger_path(), _DEFAULT_LEDGER_PATH)
+        self.assertEqual(resolve_ledger_path(), _BENCH_LEDGER_PATH)
 
     def test_foreign_project_gets_its_own_ledger(self) -> None:
         foreign: str = tempfile.mkdtemp()
         try:
             os.chdir(foreign)
             resolved: Path = Path(resolve_ledger_path())
-            self.assertNotEqual(str(resolved), _DEFAULT_LEDGER_PATH)
+            self.assertNotEqual(str(resolved), _BENCH_LEDGER_PATH)
             self.assertEqual(resolved.name, "bench-ledger.json")
             self.assertEqual(resolved.parent.name, ".bench")
             # The governed project's ledger must live under that project,
@@ -165,7 +171,7 @@ class ResolveLedgerPathTests(unittest.TestCase):
             )
 
             # Bench's own ledger must be untouched by a foreign project.
-            bench_entries: list[dict] = load_ledger(_DEFAULT_LEDGER_PATH)
+            bench_entries: list[dict] = load_ledger(_BENCH_LEDGER_PATH)
             self.assertFalse(
                 any(e["change"].get("file") == "app/main.py" for e in bench_entries),
                 "foreign verdict contaminated Bench's own ledger",
