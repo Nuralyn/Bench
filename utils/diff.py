@@ -27,6 +27,13 @@ import traceback
 from typing import Any
 
 MAX_DIFF_LINES: int = 300
+# Line count alone does not bound payload size: a generated JSON, minified
+# asset, or CSV can sit far under MAX_DIFF_LINES while carrying tens of
+# thousands of characters on a handful of very long lines. Those two caps
+# bound the per-line and total character budget so an unbounded payload
+# cannot reach the LLM stages or the ledger.
+MAX_DIFF_CHARS: int = 20000
+MAX_LINE_CHARS: int = 500
 BINARY_SNIFF_BYTES: int = 8192
 BINARY_LABEL: str = "[BINARY FILE — content not evaluated]"
 
@@ -301,6 +308,23 @@ def _binary_metadata(
     }
 
 
+def _cap_line(line: str) -> tuple[str, bool]:
+    """Cap a single line at MAX_LINE_CHARS, marking what was dropped.
+
+    Returns (possibly-capped-line, was_capped). The marker is visible in
+    the body for the same reason BINARY_LABEL is: evidence loss reaching
+    the Challenger or the ledger must be signaled, never silent (C-001).
+    """
+    if len(line) <= MAX_LINE_CHARS:
+        return line, False
+    omitted: int = len(line) - MAX_LINE_CHARS
+    return (
+        f"{line[:MAX_LINE_CHARS]}"
+        f"[BENCH TRUNCATION: {omitted} chars omitted from line]",
+        True,
+    )
+
+
 def _truncate_preserving(
     text: str,
 ) -> tuple[str, dict[str, Any] | None]:
@@ -316,7 +340,8 @@ def _truncate_preserving(
     """
     lines: list[str] = text.splitlines()
     original: int = len(lines)
-    if original <= MAX_DIFF_LINES:
+    original_chars: int = len(text)
+    if original <= MAX_DIFF_LINES and original_chars <= MAX_DIFF_CHARS:
         return text, None
 
     keep: set[int] = set(range(0, min(_FIRST_N, original)))
@@ -329,32 +354,61 @@ def _truncate_preserving(
         if "except" in line or "catch" in line:
             keep.add(i)
 
-    if len(keep) >= original:
-        return text, None
-
     sorted_keep: list[int] = sorted(keep)
     out_lines: list[str] = []
     prev: int = -1
+    capped_any: bool = False
     for idx in sorted_keep:
         if prev != -1 and idx != prev + 1:
             gap: int = idx - prev - 1
             out_lines.append(f"[BENCH TRUNCATION: {gap} lines omitted]")
-        out_lines.append(lines[idx])
+        capped_line, was_capped = _cap_line(lines[idx])
+        capped_any = capped_any or was_capped
+        out_lines.append(capped_line)
         prev = idx
     kept: int = len(sorted_keep)
+
+    # Nothing was actually cut: every line survived, none needed capping, and
+    # the payload is inside the char budget so the clamp below would not fire
+    # either. Checked after assembly rather than before, because a short-but-
+    # wide payload keeps all its lines yet still needs per-line capping. The
+    # char-budget term is load-bearing: without it a payload whose lines are
+    # each under MAX_LINE_CHARS but whose total exceeds MAX_DIFF_CHARS (say 50
+    # lines of 400 chars) would return here unbounded, before the clamp ran.
+    if kept >= original and not capped_any and original_chars <= MAX_DIFF_CHARS:
+        return text, None
+
+    body: str = "\n".join(out_lines)
+    clamped: bool = False
+    if len(body) > MAX_DIFF_CHARS:
+        # Per-line caps bound each line but not their sum. Clamp the total so
+        # a payload with many just-under-cap lines cannot grow without bound.
+        # Cut at a line boundary: a raw slice can sever a preserved def/class/
+        # except line mid-token, degrading the lines _PRESERVED_KINDS exists
+        # to keep readable for the downstream stages.
+        cut: int = body.rfind("\n", 0, MAX_DIFF_CHARS)
+        body = body[: cut if cut > 0 else MAX_DIFF_CHARS]
+        clamped = True
+        body += f"\n[BENCH TRUNCATION: body clamped to {MAX_DIFF_CHARS} chars]"
+
     footer: str = (
         f"[BENCH TRUNCATION: original_lines={original}, "
-        f"truncated_lines={kept}, preserved={_PRESERVED_KINDS}]"
+        f"truncated_lines={kept}, original_chars={original_chars}, "
+        f"preserved={_PRESERVED_KINDS}]"
     )
-    out_lines.append(footer)
+    body = body + "\n" + footer
 
     tail: str = "\n" if text.endswith("\n") else ""
     meta: dict[str, Any] = {
         "original_lines": original,
         "truncated_lines": kept,
+        "original_chars": original_chars,
+        "truncated_chars": len(body) + len(tail),
+        "line_capped": capped_any,
+        "body_clamped": clamped,
         "preserved": _PRESERVED_KINDS,
     }
-    return "\n".join(out_lines) + tail, meta
+    return body + tail, meta
 
 
 def _format_as_create_diff(text: str) -> str:
