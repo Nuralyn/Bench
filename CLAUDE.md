@@ -104,7 +104,7 @@ bench/
   cli/
     __main__.py           # python -m cli
     commands.py           # verify, ledger, stats, constitution, viewer,
-                          # retire, audit-retirement
+                          # retire, audit-retirement, migrate-ledger
   utils/
     diff.py               # Diff extraction and formatting
     api.py                # Anthropic API client

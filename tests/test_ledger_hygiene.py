@@ -85,36 +85,51 @@ def _tracked_files() -> list[str]:
     return [line for line in result.stdout.splitlines() if line]
 
 
+def _has_entry_shape(obj: object) -> bool:
+    """True when one parsed object is an operational ledger entry.
+
+    The 64-hex entry_hash is what separates a real chain from a synthetic
+    fixture using a short placeholder digest such as "abc123hash".
+    """
+    if not isinstance(obj, dict):
+        return False
+    change = obj.get("change")
+    return bool(
+        _SHA256.match(str(obj.get("entry_hash", "")))
+        and "previous_hash" in obj
+        and isinstance(change, dict)
+        and "diff_summary" in change
+    )
+
+
 def _is_ledger_shaped(raw: str) -> bool:
-    """True when text is a serialized operational ledger.
+    """True when text is serialized operational ledger data.
 
     Keyed on parseability plus the real entry shape, so Bench's own source,
     tests, fixtures, docs, and this detector are excluded by construction
-    rather than by an allowlist: none of them parse as JSON. The 64-hex
-    entry_hash is what separates a real chain from a synthetic fixture using
-    a short placeholder digest. attestation.json is immune by design, since
-    it carries `commitment` and has no `change` object.
+    rather than by an allowlist: none of them parse as JSON.
+
+    Three carriers are recognized, because a chain can be renamed into any
+    of them. Under DAG storage append_entry writes one standalone object per
+    entry as entries/<hash>.json, so a relocated chain is most naturally a
+    directory of root objects rather than an array. Checking only arrays
+    would let exactly that shape through under a path the tracked-file guard
+    does not name.
+
+    attestation.json stays immune by design: it carries `commitment` and has
+    no `change` object, so it matches none of the three.
     """
     try:
         data = json.loads(raw)
     except ValueError:
         return False
+    if _has_entry_shape(data):
+        return True
     if isinstance(data, dict):
         data = data.get("entries")
     if not isinstance(data, list):
         return False
-    for obj in data:
-        if not isinstance(obj, dict):
-            continue
-        change = obj.get("change")
-        if (
-            _SHA256.match(str(obj.get("entry_hash", "")))
-            and "previous_hash" in obj
-            and isinstance(change, dict)
-            and "diff_summary" in change
-        ):
-            return True
-    return False
+    return any(_has_entry_shape(obj) for obj in data)
 
 
 class TrackedLedgerGuardTests(unittest.TestCase):
@@ -180,6 +195,22 @@ class LedgerShapeDetectorTests(unittest.TestCase):
     def test_flags_entries_wrapped_object(self) -> None:
         payload = json.dumps({"entries": [self._entry("b" * 64)]})
         self.assertTrue(_is_ledger_shaped(payload))
+
+    def test_flags_standalone_entry_object(self) -> None:
+        """A renamed chain is a directory of root objects, not an array.
+
+        append_entry writes one standalone object per entry under
+        entries/<hash>.json. Checking only arrays let exactly that shape
+        through under a path the tracked-file guard does not name.
+        """
+        self.assertTrue(_is_ledger_shaped(json.dumps(self._entry("e" * 64))))
+
+    def test_ignores_standalone_object_with_short_digest(self) -> None:
+        self.assertFalse(_is_ledger_shaped(json.dumps(self._entry("deadbeef"))))
+
+    def test_ignores_standalone_object_without_change(self) -> None:
+        payload = json.dumps({"entry_hash": "f" * 64, "previous_hash": "GENESIS"})
+        self.assertFalse(_is_ledger_shaped(payload))
 
     def test_ignores_synthetic_fixture_digest(self) -> None:
         """Short placeholder hashes are how tests fake a chain."""

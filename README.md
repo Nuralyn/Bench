@@ -158,6 +158,17 @@ pip install -r requirements.txt
 # catches a chain committed under another name; this hook catches it earlier.
 git config core.hooksPath scripts/githooks
 
+# Upgrading a clone made before the ledger became private: run this once.
+# Checking out that switch makes git delete the formerly tracked chain under
+# ledger/, and nothing can repopulate .bench/ from git because it is ignored
+# by design. Without this the clone resolves to an empty chain and its next
+# governed edit silently opens a fresh GENESIS. The command reads the chain
+# from the working tree, or from git history if the checkout already removed
+# it, refuses to touch a chain that already exists, and verifies the result
+# before reporting success. A clone that never had a chain reports
+# "nothing to migrate", which is the expected state for a fresh one.
+python -m cli migrate-ledger
+
 # Pick how Bench reaches the models (see "Provider Configuration" below):
 #   Option A: use your own Anthropic API key
 export ANTHROPIC_API_KEY=your-key-here
