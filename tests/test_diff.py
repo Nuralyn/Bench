@@ -12,6 +12,7 @@ Run: python -m unittest tests.test_diff -v
 import os
 import sys
 import unittest
+import unittest.mock
 from pathlib import Path
 
 _REPO_ROOT: Path = Path(__file__).resolve().parent.parent
@@ -20,8 +21,11 @@ if str(_REPO_ROOT) not in sys.path:
 
 from utils.diff import (  # noqa: E402
     BINARY_LABEL,
+    MAX_DIFF_CHARS,
     MAX_DIFF_LINES,
+    MAX_LINE_CHARS,
     _PROJECT_ROOT,
+    _cap_line,
     _is_binary,
     _normalize_path,
     _truncate_preserving,
@@ -333,6 +337,137 @@ class MalformedInputTests(unittest.TestCase):
         self.assertEqual(
             result["edits"][1], {"old_string": "a", "new_string": "b"}
         )
+
+
+class CharacterBudgetTests(unittest.TestCase):
+    """Covers the character-based caps added alongside MAX_DIFF_LINES.
+
+    Line count alone did not bound payload size: a generated JSON or
+    minified asset can sit far under MAX_DIFF_LINES while carrying tens of
+    thousands of characters on a few very long lines. That shape reached
+    the ledger untruncated, so these lock in the per-line cap, the
+    whole-body clamp, and the widened trigger.
+    """
+
+    def test_cap_line_under_limit_unchanged(self) -> None:
+        line: str = "a" * (MAX_LINE_CHARS - 1)
+        capped, was_capped = _cap_line(line)
+        self.assertFalse(was_capped)
+        self.assertEqual(capped, line)
+
+    def test_cap_line_exactly_at_limit_unchanged(self) -> None:
+        line: str = "a" * MAX_LINE_CHARS
+        capped, was_capped = _cap_line(line)
+        self.assertFalse(was_capped)
+        self.assertEqual(capped, line)
+
+    def test_cap_line_one_over_limit_marks_omission(self) -> None:
+        line: str = "a" * (MAX_LINE_CHARS + 1)
+        capped, was_capped = _cap_line(line)
+        self.assertTrue(was_capped)
+        self.assertIn("[BENCH TRUNCATION: 1 chars omitted from line]", capped)
+        self.assertTrue(capped.startswith("a" * MAX_LINE_CHARS))
+
+    def test_short_but_wide_payload_is_capped(self) -> None:
+        """The graphify-chunk shape: few lines, very wide, over budget."""
+        content: str = "\n".join("x" * 600 for _ in range(50))
+        self.assertLess(len(content.splitlines()), MAX_DIFF_LINES)
+        self.assertGreater(len(content), MAX_DIFF_CHARS)
+        result = build_diff_info(
+            "Write", {"file_path": "chunk.json", "content": content}
+        )
+        self.assertIn("truncation", result)
+        self.assertTrue(result["truncation"]["line_capped"])
+        self.assertEqual(result["truncation"]["original_chars"], len(content))
+        self.assertIn("chars omitted from line", result["content"])
+        self.assertLess(len(result["content"]), len(content))
+
+    def test_many_narrow_lines_trigger_body_clamp(self) -> None:
+        """Lines under the per-line cap still need a total budget."""
+        content: str = "\n".join("y" * 400 for _ in range(100))
+        result = build_diff_info(
+            "Write", {"file_path": "wide.json", "content": content}
+        )
+        self.assertIn("truncation", result)
+        self.assertFalse(result["truncation"]["line_capped"])
+        self.assertTrue(result["truncation"]["body_clamped"])
+        self.assertIn("body clamped to", result["content"])
+
+    def test_all_lines_kept_but_over_budget_still_clamps(self) -> None:
+        """Regression: the early return once let this shape through whole.
+
+        Every line is under MAX_LINE_CHARS so nothing is per-line capped,
+        and the line-preservation set covers all 50 lines so nothing is
+        dropped. Without the char-budget term on the early return, the
+        payload returned unbounded before the clamp could run.
+        """
+        content: str = "\n".join("v" * 400 for _ in range(50))
+        self.assertLess(len(content.splitlines()), MAX_DIFF_LINES)
+        self.assertGreater(len(content), MAX_DIFF_CHARS)
+        result = build_diff_info(
+            "Write", {"file_path": "escape.json", "content": content}
+        )
+        self.assertIn("truncation", result)
+        self.assertFalse(result["truncation"]["line_capped"])
+        self.assertTrue(result["truncation"]["body_clamped"])
+        self.assertLess(len(result["content"]), len(content))
+
+    def test_truncated_output_stays_within_budget(self) -> None:
+        content: str = "\n".join("z" * 600 for _ in range(400))
+        result = build_diff_info(
+            "Write", {"file_path": "huge.json", "content": content}
+        )
+        # Budget plus the clamp marker and the footer, which are appended
+        # after the clamp so evidence loss stays visible.
+        self.assertLess(len(result["content"]), MAX_DIFF_CHARS + 500)
+
+    def test_body_clamp_cuts_on_a_line_boundary(self) -> None:
+        content: str = "\n".join("w" * 400 for _ in range(100))
+        result = build_diff_info(
+            "Write", {"file_path": "bound.json", "content": content}
+        )
+        body: str = result["content"]
+        marker: str = "\n[BENCH TRUNCATION: body clamped to"
+        head: str = body.split(marker)[0]
+        # The cut lands at a newline, so the final retained line is whole.
+        self.assertTrue(head.endswith("w" * 400))
+
+    def test_clamp_falls_back_when_no_newline_in_window(self) -> None:
+        """rfind returns -1 when one line exceeds the whole-body budget.
+
+        Unreachable with the shipped constants, since the per-line cap
+        keeps every line far below MAX_DIFF_CHARS. Patched here so the
+        fallback slice is exercised rather than assumed.
+        """
+        content: str = "q" * (MAX_DIFF_CHARS + 5000)
+        with unittest.mock.patch("utils.diff.MAX_LINE_CHARS", MAX_DIFF_CHARS * 2):
+            result = build_diff_info(
+                "Write", {"file_path": "oneline.json", "content": content}
+            )
+        self.assertIn("truncation", result)
+        self.assertTrue(result["truncation"]["body_clamped"])
+        self.assertIn("body clamped to", result["content"])
+
+    def test_at_char_limit_not_truncated(self) -> None:
+        line: str = "c" * 99
+        count: int = MAX_DIFF_CHARS // 100
+        content: str = "\n".join(line for _ in range(count))
+        self.assertLessEqual(len(content), MAX_DIFF_CHARS)
+        result = build_diff_info(
+            "Write", {"file_path": "atlimit.py", "content": content}
+        )
+        self.assertNotIn("truncation", result)
+        self.assertEqual(result["content"], content)
+
+    def test_line_truncation_still_fires_on_narrow_long_files(self) -> None:
+        """The pre-existing MAX_DIFF_LINES path is unaffected."""
+        content: str = "\n".join(f"line_{i}" for i in range(400))
+        result = build_diff_info(
+            "Write", {"file_path": "long.py", "content": content}
+        )
+        self.assertIn("truncation", result)
+        self.assertEqual(result["truncation"]["original_lines"], 400)
+        self.assertFalse(result["truncation"]["line_capped"])
 
 
 if __name__ == "__main__":
