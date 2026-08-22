@@ -36,15 +36,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from utils.project import BENCH_ROOT, project_root
+from utils.project import project_root
 
 # Ledger routing, out-of-project classification, and constitution resolution
 # must agree on which project a run belongs to; if they could disagree, a
 # change could be judged against one project's constitution while being
 # recorded in another project's ledger. utils.project is the single definition
 # all three resolve through.
-_BENCH_ROOT: Path = BENCH_ROOT
-_DEFAULT_LEDGER_PATH: str = str(_BENCH_ROOT / "ledger" / "bench-ledger.json")
 _PROJECT_LEDGER_DIRNAME: str = ".bench"
 # Frozen pin on the legacy segment; never written here. verify.py imports
 # this name to check the pin.
@@ -108,9 +106,23 @@ def resolve_ledger_path() -> str:
     project being governed:
 
     1. ``BENCH_LEDGER_PATH`` wins outright, for an explicit central ledger.
-    2. A working directory inside the Bench repo (Bench governing itself)
-       uses Bench's own ``ledger/bench-ledger.json``, unchanged.
-    3. Anything else writes to ``<project>/.bench/bench-ledger.json``.
+    2. Anything else writes to ``<project>/.bench/bench-ledger.json``.
+
+    Bench governs itself through those same two rules, with no exemption: a
+    run inside the Bench repo resolves to
+    ``<bench repo>/.bench/bench-ledger.json`` exactly as any other project
+    does. An operational ledger records the full diff body of every change it
+    governs, so publishing one publishes every change it ever saw. It is
+    therefore never a tracked artifact of the repository it governs, and
+    dogfooding does not earn an exception to that.
+
+    Bench's existing chain was relocated to that path before this branch
+    removed the special case: the legacy segment, ``ledger-meta.json``, and
+    every entry file were copied unchanged, and ``verify_chain`` reports VALID
+    at the new location with genesis hash 4e98fb41 unchanged. No entry was
+    modified, reordered, or removed, so continuity is preserved and no
+    retirement was triggered, which matters because a storage-location change
+    is not a permitted C-008 retirement trigger.
 
     Claude Code invokes hooks with the governed project as the working
     directory. That is the same assumption ``utils.diff`` already relies on
@@ -120,11 +132,7 @@ def resolve_ledger_path() -> str:
     if override:
         return override
 
-    root: Path = _project_root()
-    if root == _BENCH_ROOT:
-        return _DEFAULT_LEDGER_PATH
-
-    return str(root / _PROJECT_LEDGER_DIRNAME / "bench-ledger.json")
+    return str(_project_root() / _PROJECT_LEDGER_DIRNAME / "bench-ledger.json")
 
 
 def resolve_entries_dir(path: str | None = None) -> str:

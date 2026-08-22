@@ -1,6 +1,7 @@
 """Independent chain validator for the Bench ledger.
 
-Reads ``ledger/bench-ledger.json`` directly and walks every entry,
+Reads the chain at ``resolve_ledger_path()`` directly (``.bench/`` in every
+governed project, Bench included) and walks every entry,
 recomputing each hash and confirming the ``previous_hash`` link holds
 from the GENESIS entry through to the latest. This module deliberately
 does not call ``load_ledger`` from ``chain.py`` — independence from the
