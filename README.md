@@ -106,23 +106,35 @@ Bench governs what a model proposes through the tools it hooks, not everything
 that can reach a branch.
 
 Bench has repeatedly vetoed changes to its own governance pipeline under
-constraint C-007 (governance pipeline integrity). Ledger entry #64 is a clean
-example: a change to `pipeline/constitution.py` left a literal placeholder token
-in the file, which would have been a `SyntaxError` breaking every pipeline
-import and disabling enforcement outright. The Oracle caught it, named it, and
-blocked it. It was corrected and re-submitted.
+constraint C-007 (governance pipeline integrity). One clean example: a change
+to `pipeline/constitution.py` left a literal placeholder token in the file,
+which would have been a `SyntaxError` breaking every pipeline import and
+disabling enforcement outright. The Oracle caught it, named it, and blocked it.
+It was corrected and re-submitted. Others have covered `bench.json`,
+`ledger/chain.py`, `utils/api.py`, and `pipeline/runner.py`.
 
-Other C-007 vetoes in this chain: #22–#25 (`bench.json`), #28
-(`ledger/chain.py`), #54 and #56 (`utils/api.py`), #77 (`pipeline/runner.py`).
-Read any of them with `python -m cli ledger`.
+Those entries are not published, and this README no longer cites them by
+number. The ledger is an operational audit record: every entry embeds the full
+diff body of the change it governs, so publishing the chain publishes every
+change it ever saw, including work in progress and anything a globally
+registered hook happened to see. That is a private artifact by construction,
+not a transparency surface, and Bench keeps its own chain private on exactly
+the same terms it asks of every project it governs.
 
-One note on the numbering, so it is not mysterious. This chain opens with an
+What replaces reading someone else's chain is reproducing the behavior on your
+own: clone this repo, enable the hook, and propose a change that breaks a
+constraint. The veto is the demonstration, and it is one you control end to
+end rather than one you have to take on faith. `python -m cli verify` confirms
+your chain's integrity; `python -m cli stats` summarizes it.
+
+One note on how this chain begins, so it is not mysterious. It opens with an
 `ANCHOR` entry rather than an ordinary verdict. A predecessor chain was retired
 on 2026-07-24 and archived without being published, because a globally
 registered hook had written diffs from unrelated projects into Bench's own
 ledger and that chain contained third-party source. Retiring it whole was chosen
-over editing entries, which C-008 forbids without exception. Entry numbers in
-this README refer to the current published chain. See
+over editing entries, which C-008 forbids without exception. Making the ledger
+private is the structural fix for what retirement could only clean up after:
+a chain that is never published cannot publish anything. See
 [Chain Retirement](#chain-retirement) for when this is permitted, and run
 `python -m cli audit-retirement` to confirm that retirement yourself.
 
@@ -140,11 +152,22 @@ cd bench
 pip install -r requirements.txt
 
 # Enable the ledger commit guard (once per clone). It refuses a commit that
-# stages some ledger/entries/ files while others remain untracked: a partial
-# set publishes entries whose parents are not in git, and a fresh clone then
-# fails `python -m cli verify`. CI enforces the same invariant through
-# tests/test_ledger_hygiene.py; this hook just catches it before the push.
+# stages operational ledger data. An entry embeds the full diff of the change
+# it governs, so a committed chain publishes every change it ever saw. CI
+# enforces the same invariant through tests/test_ledger_hygiene.py, which also
+# catches a chain committed under another name; this hook catches it earlier.
 git config core.hooksPath scripts/githooks
+
+# Upgrading a clone made before the ledger became private: run this once.
+# Checking out that switch makes git delete the formerly tracked chain under
+# ledger/, and nothing can repopulate .bench/ from git because it is ignored
+# by design. Without this the clone resolves to an empty chain and its next
+# governed edit silently opens a fresh GENESIS. The command reads the chain
+# from the working tree, or from git history if the checkout already removed
+# it, refuses to touch a chain that already exists, and verifies the result
+# before reporting success. A clone that never had a chain reports
+# "nothing to migrate", which is the expected state for a fresh one.
+python -m cli migrate-ledger
 
 # Pick how Bench reaches the models (see "Provider Configuration" below):
 #   Option A: use your own Anthropic API key

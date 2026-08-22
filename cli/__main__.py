@@ -11,6 +11,7 @@ from cli.commands import (
     cmd_audit_retirement,
     cmd_constitution,
     cmd_ledger,
+    cmd_migrate_ledger,
     cmd_retire,
     cmd_stats,
     cmd_verify,
@@ -25,6 +26,14 @@ _USAGE: str = (
     "  verify                     Validate the ledger hash chain\n"
     "  ledger [--all] [--vetoes]  Show ledger entries (default: last 10)\n"
     "  stats                      Governance summary statistics\n"
+    "  migrate-ledger             One-time upgrade for a clone made before\n"
+    "                             the ledger became private. Copies the\n"
+    "                             pre-migration chain into .bench/ from the\n"
+    "                             working tree, or from git history if the\n"
+    "                             checkout already removed it. Idempotent,\n"
+    "                             refuses to touch a chain that already\n"
+    "                             exists, and verifies before reporting\n"
+    "                             success.\n"
     "  constitution               Show current constitutional constraints\n"
     "  viewer                     Open an HTML verdict viewer in the browser\n"
     "  audit-retirement [PATH]    Run C-008's auditor check on this chain's\n"
@@ -73,6 +82,13 @@ def main(argv: list[str]) -> int:
         )
     if command == "stats":
         return cmd_stats()
+    if command == "migrate-ledger":
+        # No TTY gate, unlike retire. Retirement is destructive and moves a
+        # chain out of the way, so it is human-only. Migration only copies
+        # whole files into a location holding no chain, refuses to touch one
+        # that already exists, and verifies the result before reporting
+        # success, so it cannot destroy or alter evidence.
+        return cmd_migrate_ledger()
     if command == "constitution":
         return cmd_constitution()
     if command == "viewer":
