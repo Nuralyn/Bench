@@ -9,6 +9,7 @@ import sys
 
 from cli.commands import (
     cmd_audit_retirement,
+    cmd_audit_sanitation,
     cmd_constitution,
     cmd_ledger,
     cmd_migrate_ledger,
@@ -36,6 +37,11 @@ _USAGE: str = (
     "                             success.\n"
     "  constitution               Show current constitutional constraints\n"
     "  viewer                     Open an HTML verdict viewer in the browser\n"
+    "  audit-sanitation [PATH]    Audit this chain's published-copy\n"
+    "                             sanitation records: structure, the live\n"
+    "                             chain's own state, and the encrypted\n"
+    "                             backup's digest when PATH is given.\n"
+    "                             Read-only; it never performs a sanitation.\n"
     "  audit-retirement [PATH]    Run C-008's auditor check on this chain's\n"
     "                             opening anchor (PATH defaults to the archive\n"
     "                             the anchor recorded)\n"
@@ -98,6 +104,13 @@ def main(argv: list[str]) -> int:
             archive_dir=_flag_value(rest, "--archive-dir"),
             reason=_flag_value(rest, "--reason"),
             remediation=_flag_value(rest, "--remediation"),
+        )
+    if command == "audit-sanitation":
+        positional_backup: list[str] = [
+            arg for arg in rest if not arg.startswith("-")
+        ]
+        return cmd_audit_sanitation(
+            positional_backup[0] if positional_backup else None
         )
     if command == "audit-retirement":
         positional: list[str] = [arg for arg in rest if not arg.startswith("-")]

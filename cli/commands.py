@@ -19,10 +19,12 @@ import stat
 import sys
 import tempfile
 import webbrowser
+from pathlib import Path
 from typing import Any
 
 from ledger.chain import LedgerReadError, load_ledger, resolve_ledger_path
 from ledger.migrate import migrate_ledger
+from ledger.sanitize import SANITATION_VERDICT, audit_sanitation
 from ledger.retire import (
     ANCHOR_TOOL,
     RetirementError,
@@ -126,6 +128,62 @@ def cmd_verify() -> int:
     print(f"  found           : {result.get('found', '-')}", file=sys.stderr)
     print(f"  message         : {result.get('message', '-')}", file=sys.stderr)
     return 1
+
+
+def cmd_audit_sanitation(backup: str | None = None) -> int:
+    """Audit this chain's published-copy sanitation records.
+
+    Read-only. It audits records; it never performs a sanitation, which is a
+    human action at a plain TTY. A sanitation removes published copies of
+    ledger data from a version control remote and never touches the
+    authoritative chain, so this reports three things that can each fail
+    alone: the record's structure, the live chain's own state, and, when the
+    artifact is supplied, the encrypted backup's digest.
+
+    Checking the live chain matters most. The record asserts that the chain
+    still verifies with an unchanged genesis; an auditor that trusted that
+    claim would be checking the record against itself.
+    """
+    try:
+        entries: list[dict] = load_ledger()
+    except LedgerReadError as exc:
+        print(f"[bench cli] cannot read ledger: {exc}", file=sys.stderr)
+        return 1
+
+    records: list[dict] = [
+        e for e in entries if e.get("verdict") == SANITATION_VERDICT
+    ]
+    if not records:
+        print("Sanitation: NONE RECORDED")
+        print("  This chain has never had published copies sanitized.")
+        return 0
+
+    artifact: Path | None = Path(backup) if backup else None
+    failures: int = 0
+
+    for record in records:
+        summary: dict = (record.get("change") or {}).get("diff_summary") or {}
+        result: dict[str, Any] = audit_sanitation(record, artifact)
+        print(f"Sanitation: {'VALID' if result['valid'] else 'INVALID'}")
+        print(f"  recorded at   : {record.get('timestamp', '-')}")
+        print(f"  backup id     : {summary.get('backup_id', '-')}")
+        print(f"  digest        : {summary.get('backup_digest', '-')}")
+        print(f"  refs rewritten: {len(summary.get('refs') or [])}")
+        print(f"  retention     : {summary.get('retention_owner', '-')}")
+        if result["digest_checked"]:
+            print(
+                f"  backup digest : "
+                f"{'matches' if result['digest_matches'] else 'DOES NOT MATCH'}"
+            )
+        else:
+            print("  backup digest : not checked (supply the artifact path)")
+
+        if not result["valid"]:
+            failures += 1
+            for defect in result["defects"]:
+                print(f"  defect        : {defect}", file=sys.stderr)
+
+    return 1 if failures else 0
 
 
 def cmd_migrate_ledger() -> int:
