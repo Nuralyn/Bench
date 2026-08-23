@@ -108,7 +108,8 @@ bench/
     __main__.py           # python -m cli
     commands.py           # verify, ledger, stats, constitution, viewer,
                           # retire, audit-retirement, record-sanitation,
-                          # audit-sanitation, migrate-ledger, attest
+                          # audit-sanitation, verify-sanitation-binding,
+                          # verify-purge, migrate-ledger, attest
   utils/
     diff.py               # Diff extraction and formatting
     api.py                # Anthropic API client

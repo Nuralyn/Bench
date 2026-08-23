@@ -351,6 +351,7 @@ class BuildRecordTests(unittest.TestCase):
                 human_decision="Confirmed at a TTY.",
                 retention_owner="repository owner",
                 retention_policy="destroyed once confirmed",
+                repository="Nuralyn/Bench",
             )
 
     def test_chain_fields_come_from_the_chain(self) -> None:
@@ -388,6 +389,7 @@ class BuildRecordTests(unittest.TestCase):
                     human_decision="d",
                     retention_owner="o",
                     retention_policy="p",
+                    repository="Nuralyn/Bench",
                 )
 
 
