@@ -97,6 +97,9 @@ bench/
     chain.py              # Hash-chaining, append
     verify.py             # Independent chain validation
     retire.py             # C-008 chain retirement: archive, anchor, audit
+    migrate.py            # One-time upgrade for pre-privacy clones
+    sanitize.py           # Validation and audit for published-copy removal
+    attestation.py        # Public checkpoint export: commitments, no content
   .bench/                 # Operational chain. Gitignored, never committed.
     bench-ledger.json     # Frozen legacy chain segment (read, never written)
     ledger-meta.json      # Frozen pin on that segment's tip and count
@@ -104,7 +107,8 @@ bench/
   cli/
     __main__.py           # python -m cli
     commands.py           # verify, ledger, stats, constitution, viewer,
-                          # retire, audit-retirement, migrate-ledger
+                          # retire, audit-retirement, record-sanitation,
+                          # audit-sanitation, migrate-ledger, attest
   utils/
     diff.py               # Diff extraction and formatting
     api.py                # Anthropic API client
