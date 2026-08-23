@@ -217,6 +217,21 @@ def validate_sanitation_summary(summary: Any) -> list[str]:
                 f"republish machine paths"
             )
 
+    # Shape-checked when present, not required. Records written before
+    # verify_binding existed carry no repository, and C-008 forbids editing
+    # them. Making it required here would retroactively invalidate a record
+    # that was well formed under the schema it was written against. The
+    # binding gate requires it instead, so an unnamed warrant cannot
+    # authorize a rewrite while remaining honestly described as it was.
+    repository: Any = summary.get("repository")
+    if repository is not None and (
+        not isinstance(repository, str)
+        or not _REPOSITORY_RE.match(repository)
+    ):
+        defects.append(
+            f"repository must look like 'owner/name', got {repository!r}"
+        )
+
     defects.extend(_validate_refs(summary.get("refs")))
     return defects
 
@@ -246,6 +261,147 @@ def validate_sanitation_record(entry: Any) -> list[str]:
         return defects
 
     defects.extend(validate_sanitation_summary(change.get("diff_summary")))
+    return defects
+
+
+_REPOSITORY_RE: re.Pattern = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
+
+# One endpoint per git object type. A purged set is mixed: the baseline for
+# this repository is 298 blobs, 177 trees, 79 commits, and 2 tags.
+_OBJECT_ENDPOINTS: Mapping[str, str] = {
+    "blob": "git/blobs",
+    "tree": "git/trees",
+    "commit": "git/commits",
+    "tag": "git/tags",
+}
+
+REMOVED: str = "removed"
+PRESENT: str = "present"
+INCONCLUSIVE: str = "inconclusive"
+
+
+def object_endpoint(object_type: str, repository: str, sha: str) -> str:
+    """API path for probing one object, chosen by its type.
+
+    Probing everything at ``/commit/{sha}`` is the trap this exists to avoid.
+    A blob SHA is not a commit SHA, so that path returns 404 for every blob
+    whether or not the blob is still served, which reads as proof of removal
+    while proving nothing. Most of a purged set is blobs and trees.
+    """
+    path: str | None = _OBJECT_ENDPOINTS.get(object_type)
+    if path is None:
+        raise SanitationError(
+            f"no endpoint for object type {object_type!r}; refusing to probe "
+            f"a type this cannot check rather than reporting it removed"
+        )
+    return f"repos/{repository}/{path}/{sha}"
+
+
+def classify_removal(status: int) -> str:
+    """Turn an HTTP status into a removal verdict.
+
+    Only 404 proves removal. 200 proves the object is still served. Anything
+    else, including 401, 403, 429, and every 5xx, means the question was not
+    answered: a rate limit or an expired token would otherwise be recorded as
+    a successful purge, which is the failure mode that matters most here
+    because it is silent and final.
+    """
+    if status == 404:
+        return REMOVED
+    if status == 200:
+        return PRESENT
+    return INCONCLUSIVE
+
+
+def verify_binding(
+    summary: Mapping[str, Any],
+    repository: str,
+    remote_refs: Mapping[str, str],
+    local_refs: Mapping[str, str],
+) -> list[str]:
+    """Bind a sanitation warrant to the operation about to be performed.
+
+    ``validate_sanitation_record`` checks that a record is well formed and
+    that the chain it describes is intact. Neither says the record authorizes
+    *this* rewrite of *this* repository right now. A well-formed record is a
+    warrant with no name on it: without these checks the same record would
+    satisfy the gate for a different repository, for a mirror holding a
+    different rewrite, or a second time after the first push already consumed
+    it.
+
+    Four bindings, each of which can hold while another fails:
+
+    * **Repository.** The record names the repository it authorizes.
+    * **Pre-image.** Every recorded ref still points where the record says it
+      did, so the remote has not moved since the warrant was issued.
+    * **Post-image.** The local mirror holds exactly the rewrite the record
+      describes, so the thing about to be pushed is the thing authorized.
+    * **Not consumed.** A remote already sitting at the post-image means this
+      warrant was spent; re-using it would authorize a second, unrecorded
+      rewrite.
+
+    Pure and injectable: refs come in as mappings so this is testable without
+    a network or a repository. Returns defects, empty when the binding holds.
+    """
+    defects: list[str] = []
+
+    recorded_repo: Any = summary.get("repository")
+    if not isinstance(recorded_repo, str) or not _REPOSITORY_RE.match(
+        recorded_repo
+    ):
+        defects.append(
+            "record does not name a repository, so it cannot authorize an "
+            "operation against one. Records created before this check "
+            "existed carry no repository and must be superseded."
+        )
+    elif recorded_repo != repository:
+        defects.append(
+            f"record authorizes {recorded_repo!r}, not {repository!r}"
+        )
+
+    refs: Any = summary.get("refs")
+    if not isinstance(refs, list) or not refs:
+        defects.append("record carries no refs to bind against")
+        return defects
+
+    for entry in refs:
+        if not isinstance(entry, dict):
+            defects.append("a ref entry is not an object")
+            continue
+        name: Any = entry.get("ref")
+        pre: Any = entry.get("pre_image")
+        post: Any = entry.get("post_image")
+        if not isinstance(name, str):
+            defects.append("a ref entry has no name")
+            continue
+
+        actual_remote: str | None = remote_refs.get(name)
+        actual_local: str | None = local_refs.get(name)
+
+        if actual_remote is None:
+            defects.append(f"{name}: recorded but absent from the remote")
+        elif actual_remote == post:
+            defects.append(
+                f"{name}: the remote is already at the recorded post-image "
+                f"{str(post)[:12]}. This warrant was already used; a second "
+                f"push under it would be an unrecorded rewrite."
+            )
+        elif actual_remote != pre:
+            defects.append(
+                f"{name}: remote is {actual_remote[:12]}, but the record was "
+                f"issued against {str(pre)[:12]}. The remote moved after the "
+                f"warrant was written."
+            )
+
+        if actual_local is None:
+            defects.append(f"{name}: recorded but absent from the local mirror")
+        elif actual_local != post:
+            defects.append(
+                f"{name}: mirror is {actual_local[:12]}, but the record "
+                f"authorizes {str(post)[:12]}. The rewrite about to be pushed "
+                f"is not the one that was authorized."
+            )
+
     return defects
 
 
@@ -322,6 +478,7 @@ def build_sanitation_record(
     human_decision: str,
     retention_owner: str,
     retention_policy: str,
+    repository: str,
 ) -> dict[str, Any]:
     """Assemble a sanitation record, filling the chain fields from the chain.
 
@@ -342,6 +499,9 @@ def build_sanitation_record(
     live: dict = verify_chain()
     summary: dict[str, Any] = {
         "event": SANITATION_EVENT,
+        # Names the repository the warrant authorizes. Without it a record is
+        # a warrant with no name on it, and verify_binding refuses to bind.
+        "repository": repository,
         "human_decision": human_decision,
         "reason": reason,
         "refs": refs,
@@ -442,6 +602,59 @@ def _audit_live_chain(summary: dict) -> list[str]:
                 f"appear to have been removed"
             )
     return defects
+
+
+def verify_copy(source: Path, destination: Path, expected: str) -> list[str]:
+    """Confirm a copied backup is byte-identical before the source is removed.
+
+    Moving the only encrypted recovery bundle is not safe. A cross-volume
+    move is a copy plus a delete, and if the copy is short, truncated, or
+    silently corrupted the delete destroys the only remaining good copy. The
+    move also reports success from the filesystem, which is not the same
+    claim as "the destination hashes to what the sanitation record says".
+
+    So: copy, hash the destination, require it to equal the recorded digest,
+    and only then delete the source deliberately. Returns defects, empty when
+    the destination is provably identical.
+    """
+    defects: list[str] = []
+    if not _SHA256_RE.match(expected or ""):
+        defects.append(f"expected digest is not a sha256: {expected!r}")
+
+    if not destination.exists():
+        defects.append(f"destination does not exist: {destination}")
+        return defects
+
+    actual: str | None = digest_file(destination)
+    if actual is None:
+        defects.append(f"destination could not be read: {destination}")
+        return defects
+    if actual != expected:
+        defects.append(
+            f"destination digest {actual} does not match the recorded "
+            f"{expected}. Do not delete the source."
+        )
+
+    if source.exists():
+        source_digest: str | None = digest_file(source)
+        if source_digest is not None and source_digest != actual:
+            defects.append(
+                "source and destination differ; the copy is not faithful"
+            )
+    return defects
+
+
+def worktree_is_clean(porcelain_status: str) -> bool:
+    """True when ``git status --porcelain`` reported nothing.
+
+    Gate for retiring an old clone. After a history rewrite the old clone
+    holds commits that no longer exist upstream, and the reflex fix,
+    ``git reset --hard origin/main``, destroys uncommitted work without
+    asking. It also does not sanitize anything: the purged objects stay in
+    that clone's ``.git`` afterwards. A fresh clone is the honest move, and
+    this refuses to retire a clone that still holds unsaved work.
+    """
+    return porcelain_status.strip() == ""
 
 
 def audit_sanitation(entry: Any, backup: Path | None = None) -> dict[str, Any]:
