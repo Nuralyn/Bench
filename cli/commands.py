@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from ledger.chain import LedgerReadError, load_ledger, resolve_ledger_path
+from ledger.attestation import AttestationError, build_attestation, render
 from ledger.migrate import migrate_ledger
 from ledger.sanitize import SANITATION_VERDICT, audit_sanitation
 from ledger.retire import (
@@ -128,6 +129,72 @@ def cmd_verify() -> int:
     print(f"  found           : {result.get('found', '-')}", file=sys.stderr)
     print(f"  message         : {result.get('message', '-')}", file=sys.stderr)
     return 1
+
+
+def cmd_attest(
+    cutoff: str | None = None,
+    bench_version: str | None = None,
+    out: str | None = None,
+) -> int:
+    """Export a public attestation for entries up to a declared cutoff.
+
+    The operational chain stays private because it records content. This
+    emits commitments instead: hashes, verdicts, and constraint citations,
+    with no diff, no path, and no stage prose. It is evidence that a ruling
+    happened, not proof the ruling was right, and it is not a backup, since
+    nothing in it can reconstruct what was governed.
+
+    ``--cutoff`` is required rather than defaulting to the tip. A checkpoint
+    is a deliberate act, and committing the artifact appends a new entry
+    that necessarily falls after the cutoff, which is what stops the export
+    from chasing its own tail.
+    """
+    if not cutoff:
+        print(
+            "[bench cli] attest requires --cutoff <commitment>. A checkpoint "
+            "declares a fixed boundary; it does not track the live tip.",
+            file=sys.stderr,
+        )
+        return 1
+    if not bench_version:
+        print(
+            "[bench cli] attest requires --bench-version <x.y.z>.",
+            file=sys.stderr,
+        )
+        return 1
+
+    try:
+        entries: list[dict] = load_ledger()
+    except LedgerReadError as exc:
+        print(f"[bench cli] cannot read ledger: {exc}", file=sys.stderr)
+        return 1
+
+    try:
+        document: dict[str, Any] = build_attestation(
+            entries, cutoff, bench_version
+        )
+    except AttestationError as exc:
+        print(f"[bench cli] attestation refused: {exc}", file=sys.stderr)
+        return 1
+
+    target: Path = Path(out) if out else Path("attestation.json")
+    try:
+        target.write_text(render(document), encoding="utf-8")
+    except OSError as exc:
+        print(f"[bench cli] cannot write attestation: {exc}", file=sys.stderr)
+        return 1
+
+    print("Attestation: WRITTEN")
+    print(f"  file        : {_display_path(str(target))}")
+    print(f"  bench version: {document['bench_version']}")
+    print(f"  cutoff      : {document['cutoff_commitment']}")
+    print(f"  records     : {document['record_count']}")
+    unmapped: int = sum(
+        r["unmapped_citation_count"] for r in document["records"]
+    )
+    if unmapped:
+        print(f"  unmapped    : {unmapped} citation(s) excluded as non-ids")
+    return 0
 
 
 def cmd_audit_sanitation(backup: str | None = None) -> int:

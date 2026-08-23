@@ -8,6 +8,7 @@ membership checks against the remaining argv. Logic lives in commands.py.
 import sys
 
 from cli.commands import (
+    cmd_attest,
     cmd_audit_retirement,
     cmd_audit_sanitation,
     cmd_constitution,
@@ -37,6 +38,13 @@ _USAGE: str = (
     "                             success.\n"
     "  constitution               Show current constitutional constraints\n"
     "  viewer                     Open an HTML verdict viewer in the browser\n"
+    "  attest --cutoff HASH --bench-version X.Y.Z [--out PATH]\n"
+    "                             Export a public attestation for entries up\n"
+    "                             to the declared cutoff: commitments,\n"
+    "                             verdicts, and constraint ids, with no diff,\n"
+    "                             path, or stage prose. --cutoff is required;\n"
+    "                             a checkpoint is a deliberate act, not a\n"
+    "                             running view of the tip. Not a backup.\n"
     "  audit-sanitation [PATH]    Audit this chain's published-copy\n"
     "                             sanitation records: structure, the live\n"
     "                             chain's own state, and the encrypted\n"
@@ -104,6 +112,12 @@ def main(argv: list[str]) -> int:
             archive_dir=_flag_value(rest, "--archive-dir"),
             reason=_flag_value(rest, "--reason"),
             remediation=_flag_value(rest, "--remediation"),
+        )
+    if command == "attest":
+        return cmd_attest(
+            cutoff=_flag_value(rest, "--cutoff"),
+            bench_version=_flag_value(rest, "--bench-version"),
+            out=_flag_value(rest, "--out"),
         )
     if command == "audit-sanitation":
         positional_backup: list[str] = [
