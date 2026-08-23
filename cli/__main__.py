@@ -14,6 +14,7 @@ from cli.commands import (
     cmd_constitution,
     cmd_ledger,
     cmd_migrate_ledger,
+    cmd_record_sanitation,
     cmd_retire,
     cmd_stats,
     cmd_verify,
@@ -45,6 +46,16 @@ _USAGE: str = (
     "                             path, or stage prose. --cutoff is required;\n"
     "                             a checkpoint is a deliberate act, not a\n"
     "                             running view of the tip. Not a backup.\n"
+    "  record-sanitation --refs-file PATH --backup-id ID\n"
+    "                    --backup-digest HEX --reason TEXT\n"
+    "                    --retention-owner NAME --retention-policy TEXT\n"
+    "                             Append a published-copy sanitation record.\n"
+    "                             Run AFTER the rewrite and BEFORE the push:\n"
+    "                             the record names post-image hashes, and an\n"
+    "                             unrecorded removal violates C-008. Refuses\n"
+    "                             outside a plain TTY, inside an agent\n"
+    "                             session, on a non-conforming record, and if\n"
+    "                             the chain does not still verify after.\n"
     "  audit-sanitation [PATH]    Audit this chain's published-copy\n"
     "                             sanitation records: structure, the live\n"
     "                             chain's own state, and the encrypted\n"
@@ -118,6 +129,15 @@ def main(argv: list[str]) -> int:
             cutoff=_flag_value(rest, "--cutoff"),
             bench_version=_flag_value(rest, "--bench-version"),
             out=_flag_value(rest, "--out"),
+        )
+    if command == "record-sanitation":
+        return cmd_record_sanitation(
+            refs_file=_flag_value(rest, "--refs-file"),
+            backup_id=_flag_value(rest, "--backup-id"),
+            backup_digest=_flag_value(rest, "--backup-digest"),
+            reason=_flag_value(rest, "--reason"),
+            retention_owner=_flag_value(rest, "--retention-owner"),
+            retention_policy=_flag_value(rest, "--retention-policy"),
         )
     if command == "audit-sanitation":
         positional_backup: list[str] = [
