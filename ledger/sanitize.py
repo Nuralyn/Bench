@@ -87,6 +87,19 @@ _OPAQUE_FIELDS: tuple[str, ...] = (
     "retention_owner",
 )
 
+# Fields that must carry an actual written value. The check is non-empty
+# string, not a prose heuristic: backup_id is deliberately opaque and
+# retention_owner may be a role rather than a sentence. It exists because
+# presence alone is not evidence, and `x in ("", None)` admits False, 0, [],
+# and {} without complaint.
+_TEXT_FIELDS: tuple[str, ...] = (
+    "human_decision",
+    "reason",
+    "backup_id",
+    "retention_owner",
+    "retention_policy",
+)
+
 
 def _validate_refs(refs: Any) -> list[str]:
     """Defects in the rewritten-ref list, empty when it conforms."""
@@ -138,6 +151,20 @@ def validate_sanitation_summary(summary: Any) -> list[str]:
             defects.append(f"missing required field {field!r}")
         elif summary[field] in ("", None):
             defects.append(f"field {field!r} is empty")
+
+    # Presence is not evidence. `x in ("", None)` admits False, 0, [], and {},
+    # so a record could carry human_decision=False or retention_owner={} and
+    # report no defects while containing no decision and naming nobody. Every
+    # field C-008 expects a human to have written must actually be prose.
+    for field in _TEXT_FIELDS:
+        value: Any = summary.get(field)
+        if field in summary and (
+            not isinstance(value, str) or not value.strip()
+        ):
+            defects.append(
+                f"field {field!r} must be a non-empty string, got "
+                f"{type(value).__name__}"
+            )
 
     if summary.get("event") != SANITATION_EVENT:
         defects.append(
@@ -442,11 +469,20 @@ def audit_sanitation(entry: Any, backup: Path | None = None) -> dict[str, Any]:
 
     if backup is None:
         result["defects"] = defects
-        result["valid"] = not defects
+        result["structure_valid"] = not defects
+        # Not valid, only incomplete. C-008 defines three checks, and the one
+        # that is missing here is the only one a forged record cannot satisfy
+        # by being well-formed. Reporting VALID on two of three would let the
+        # cheapest audit look like the strongest.
+        result["valid"] = False
+        # Only incomplete when nothing else is wrong. A record with real
+        # defects that also lacks a digest check is INVALID, not merely
+        # unfinished, and reporting the softer word would bury the defect.
+        result["incomplete"] = not defects
         result["detail"] = (
-            "Structure and live chain only. Supply the backup artifact to "
-            "verify its digest; a well-formed record proves nothing about "
-            "the backup itself."
+            "Structure and live chain only, so this is incomplete rather "
+            "than valid. Supply the backup artifact to verify its digest; a "
+            "well-formed record proves nothing about the backup itself."
         )
         return result
 

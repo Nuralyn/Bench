@@ -308,7 +308,9 @@ def cmd_record_sanitation(
     return 0
 
 
-def cmd_audit_sanitation(backup: str | None = None) -> int:
+def cmd_audit_sanitation(
+    backup: str | None = None, record_hash: str | None = None
+) -> int:
     """Audit this chain's published-copy sanitation records.
 
     Read-only. It audits records; it never performs a sanitation, which is a
@@ -322,6 +324,22 @@ def cmd_audit_sanitation(backup: str | None = None) -> int:
     still verifies with an unchanged genesis; an auditor that trusted that
     claim would be checking the record against itself.
     """
+    # load_ledger is deliberately tolerant: it logs an unreadable segment and
+    # returns what it could parse. That is right for reporting, and wrong
+    # here, because a corrupt segment holding the sanitation record would
+    # produce "NONE RECORDED" and exit 0. Verify first, so absence means
+    # absence rather than unreadability.
+    chain: dict[str, Any] = verify_chain()
+    if not chain.get("valid"):
+        print(
+            f"[bench cli] refusing to audit: the chain does not verify "
+            f"({chain.get('failure_type', 'unknown')}). A record could be "
+            f"present but unreadable, so absence cannot be reported as "
+            f"absence.",
+            file=sys.stderr,
+        )
+        return 1
+
     try:
         entries: list[dict] = load_ledger()
     except LedgerReadError as exc:
@@ -336,17 +354,57 @@ def cmd_audit_sanitation(backup: str | None = None) -> int:
         print("  This chain has never had published copies sanitized.")
         return 0
 
+    if record_hash:
+        records = [r for r in records if r.get("entry_hash") == record_hash]
+        if not records:
+            print(
+                f"[bench cli] no sanitation record with entry hash "
+                f"{record_hash}",
+                file=sys.stderr,
+            )
+            return 1
+
     artifact: Path | None = Path(backup) if backup else None
+    # One artifact cannot belong to several records. Two legitimate
+    # sanitations have different backups, so applying one path to both would
+    # fail the other on a digest mismatch that is not a defect.
+    if artifact is not None and len(records) > 1:
+        print(
+            f"[bench cli] {len(records)} sanitation records exist and a "
+            f"backup was supplied. Name the one it belongs to with "
+            f"--record <entry_hash>; a backup verifies one record, not all.",
+            file=sys.stderr,
+        )
+        return 1
+
     failures: int = 0
 
     for record in records:
-        summary: dict = (record.get("change") or {}).get("diff_summary") or {}
+        # A malformed record is exactly what the auditor exists to diagnose,
+        # so reading it must not raise before the defects can be printed.
+        raw_change: Any = record.get("change")
+        change: dict[str, Any] = raw_change if isinstance(raw_change, dict) else {}
+        raw_summary: Any = change.get("diff_summary")
+        summary: dict[str, Any] = (
+            raw_summary if isinstance(raw_summary, dict) else {}
+        )
+        raw_refs: Any = summary.get("refs")
+        ref_count: int = len(raw_refs) if isinstance(raw_refs, list) else 0
+
         result: dict[str, Any] = audit_sanitation(record, artifact)
-        print(f"Sanitation: {'VALID' if result['valid'] else 'INVALID'}")
+        if result["valid"]:
+            status: str = "VALID"
+        elif result.get("incomplete"):
+            status = "INCOMPLETE"
+        else:
+            status = "INVALID"
+
+        print(f"Sanitation: {status}")
+        print(f"  entry         : {record.get('entry_hash', '-')}")
         print(f"  recorded at   : {record.get('timestamp', '-')}")
         print(f"  backup id     : {summary.get('backup_id', '-')}")
         print(f"  digest        : {summary.get('backup_digest', '-')}")
-        print(f"  refs rewritten: {len(summary.get('refs') or [])}")
+        print(f"  refs rewritten: {ref_count}")
         print(f"  retention     : {summary.get('retention_owner', '-')}")
         if result["digest_checked"]:
             print(
@@ -354,7 +412,7 @@ def cmd_audit_sanitation(backup: str | None = None) -> int:
                 f"{'matches' if result['digest_matches'] else 'DOES NOT MATCH'}"
             )
         else:
-            print("  backup digest : not checked (supply the artifact path)")
+            print("  backup digest : NOT CHECKED (supply the artifact path)")
 
         if not result["valid"]:
             failures += 1
