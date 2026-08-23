@@ -127,6 +127,27 @@ constraint. The veto is the demonstration, and it is one you control end to
 end rather than one you have to take on faith. `python -m cli verify` confirms
 your chain's integrity; `python -m cli stats` summarizes it.
 
+For what a private chain cannot show, there is an attestation:
+
+```bash
+python -m cli attest --cutoff <commitment> --bench-version 2.0.0
+```
+
+It exports one record per entry carrying the entry's commitment, its parent
+commitments, the constitution's hash, the verdict, and the constraint ids
+cited. It carries no diff, no file path, no stage prose, and no free-text
+field at all: every value must match a fixed pattern to be emitted, and a
+value that does not is excluded and counted rather than published. That is
+deliberate, because entry data is model-authored and this chain contains
+strings like `"process (CLAUDE.md Rule 15, not a numbered C-XXX constraint)"`
+sitting in a field named `constraint_id`.
+
+An attestation is evidence that a ruling was committed to, not proof the
+ruling was correct, and it is **not a backup**: nothing in it can reconstruct
+a diff. `--cutoff` is required rather than defaulting to the tip, because a
+checkpoint is a deliberate act and committing the artifact appends a new entry
+that belongs to the next one.
+
 One note on how this chain begins, so it is not mysterious. It opens with an
 `ANCHOR` entry rather than an ordinary verdict. A predecessor chain was retired
 on 2026-07-24 and archived without being published, because a globally
