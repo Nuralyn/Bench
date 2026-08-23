@@ -39,6 +39,7 @@ from ledger.sanitize import (
     INCONCLUSIVE,
     PRESENT,
     REMOVED,
+    access_established,
     build_sanitation_record,
     classify_removal,
     confirm_sanitation_interactively,
@@ -348,6 +349,40 @@ def _git_refs(args: list[str]) -> dict[str, str] | None:
     return refs
 
 
+def _gh_status(endpoint: str) -> int:
+    """HTTP status from ``gh api -i <endpoint>``, or 0 when unknown.
+
+    Returns 0 rather than raising or guessing when gh is missing, the call
+    fails, or the status cannot be parsed. classify_removal maps 0 to
+    inconclusive, so an unanswered probe can never be read as a removal
+    (C-001: the failure is surfaced, not swallowed into a pass).
+    """
+    try:
+        proc = subprocess.run(
+            ["gh", "api", "-i", endpoint],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        print(f"[bench cli] cannot run gh: {exc}", file=sys.stderr)
+        return 0
+
+    first: list[str] = (proc.stdout or proc.stderr or "").splitlines()[0:1] or [""]
+    for token in first[0].split():
+        if token.isdigit() and len(token) == 3:
+            return int(token)
+    # Logged for the same reason the OSError branch is: an unparseable
+    # response is a question that went unanswered, and it should be as
+    # diagnosable as a missing binary rather than a silent 0.
+    print(
+        f"[bench cli] no HTTP status in the response for {endpoint}: "
+        f"{first[0][:120]!r}",
+        file=sys.stderr,
+    )
+    return 0
+
+
 def cmd_verify_purge(
     manifest: str | None = None, repository: str | None = None
 ) -> int:
@@ -375,6 +410,21 @@ def cmd_verify_purge(
         print(f"[bench cli] cannot read manifest: {exc}", file=sys.stderr)
         return 1
 
+    # Prove the repository answers before interpreting any 404 under it.
+    # GitHub returns 404 for a repository that is private to this token,
+    # renamed, or misspelled, and then every object probe returns 404 too. A
+    # single transposed letter would otherwise read as a completed purge.
+    access_status: int = _gh_status(f"repos/{repository}")
+    if not access_established(access_status):
+        print(
+            f"[bench cli] cannot establish access to {repository} "
+            f"(HTTP {access_status}). Refusing to probe objects: every "
+            f"object under an unreachable repository returns 404, which "
+            f"would read as a completed purge.",
+            file=sys.stderr,
+        )
+        return 1
+
     tally: dict[str, int] = {REMOVED: 0, PRESENT: 0, INCONCLUSIVE: 0}
     problems: list[str] = []
 
@@ -394,23 +444,9 @@ def cmd_verify_purge(
             tally[INCONCLUSIVE] += 1
             continue
 
-        proc = subprocess.run(
-            ["gh", "api", "-i", endpoint],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-        )
-        first: list[str] = (
-            proc.stdout or proc.stderr or ""
-        ).splitlines()[0:1] or [""]
         # Defaults to 0 when nothing parses, and classify_removal maps 0 to
         # inconclusive. An unparseable response must never read as removed.
-        status: int = 0
-        for token in first[0].split():
-            if token.isdigit() and len(token) == 3:
-                status = int(token)
-                break
-
+        status: int = _gh_status(endpoint)
         verdict: str = classify_removal(status)
         tally[verdict] += 1
         if verdict != REMOVED:
@@ -422,6 +458,19 @@ def cmd_verify_purge(
     print(f"  removed (404)  : {tally[REMOVED]}")
     print(f"  present (200)  : {tally[PRESENT]}")
     print(f"  inconclusive   : {tally[INCONCLUSIVE]}")
+
+    # A manifest that parsed to nothing must not read as a clean sweep. With
+    # every tally at zero the checks below all pass and the command would
+    # report success having made no request at all, turning a failed
+    # manifest-generation step into a purge confirmation.
+    if total == 0:
+        print(
+            "[bench cli] the manifest yielded no objects to probe. Refusing "
+            "to report a purge that was never checked; regenerate the "
+            "manifest and re-run.",
+            file=sys.stderr,
+        )
+        return 1
 
     if tally[PRESENT] or tally[INCONCLUSIVE]:
         print("", file=sys.stderr)

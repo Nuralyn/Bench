@@ -266,6 +266,24 @@ def validate_sanitation_record(entry: Any) -> list[str]:
 
 _REPOSITORY_RE: re.Pattern = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
 
+# What a mirror push of 'refs/heads/*' and 'refs/tags/*' can reach. A ref
+# under either prefix can be created, updated, or deleted by the push, so the
+# warrant has to name it. refs/pull/* is GitHub-managed and unpushable.
+PUSHABLE_PREFIXES: tuple[str, ...] = ("refs/heads/", "refs/tags/")
+
+
+def access_established(status: int) -> bool:
+    """True when a repository probe proved the repository is reachable.
+
+    Object-level 404s only mean "removed" if the repository itself answered.
+    GitHub returns 404 for a repository that is private to the token, renamed,
+    or simply misspelled, and every object probe under it then returns 404
+    too. Without this gate a single transposed letter turns a failed purge
+    into a confirmed one, which is the most dangerous outcome available here:
+    silent, total, and final.
+    """
+    return status == 200
+
 # One endpoint per git object type. A purged set is mixed: the baseline for
 # this repository is 298 blobs, 177 trees, 79 commits, and 2 tags.
 _OBJECT_ENDPOINTS: Mapping[str, str] = {
@@ -400,6 +418,50 @@ def verify_binding(
                 f"{name}: mirror is {actual_local[:12]}, but the record "
                 f"authorizes {str(post)[:12]}. The rewrite about to be pushed "
                 f"is not the one that was authorized."
+            )
+
+    # Checking only the recorded refs leaves the push wider than the warrant.
+    # The push is 'refs/heads/*' and 'refs/tags/*', so a ref in either the
+    # remote or the mirror that the record never mentions would still be
+    # created, updated, or deleted by it, under an authorization that never
+    # named it. Bind the union of what the push can reach, not the subset the
+    # record happens to list. refs/pull/* is excluded because it is
+    # GitHub-managed and no push can touch it.
+    recorded_names: set[str] = {
+        entry.get("ref")
+        for entry in refs
+        if isinstance(entry, dict) and isinstance(entry.get("ref"), str)
+    }
+    reachable: set[str] = {
+        name
+        for name in set(remote_refs) | set(local_refs)
+        if name.startswith(PUSHABLE_PREFIXES)
+    }
+    for name in sorted(reachable - recorded_names):
+        on_remote: bool = name in remote_refs
+        in_mirror: bool = name in local_refs
+        if on_remote and not in_mirror:
+            # The push cannot delete this, but that is the smaller problem:
+            # the mirror was made without it, so the rewrite never examined
+            # it and any contaminated objects it carries survive the purge.
+            defects.append(
+                f"{name}: on the remote but absent from the mirror and "
+                f"unrecorded. The rewrite never covered it, so anything it "
+                f"carries survives the purge. Re-clone the mirror."
+            )
+        elif in_mirror and not on_remote:
+            defects.append(
+                f"{name}: in the mirror but not on the remote and "
+                f"unrecorded. The push would create it under a warrant that "
+                f"never mentioned it."
+            )
+        else:
+            # In both. A name absent from both cannot reach here: `reachable`
+            # is built from the union of the two mappings, so every name in
+            # it belongs to at least one.
+            defects.append(
+                f"{name}: present on both sides but unrecorded. The push "
+                f"would update it under a warrant that never mentioned it."
             )
 
     return defects

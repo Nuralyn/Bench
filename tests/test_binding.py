@@ -28,6 +28,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from ledger.sanitize import (  # noqa: E402
     INCONCLUSIVE,
+    access_established,
     PRESENT,
     REMOVED,
     SanitationError,
@@ -205,6 +206,73 @@ class RemovalClassificationTests(unittest.TestCase):
     def test_unparseable_response_is_not_removed(self) -> None:
         """Status 0 is what the caller uses when nothing parsed."""
         self.assertNotEqual(classify_removal(0), REMOVED)
+
+
+class UnrecordedRefTests(unittest.TestCase):
+    """The push is refs/heads/* and refs/tags/*, not just the recorded refs.
+
+    Checking only what the record lists leaves the push wider than the
+    warrant: a ref present in the remote or the mirror that the record never
+    mentions would still be created, updated, or deleted by it.
+    """
+
+    def test_unrecorded_ref_in_the_mirror_is_refused(self) -> None:
+        defects = verify_binding(
+            _summary(),
+            _REPO,
+            remote_refs={"refs/heads/main": _PRE},
+            local_refs={"refs/heads/main": _POST, "refs/heads/extra": _OTHER},
+        )
+        self.assertTrue(any("refs/heads/extra" in d for d in defects))
+        self.assertTrue(any("would create it" in d for d in defects))
+
+    def test_unrecorded_ref_on_the_remote_is_refused(self) -> None:
+        defects = verify_binding(
+            _summary(),
+            _REPO,
+            remote_refs={"refs/heads/main": _PRE, "refs/heads/release": _OTHER},
+            local_refs={"refs/heads/main": _POST},
+        )
+        self.assertTrue(any("refs/heads/release" in d for d in defects))
+        # The push cannot delete it; the real problem is that the rewrite
+        # never covered it, so anything it carries survives the purge.
+        self.assertTrue(any("survives the purge" in d for d in defects))
+        self.assertTrue(any("Re-clone the mirror" in d for d in defects))
+
+    def test_unrecorded_tag_is_refused(self) -> None:
+        defects = verify_binding(
+            _summary(),
+            _REPO,
+            remote_refs={"refs/heads/main": _PRE, "refs/tags/v9.9.9": _OTHER},
+            local_refs={"refs/heads/main": _POST, "refs/tags/v9.9.9": _OTHER},
+        )
+        self.assertTrue(any("refs/tags/v9.9.9" in d for d in defects))
+
+    def test_github_managed_pull_refs_are_not_required(self) -> None:
+        """refs/pull/* is unpushable, so a warrant need not name it."""
+        defects = verify_binding(
+            _summary(),
+            _REPO,
+            remote_refs={"refs/heads/main": _PRE, "refs/pull/12/head": _OTHER},
+            local_refs={"refs/heads/main": _POST},
+        )
+        self.assertEqual(defects, [])
+
+
+class RepositoryAccessTests(unittest.TestCase):
+    """A 404 only means 'removed' if the repository itself answered."""
+
+    def test_only_200_establishes_access(self) -> None:
+        self.assertTrue(access_established(200))
+
+    def test_a_404_repository_does_not_establish_access(self) -> None:
+        """A misspelled or private repo 404s, and so does every object in it."""
+        self.assertFalse(access_established(404))
+
+    def test_auth_and_error_statuses_do_not_establish_access(self) -> None:
+        for status in (0, 301, 401, 403, 429, 500, 502):
+            with self.subTest(status=status):
+                self.assertFalse(access_established(status))
 
 
 class BackupCopyTests(unittest.TestCase):
