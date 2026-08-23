@@ -14,6 +14,7 @@ lives in ``ledger/retire.py``, and this module only parses arguments, supplies
 the real ``sys.stdin.isatty`` and ``input``, and renders the result.
 """
 
+import json
 import os
 import stat
 import sys
@@ -22,10 +23,21 @@ import webbrowser
 from pathlib import Path
 from typing import Any
 
-from ledger.chain import LedgerReadError, load_ledger, resolve_ledger_path
+from ledger.chain import (
+    LedgerReadError,
+    append_entry,
+    load_ledger,
+    resolve_ledger_path,
+)
 from ledger.attestation import AttestationError, build_attestation, render
 from ledger.migrate import migrate_ledger
-from ledger.sanitize import SANITATION_VERDICT, audit_sanitation
+from ledger.sanitize import (
+    SANITATION_VERDICT,
+    SanitationError,
+    audit_sanitation,
+    build_sanitation_record,
+    confirm_sanitation_interactively,
+)
 from ledger.retire import (
     ANCHOR_TOOL,
     RetirementError,
@@ -194,6 +206,105 @@ def cmd_attest(
     )
     if unmapped:
         print(f"  unmapped    : {unmapped} citation(s) excluded as non-ids")
+    return 0
+
+
+def cmd_record_sanitation(
+    refs_file: str | None = None,
+    backup_id: str | None = None,
+    backup_digest: str | None = None,
+    reason: str | None = None,
+    retention_owner: str | None = None,
+    retention_policy: str | None = None,
+) -> int:
+    """Append a published-copy sanitation record to the live chain.
+
+    Run this AFTER the rewrite and BEFORE the force-push. The record names
+    post-image hashes, so it cannot be written until the rewrite exists; and
+    C-008 makes an unrecorded removal a violation, so the rewritten history
+    must not be published until the record does.
+
+    Refuses outside a plain TTY and inside an agent session, refuses a record
+    that does not conform, and refuses to report success if the chain does
+    not still verify afterwards.
+    """
+    missing: list[str] = [
+        name
+        for name, value in (
+            ("--refs-file", refs_file),
+            ("--backup-id", backup_id),
+            ("--backup-digest", backup_digest),
+            ("--reason", reason),
+            ("--retention-owner", retention_owner),
+            ("--retention-policy", retention_policy),
+        )
+        if not value
+    ]
+    if missing:
+        print(
+            f"[bench cli] record-sanitation requires {', '.join(missing)}. "
+            f"C-008 enumerates every field; none of them has a default.",
+            file=sys.stderr,
+        )
+        return 1
+
+    try:
+        payload: dict[str, Any] = json.loads(
+            Path(str(refs_file)).read_text(encoding="utf-8")
+        )
+    except (OSError, ValueError) as exc:
+        print(f"[bench cli] cannot read refs file: {exc}", file=sys.stderr)
+        return 1
+
+    refs: Any = payload.get("refs")
+    if not isinstance(refs, list):
+        print(
+            "[bench cli] refs file must contain a 'refs' list of "
+            "{ref, pre_image, post_image} objects.",
+            file=sys.stderr,
+        )
+        return 1
+
+    genesis_before: str = str(verify_chain().get("genesis_hash", ""))
+
+    try:
+        decision: str = confirm_sanitation_interactively(
+            refs, str(backup_id)
+        )
+        record: dict[str, Any] = build_sanitation_record(
+            refs=refs,
+            backup_id=str(backup_id),
+            backup_digest=str(backup_digest),
+            reason=str(reason),
+            human_decision=decision,
+            retention_owner=str(retention_owner),
+            retention_policy=str(retention_policy),
+        )
+    except SanitationError as exc:
+        print(f"[bench cli] {exc}", file=sys.stderr)
+        return 1
+
+    appended: dict[str, Any] = append_entry(record)
+
+    # C-008(d): the chain this operation promised not to touch must still
+    # verify, with the same genesis it had before.
+    after: dict[str, Any] = verify_chain()
+    if not after.get("valid") or after.get("genesis_hash") != genesis_before:
+        print(
+            "[bench cli] the record was appended but the chain no longer "
+            f"verifies as expected ({after.get('failure_type', 'genesis moved')}). "
+            "Do NOT push the rewritten history; resolve this first.",
+            file=sys.stderr,
+        )
+        return 1
+
+    print("Sanitation: RECORDED")
+    print(f"  entry        : {appended.get('entry_hash', '-')}")
+    print(f"  refs recorded: {len(refs)}")
+    print(f"  backup id    : {backup_id}")
+    print(f"  chain        : VALID, genesis {genesis_before[:12]} unchanged")
+    print("  next         : verify with 'python -m cli audit-sanitation "
+          "<backup>', then push.")
     return 0
 
 

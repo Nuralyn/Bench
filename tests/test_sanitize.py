@@ -22,10 +22,14 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from ledger.sanitize import (  # noqa: E402
+    CONFIRMATION_PHRASE,
     DIGEST_ALGORITHM,
     SANITATION_EVENT,
     SANITATION_VERDICT,
+    SanitationError,
     audit_sanitation,
+    build_sanitation_record,
+    confirm_sanitation_interactively,
     digest_file,
     validate_sanitation_record,
     validate_sanitation_summary,
@@ -266,6 +270,125 @@ class AuditTests(unittest.TestCase):
         with patch("ledger.verify.verify_chain", return_value=grown):
             result = audit_sanitation(record, self.backup)
         self.assertTrue(result["valid"])
+
+
+class HumanGateTests(unittest.TestCase):
+    """C-008(a): a human at a plain TTY, never agent-initiated."""
+
+    def _refs(self) -> list[dict]:
+        return [
+            {
+                "ref": "refs/heads/main",
+                "pre_image": "1" * 40,
+                "post_image": "2" * 40,
+            }
+        ]
+
+    def test_refuses_inside_an_agent_session(self) -> None:
+        for marker in ("CLAUDECODE", "BENCH_SUBPROCESS", "CI"):
+            with self.subTest(marker=marker):
+                with self.assertRaises(SanitationError) as ctx:
+                    confirm_sanitation_interactively(
+                        self._refs(), "BKP-1", env={marker: "1"}
+                    )
+                self.assertIn(marker, str(ctx.exception))
+
+    def test_refuses_without_a_tty(self) -> None:
+        with self.assertRaises(SanitationError) as ctx:
+            confirm_sanitation_interactively(
+                self._refs(), "BKP-1", env={}, stdin_isatty=lambda: False
+            )
+        self.assertIn("not a TTY", str(ctx.exception))
+
+    def test_refuses_on_wrong_phrase(self) -> None:
+        with self.assertRaises(SanitationError) as ctx:
+            confirm_sanitation_interactively(
+                self._refs(),
+                "BKP-1",
+                env={},
+                stdin_isatty=lambda: True,
+                prompt=lambda _: "yes",
+            )
+        self.assertIn("Nothing was recorded", str(ctx.exception))
+
+    def test_accepts_the_exact_phrase(self) -> None:
+        decision = confirm_sanitation_interactively(
+            self._refs(),
+            "BKP-1",
+            env={},
+            stdin_isatty=lambda: True,
+            prompt=lambda _: CONFIRMATION_PHRASE,
+        )
+        self.assertIn("Confirmed interactively at a TTY", decision)
+        self.assertIn("Not agent-initiated", decision)
+
+    def test_phrase_differs_from_retirement(self) -> None:
+        """Muscle memory from one ceremony must not carry the other."""
+        from ledger.retire import CONFIRMATION_PHRASE as RETIRE_PHRASE
+
+        self.assertNotEqual(CONFIRMATION_PHRASE, RETIRE_PHRASE)
+
+
+class BuildRecordTests(unittest.TestCase):
+    """The chain fields are read from the chain, not taken on trust."""
+
+    def _refs(self) -> list[dict]:
+        return [
+            {
+                "ref": "refs/heads/main",
+                "pre_image": "1" * 40,
+                "post_image": "2" * 40,
+            }
+        ]
+
+    def _build(self, live: dict) -> dict:
+        with patch("ledger.verify.verify_chain", return_value=live):
+            return build_sanitation_record(
+                refs=self._refs(),
+                backup_id="BKP-A7F3",
+                backup_digest="b" * 64,
+                reason="published copies held unrelated source",
+                human_decision="Confirmed at a TTY.",
+                retention_owner="repository owner",
+                retention_policy="destroyed once confirmed",
+            )
+
+    def test_chain_fields_come_from_the_chain(self) -> None:
+        record = self._build(
+            {"valid": True, "genesis_hash": _GENESIS, "entries": 448}
+        )
+        summary = record["change"]["diff_summary"]
+        self.assertTrue(summary["chain_verified_valid"])
+        self.assertEqual(summary["chain_genesis_hash"], _GENESIS)
+        self.assertEqual(summary["chain_entry_count"], 448)
+        self.assertEqual(summary["backup_digest_algorithm"], DIGEST_ALGORITHM)
+        self.assertEqual(record["verdict"], SANITATION_VERDICT)
+
+    def test_conforming_record_validates(self) -> None:
+        record = self._build(
+            {"valid": True, "genesis_hash": _GENESIS, "entries": 448}
+        )
+        self.assertEqual(validate_sanitation_record(record), [])
+
+    def test_broken_chain_refuses_to_build(self) -> None:
+        """A record cannot assert a validity the chain does not have."""
+        with self.assertRaises(SanitationError) as ctx:
+            self._build({"valid": False, "failure_type": "MISSING_PARENT"})
+        self.assertIn("chain_verified_valid", str(ctx.exception))
+
+    def test_malformed_ref_refuses_to_build(self) -> None:
+        live = {"valid": True, "genesis_hash": _GENESIS, "entries": 448}
+        with patch("ledger.verify.verify_chain", return_value=live):
+            with self.assertRaises(SanitationError):
+                build_sanitation_record(
+                    refs=[{"ref": "main", "pre_image": "x", "post_image": "y"}],
+                    backup_id="BKP-1",
+                    backup_digest="b" * 64,
+                    reason="r",
+                    human_decision="d",
+                    retention_owner="o",
+                    retention_policy="p",
+                )
 
 
 class CliAuditTests(unittest.TestCase):

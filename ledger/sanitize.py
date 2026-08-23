@@ -46,14 +46,19 @@ from inside an agent session.
 """
 
 import hashlib
+import os
 import re
 import sys
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
 SANITATION_EVENT: str = "published_copy_sanitation"
 SANITATION_VERDICT: str = "SANITATION"
 DIGEST_ALGORITHM: str = "sha256"
+# Typed verbatim to confirm. Distinct from retirement's phrase so muscle
+# memory from one ceremony cannot carry a human through the other.
+CONFIRMATION_PHRASE: str = "SANITIZE PUBLISHED COPIES"
 
 _SHA256_RE: re.Pattern = re.compile(r"^[0-9a-f]{64}$")
 _GIT_SHA_RE: re.Pattern = re.compile(r"^[0-9a-f]{40}$")
@@ -215,6 +220,141 @@ def validate_sanitation_record(entry: Any) -> list[str]:
 
     defects.extend(validate_sanitation_summary(change.get("diff_summary")))
     return defects
+
+
+def confirm_sanitation_interactively(
+    refs: list[dict[str, Any]],
+    backup_id: str,
+    *,
+    stdin_isatty: Callable[[], bool] | None = None,
+    prompt: Callable[[str], str] | None = None,
+    env: Mapping[str, str] | None = None,
+) -> str:
+    """Enforce C-008(a) and return the recorded human decision.
+
+    Deliberately reuses retirement's markers rather than defining a parallel
+    set: two gates that drift apart would leave the weaker one as the real
+    boundary.
+
+    The callables are injectable so tests never need a real TTY, and are
+    resolved at call time rather than bound at import so a replaced
+    ``sys.stdin`` is honoured.
+    """
+    from ledger.retire import AGENT_ENV_MARKERS
+
+    environment: Mapping[str, str] = env if env is not None else os.environ
+    tripped: list[str] = [
+        marker
+        for marker in AGENT_ENV_MARKERS
+        if str(environment.get(marker, "")).strip()
+    ]
+    if tripped:
+        raise SanitationError(
+            f"refusing to record a sanitation: {', '.join(tripped)} set in "
+            f"the environment, so this is not a human at a plain terminal. "
+            f"C-008(a) requires an explicit human decision that is never "
+            f"automated or agent-initiated."
+        )
+
+    isatty: Callable[[], bool] = (
+        stdin_isatty if stdin_isatty is not None else sys.stdin.isatty
+    )
+    if not isatty():
+        raise SanitationError(
+            "refusing to record a sanitation: stdin is not a TTY, so no "
+            "human confirmation is possible. C-008(a) requires an explicit "
+            "human decision."
+        )
+
+    ask: Callable[[str], str] = prompt if prompt is not None else input
+    banner: str = (
+        f"\nAbout to record a published-copy sanitation.\n"
+        f"  refs rewritten : {len(refs)}\n"
+        f"  backup id      : {backup_id}\n"
+        f"This asserts that a human authorized removing published copies and\n"
+        f"that the backup exists and verifies.\n"
+        f"Type {CONFIRMATION_PHRASE} to confirm: "
+    )
+    if ask(banner).strip() != CONFIRMATION_PHRASE:
+        raise SanitationError(
+            "aborted: confirmation phrase not matched. Nothing was recorded."
+        )
+
+    return (
+        f"Confirmed interactively at a TTY by typing the required phrase "
+        f"verbatim, authorizing removal of published copies across "
+        f"{len(refs)} reference(s). Not agent-initiated."
+    )
+
+
+def build_sanitation_record(
+    refs: list[dict],
+    backup_id: str,
+    backup_digest: str,
+    reason: str,
+    human_decision: str,
+    retention_owner: str,
+    retention_policy: str,
+) -> dict[str, Any]:
+    """Assemble a sanitation record, filling the chain fields from the chain.
+
+    ``chain_verified_valid``, ``chain_genesis_hash`` and
+    ``chain_entry_count`` are read here rather than supplied by the caller.
+    They are assertions about the chain's state at the moment of sanitation,
+    so taking them from a human's typing would let a stale or invented value
+    into the one place an auditor checks against reality. Reading them inline
+    also keeps them contemporaneous: a governed edit landing between the
+    rewrite and the record would otherwise shift the count.
+
+    Raises ``SanitationError`` when the assembled record does not conform, so
+    a non-conforming record cannot reach the chain and be mistaken later for
+    one that satisfied the constraint.
+    """
+    from ledger.verify import verify_chain
+
+    live: dict = verify_chain()
+    summary: dict[str, Any] = {
+        "event": SANITATION_EVENT,
+        "human_decision": human_decision,
+        "reason": reason,
+        "refs": refs,
+        "backup_id": backup_id,
+        "backup_digest_algorithm": DIGEST_ALGORITHM,
+        "backup_digest": backup_digest,
+        "retention_owner": retention_owner,
+        "retention_policy": retention_policy,
+        "chain_verified_valid": bool(live.get("valid")),
+        "chain_genesis_hash": live.get("genesis_hash", ""),
+        "chain_entry_count": live.get("entries", 0),
+    }
+    record: dict[str, Any] = {
+        "verdict": SANITATION_VERDICT,
+        "pipeline_error": False,
+        "change": {
+            "file": "published copies",
+            "tool": "PublishedCopySanitation",
+            "diff_summary": summary,
+        },
+        "challenger": {},
+        "defender": {},
+        "oracle": {},
+    }
+
+    defects: list[str] = validate_sanitation_record(record)
+    if defects:
+        raise SanitationError(
+            "refusing to record a non-conforming sanitation: "
+            + "; ".join(defects)
+        )
+    return record
+
+
+class SanitationError(Exception):
+    """A defect that must stop a sanitation from being recorded.
+
+    Raised rather than returned so a caller cannot append a record it failed
+    to inspect.
+    """
 
 
 def digest_file(path: Path) -> str | None:
