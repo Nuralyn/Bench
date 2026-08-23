@@ -17,6 +17,7 @@ the real ``sys.stdin.isatty`` and ``input``, and renders the result.
 import json
 import os
 import stat
+import subprocess
 import sys
 import tempfile
 import webbrowser
@@ -35,8 +36,15 @@ from ledger.sanitize import (
     SANITATION_VERDICT,
     SanitationError,
     audit_sanitation,
+    INCONCLUSIVE,
+    PRESENT,
+    REMOVED,
+    access_established,
     build_sanitation_record,
+    classify_removal,
     confirm_sanitation_interactively,
+    object_endpoint,
+    verify_binding,
 )
 from ledger.retire import (
     ANCHOR_TOOL,
@@ -216,6 +224,7 @@ def cmd_record_sanitation(
     reason: str | None = None,
     retention_owner: str | None = None,
     retention_policy: str | None = None,
+    repository: str | None = None,
 ) -> int:
     """Append a published-copy sanitation record to the live chain.
 
@@ -237,6 +246,7 @@ def cmd_record_sanitation(
             ("--reason", reason),
             ("--retention-owner", retention_owner),
             ("--retention-policy", retention_policy),
+            ("--repository", repository),
         )
         if not value
     ]
@@ -279,6 +289,7 @@ def cmd_record_sanitation(
             human_decision=decision,
             retention_owner=str(retention_owner),
             retention_policy=str(retention_policy),
+            repository=str(repository),
         )
     except SanitationError as exc:
         print(f"[bench cli] {exc}", file=sys.stderr)
@@ -305,6 +316,277 @@ def cmd_record_sanitation(
     print(f"  chain        : VALID, genesis {genesis_before[:12]} unchanged")
     print("  next         : verify with 'python -m cli audit-sanitation "
           "<backup>', then push.")
+    return 0
+
+
+def _git_refs(args: list[str]) -> dict[str, str] | None:
+    """Run a git ref-listing command into a {refname: sha} map.
+
+    Returns None on failure rather than an empty map, because "no refs" and
+    "could not read refs" must not look alike to a gate that refuses on
+    mismatch.
+    """
+    try:
+        proc = subprocess.run(
+            args, capture_output=True, text=True, encoding="utf-8"
+        )
+    except OSError as exc:
+        print(f"[bench cli] cannot run git: {exc}", file=sys.stderr)
+        return None
+    if proc.returncode != 0:
+        print(
+            f"[bench cli] git failed: {proc.stderr.strip()}", file=sys.stderr
+        )
+        return None
+
+    refs: dict[str, str] = {}
+    for line in proc.stdout.splitlines():
+        parts = line.split()
+        if len(parts) == 2:
+            sha, name = parts[0], parts[1]
+            if not name.endswith("^{}"):
+                refs[name] = sha
+    return refs
+
+
+def _gh_status(endpoint: str) -> int:
+    """HTTP status from ``gh api -i <endpoint>``, or 0 when unknown.
+
+    Returns 0 rather than raising or guessing when gh is missing, the call
+    fails, or the status cannot be parsed. classify_removal maps 0 to
+    inconclusive, so an unanswered probe can never be read as a removal
+    (C-001: the failure is surfaced, not swallowed into a pass).
+    """
+    try:
+        proc = subprocess.run(
+            ["gh", "api", "-i", endpoint],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        print(f"[bench cli] cannot run gh: {exc}", file=sys.stderr)
+        return 0
+
+    first: list[str] = (proc.stdout or proc.stderr or "").splitlines()[0:1] or [""]
+    for token in first[0].split():
+        if token.isdigit() and len(token) == 3:
+            return int(token)
+    # Logged for the same reason the OSError branch is: an unparseable
+    # response is a question that went unanswered, and it should be as
+    # diagnosable as a missing binary rather than a silent 0.
+    print(
+        f"[bench cli] no HTTP status in the response for {endpoint}: "
+        f"{first[0][:120]!r}",
+        file=sys.stderr,
+    )
+    return 0
+
+
+def cmd_verify_purge(
+    manifest: str | None = None, repository: str | None = None
+) -> int:
+    """Prove purged objects are actually gone from a repository.
+
+    Probes each object at the endpoint for its own type. Reports success only
+    when every object answered 404. A 403, a rate limit, an expired token, or
+    any 5xx is counted as inconclusive and fails the check, because the
+    dangerous outcome here is a silent false all-clear: believing a purge
+    finished when the objects are still served.
+    """
+    if not manifest or not repository:
+        print(
+            "[bench cli] verify-purge requires --manifest <tsv> and "
+            "--repository <owner/name>.",
+            file=sys.stderr,
+        )
+        return 1
+
+    try:
+        lines: list[str] = (
+            Path(manifest).read_text(encoding="utf-8").splitlines()
+        )
+    except OSError as exc:
+        print(f"[bench cli] cannot read manifest: {exc}", file=sys.stderr)
+        return 1
+
+    # Prove the repository answers before interpreting any 404 under it.
+    # GitHub returns 404 for a repository that is private to this token,
+    # renamed, or misspelled, and then every object probe returns 404 too. A
+    # single transposed letter would otherwise read as a completed purge.
+    access_status: int = _gh_status(f"repos/{repository}")
+    if not access_established(access_status):
+        print(
+            f"[bench cli] cannot establish access to {repository} "
+            f"(HTTP {access_status}). Refusing to probe objects: every "
+            f"object under an unreachable repository returns 404, which "
+            f"would read as a completed purge.",
+            file=sys.stderr,
+        )
+        return 1
+
+    tally: dict[str, int] = {REMOVED: 0, PRESENT: 0, INCONCLUSIVE: 0}
+    problems: list[str] = []
+
+    for line in lines:
+        if not line.strip():
+            continue
+        parts: list[str] = line.split("\t")
+        if len(parts) != 2:
+            problems.append(f"malformed manifest line: {line!r}")
+            tally[INCONCLUSIVE] += 1
+            continue
+        sha, object_type = parts[0].strip(), parts[1].strip()
+        try:
+            endpoint: str = object_endpoint(object_type, repository, sha)
+        except SanitationError as exc:
+            problems.append(str(exc))
+            tally[INCONCLUSIVE] += 1
+            continue
+
+        # Defaults to 0 when nothing parses, and classify_removal maps 0 to
+        # inconclusive. An unparseable response must never read as removed.
+        status: int = _gh_status(endpoint)
+        verdict: str = classify_removal(status)
+        tally[verdict] += 1
+        if verdict != REMOVED:
+            problems.append(f"{sha} ({object_type}): HTTP {status} -> {verdict}")
+
+    total: int = sum(tally.values())
+    print(f"Purge check: {repository}")
+    print(f"  objects probed : {total}")
+    print(f"  removed (404)  : {tally[REMOVED]}")
+    print(f"  present (200)  : {tally[PRESENT]}")
+    print(f"  inconclusive   : {tally[INCONCLUSIVE]}")
+
+    # A manifest that parsed to nothing must not read as a clean sweep. With
+    # every tally at zero the checks below all pass and the command would
+    # report success having made no request at all, turning a failed
+    # manifest-generation step into a purge confirmation.
+    if total == 0:
+        print(
+            "[bench cli] the manifest yielded no objects to probe. Refusing "
+            "to report a purge that was never checked; regenerate the "
+            "manifest and re-run.",
+            file=sys.stderr,
+        )
+        return 1
+
+    if tally[PRESENT] or tally[INCONCLUSIVE]:
+        print("", file=sys.stderr)
+        for problem in problems[:20]:
+            print(f"  {problem}", file=sys.stderr)
+        if len(problems) > 20:
+            print(f"  ... and {len(problems) - 20} more", file=sys.stderr)
+        print(
+            "\nNOT PROVEN REMOVED. An inconclusive answer is not a pass: "
+            "re-run when the API answers cleanly.",
+            file=sys.stderr,
+        )
+        return 1
+
+    print("  all objects answered 404 at their own endpoint")
+    return 0
+
+
+def cmd_verify_sanitation_binding(
+    record_hash: str | None = None,
+    mirror: str | None = None,
+    repository: str | None = None,
+) -> int:
+    """Bind a sanitation warrant to the rewrite about to be pushed.
+
+    audit-sanitation answers "is this record well formed and is the chain
+    intact". That is not the same question as "does this record authorize
+    THIS rewrite of THIS repository, right now, and has it not already been
+    used". A well-formed record is a warrant with no name on it.
+
+    Reads the live remote and the local mirror and compares both against the
+    record, so the gate refuses on a moved remote, a mirror holding a
+    different rewrite, a record for another repository, or a warrant already
+    spent by an earlier push.
+    """
+    missing: list[str] = [
+        name
+        for name, value in (
+            ("--record", record_hash),
+            ("--mirror", mirror),
+            ("--repository", repository),
+        )
+        if not value
+    ]
+    if missing:
+        print(
+            f"[bench cli] verify-sanitation-binding requires "
+            f"{', '.join(missing)}.",
+            file=sys.stderr,
+        )
+        return 1
+
+    chain: dict[str, Any] = verify_chain()
+    if not chain.get("valid"):
+        print(
+            f"[bench cli] the chain does not verify "
+            f"({chain.get('failure_type', 'unknown')}); a record read from it "
+            f"cannot be trusted.",
+            file=sys.stderr,
+        )
+        return 1
+
+    try:
+        entries: list[dict] = load_ledger()
+    except LedgerReadError as exc:
+        print(f"[bench cli] cannot read ledger: {exc}", file=sys.stderr)
+        return 1
+
+    matches: list[dict] = [
+        e
+        for e in entries
+        if e.get("verdict") == SANITATION_VERDICT
+        and e.get("entry_hash") == record_hash
+    ]
+    if not matches:
+        print(
+            f"[bench cli] no sanitation record with entry hash {record_hash}",
+            file=sys.stderr,
+        )
+        return 1
+
+    raw_change: Any = matches[0].get("change")
+    change: dict[str, Any] = raw_change if isinstance(raw_change, dict) else {}
+    raw_summary: Any = change.get("diff_summary")
+    summary: dict[str, Any] = (
+        raw_summary if isinstance(raw_summary, dict) else {}
+    )
+
+    remote_refs: dict[str, str] | None = _git_refs(
+        ["git", "ls-remote", f"https://github.com/{repository}.git"]
+    )
+    local_refs: dict[str, str] | None = _git_refs(
+        ["git", "-C", str(mirror), "for-each-ref", "--format=%(objectname) %(refname)"]
+    )
+    if remote_refs is None or local_refs is None:
+        print(
+            "[bench cli] could not read refs; refusing rather than assuming.",
+            file=sys.stderr,
+        )
+        return 1
+
+    defects: list[str] = verify_binding(
+        summary, str(repository), remote_refs, local_refs
+    )
+
+    print(f"Binding: {'BOUND' if not defects else 'NOT BOUND'}")
+    print(f"  record     : {record_hash}")
+    print(f"  repository : {repository}")
+    print(f"  remote refs: {len(remote_refs)}")
+    print(f"  mirror refs: {len(local_refs)}")
+    if defects:
+        for defect in defects:
+            print(f"  defect     : {defect}", file=sys.stderr)
+        return 1
+    print("  every recorded ref matches the remote pre-image and the mirror "
+          "post-image, and the warrant is unspent")
     return 0
 
 

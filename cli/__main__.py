@@ -18,6 +18,8 @@ from cli.commands import (
     cmd_retire,
     cmd_stats,
     cmd_verify,
+    cmd_verify_purge,
+    cmd_verify_sanitation_binding,
     cmd_viewer,
 )
 
@@ -138,6 +140,18 @@ def main(argv: list[str]) -> int:
             reason=_flag_value(rest, "--reason"),
             retention_owner=_flag_value(rest, "--retention-owner"),
             retention_policy=_flag_value(rest, "--retention-policy"),
+            repository=_flag_value(rest, "--repository"),
+        )
+    if command == "verify-purge":
+        return cmd_verify_purge(
+            manifest=_flag_value(rest, "--manifest"),
+            repository=_flag_value(rest, "--repository"),
+        )
+    if command == "verify-sanitation-binding":
+        return cmd_verify_sanitation_binding(
+            record_hash=_flag_value(rest, "--record"),
+            mirror=_flag_value(rest, "--mirror"),
+            repository=_flag_value(rest, "--repository"),
         )
     if command == "audit-sanitation":
         # Positionally aware: skip a flag and the value that follows it,
