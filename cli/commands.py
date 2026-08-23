@@ -14,15 +14,30 @@ lives in ``ledger/retire.py``, and this module only parses arguments, supplies
 the real ``sys.stdin.isatty`` and ``input``, and renders the result.
 """
 
+import json
 import os
 import stat
 import sys
 import tempfile
 import webbrowser
+from pathlib import Path
 from typing import Any
 
-from ledger.chain import LedgerReadError, load_ledger, resolve_ledger_path
+from ledger.chain import (
+    LedgerReadError,
+    append_entry,
+    load_ledger,
+    resolve_ledger_path,
+)
+from ledger.attestation import AttestationError, build_attestation, render
 from ledger.migrate import migrate_ledger
+from ledger.sanitize import (
+    SANITATION_VERDICT,
+    SanitationError,
+    audit_sanitation,
+    build_sanitation_record,
+    confirm_sanitation_interactively,
+)
 from ledger.retire import (
     ANCHOR_TOOL,
     RetirementError,
@@ -126,6 +141,285 @@ def cmd_verify() -> int:
     print(f"  found           : {result.get('found', '-')}", file=sys.stderr)
     print(f"  message         : {result.get('message', '-')}", file=sys.stderr)
     return 1
+
+
+def cmd_attest(
+    cutoff: str | None = None,
+    bench_version: str | None = None,
+    out: str | None = None,
+) -> int:
+    """Export a public attestation for entries up to a declared cutoff.
+
+    The operational chain stays private because it records content. This
+    emits commitments instead: hashes, verdicts, and constraint citations,
+    with no diff, no path, and no stage prose. It is evidence that a ruling
+    happened, not proof the ruling was right, and it is not a backup, since
+    nothing in it can reconstruct what was governed.
+
+    ``--cutoff`` is required rather than defaulting to the tip. A checkpoint
+    is a deliberate act, and committing the artifact appends a new entry
+    that necessarily falls after the cutoff, which is what stops the export
+    from chasing its own tail.
+    """
+    if not cutoff:
+        print(
+            "[bench cli] attest requires --cutoff <commitment>. A checkpoint "
+            "declares a fixed boundary; it does not track the live tip.",
+            file=sys.stderr,
+        )
+        return 1
+    if not bench_version:
+        print(
+            "[bench cli] attest requires --bench-version <x.y.z>.",
+            file=sys.stderr,
+        )
+        return 1
+
+    try:
+        entries: list[dict] = load_ledger()
+    except LedgerReadError as exc:
+        print(f"[bench cli] cannot read ledger: {exc}", file=sys.stderr)
+        return 1
+
+    try:
+        document: dict[str, Any] = build_attestation(
+            entries, cutoff, bench_version
+        )
+    except AttestationError as exc:
+        print(f"[bench cli] attestation refused: {exc}", file=sys.stderr)
+        return 1
+
+    target: Path = Path(out) if out else Path("attestation.json")
+    try:
+        target.write_text(render(document), encoding="utf-8")
+    except OSError as exc:
+        print(f"[bench cli] cannot write attestation: {exc}", file=sys.stderr)
+        return 1
+
+    print("Attestation: WRITTEN")
+    print(f"  file        : {_display_path(str(target))}")
+    print(f"  bench version: {document['bench_version']}")
+    print(f"  cutoff      : {document['cutoff_commitment']}")
+    print(f"  records     : {document['record_count']}")
+    unmapped: int = sum(
+        r["unmapped_citation_count"] for r in document["records"]
+    )
+    if unmapped:
+        print(f"  unmapped    : {unmapped} citation(s) excluded as non-ids")
+    return 0
+
+
+def cmd_record_sanitation(
+    refs_file: str | None = None,
+    backup_id: str | None = None,
+    backup_digest: str | None = None,
+    reason: str | None = None,
+    retention_owner: str | None = None,
+    retention_policy: str | None = None,
+) -> int:
+    """Append a published-copy sanitation record to the live chain.
+
+    Run this AFTER the rewrite and BEFORE the force-push. The record names
+    post-image hashes, so it cannot be written until the rewrite exists; and
+    C-008 makes an unrecorded removal a violation, so the rewritten history
+    must not be published until the record does.
+
+    Refuses outside a plain TTY and inside an agent session, refuses a record
+    that does not conform, and refuses to report success if the chain does
+    not still verify afterwards.
+    """
+    missing: list[str] = [
+        name
+        for name, value in (
+            ("--refs-file", refs_file),
+            ("--backup-id", backup_id),
+            ("--backup-digest", backup_digest),
+            ("--reason", reason),
+            ("--retention-owner", retention_owner),
+            ("--retention-policy", retention_policy),
+        )
+        if not value
+    ]
+    if missing:
+        print(
+            f"[bench cli] record-sanitation requires {', '.join(missing)}. "
+            f"C-008 enumerates every field; none of them has a default.",
+            file=sys.stderr,
+        )
+        return 1
+
+    try:
+        payload: dict[str, Any] = json.loads(
+            Path(str(refs_file)).read_text(encoding="utf-8")
+        )
+    except (OSError, ValueError) as exc:
+        print(f"[bench cli] cannot read refs file: {exc}", file=sys.stderr)
+        return 1
+
+    refs: Any = payload.get("refs")
+    if not isinstance(refs, list):
+        print(
+            "[bench cli] refs file must contain a 'refs' list of "
+            "{ref, pre_image, post_image} objects.",
+            file=sys.stderr,
+        )
+        return 1
+
+    genesis_before: str = str(verify_chain().get("genesis_hash", ""))
+
+    try:
+        decision: str = confirm_sanitation_interactively(
+            refs, str(backup_id)
+        )
+        record: dict[str, Any] = build_sanitation_record(
+            refs=refs,
+            backup_id=str(backup_id),
+            backup_digest=str(backup_digest),
+            reason=str(reason),
+            human_decision=decision,
+            retention_owner=str(retention_owner),
+            retention_policy=str(retention_policy),
+        )
+    except SanitationError as exc:
+        print(f"[bench cli] {exc}", file=sys.stderr)
+        return 1
+
+    appended: dict[str, Any] = append_entry(record)
+
+    # C-008(d): the chain this operation promised not to touch must still
+    # verify, with the same genesis it had before.
+    after: dict[str, Any] = verify_chain()
+    if not after.get("valid") or after.get("genesis_hash") != genesis_before:
+        print(
+            "[bench cli] the record was appended but the chain no longer "
+            f"verifies as expected ({after.get('failure_type', 'genesis moved')}). "
+            "Do NOT push the rewritten history; resolve this first.",
+            file=sys.stderr,
+        )
+        return 1
+
+    print("Sanitation: RECORDED")
+    print(f"  entry        : {appended.get('entry_hash', '-')}")
+    print(f"  refs recorded: {len(refs)}")
+    print(f"  backup id    : {backup_id}")
+    print(f"  chain        : VALID, genesis {genesis_before[:12]} unchanged")
+    print("  next         : verify with 'python -m cli audit-sanitation "
+          "<backup>', then push.")
+    return 0
+
+
+def cmd_audit_sanitation(
+    backup: str | None = None, record_hash: str | None = None
+) -> int:
+    """Audit this chain's published-copy sanitation records.
+
+    Read-only. It audits records; it never performs a sanitation, which is a
+    human action at a plain TTY. A sanitation removes published copies of
+    ledger data from a version control remote and never touches the
+    authoritative chain, so this reports three things that can each fail
+    alone: the record's structure, the live chain's own state, and, when the
+    artifact is supplied, the encrypted backup's digest.
+
+    Checking the live chain matters most. The record asserts that the chain
+    still verifies with an unchanged genesis; an auditor that trusted that
+    claim would be checking the record against itself.
+    """
+    # load_ledger is deliberately tolerant: it logs an unreadable segment and
+    # returns what it could parse. That is right for reporting, and wrong
+    # here, because a corrupt segment holding the sanitation record would
+    # produce "NONE RECORDED" and exit 0. Verify first, so absence means
+    # absence rather than unreadability.
+    chain: dict[str, Any] = verify_chain()
+    if not chain.get("valid"):
+        print(
+            f"[bench cli] refusing to audit: the chain does not verify "
+            f"({chain.get('failure_type', 'unknown')}). A record could be "
+            f"present but unreadable, so absence cannot be reported as "
+            f"absence.",
+            file=sys.stderr,
+        )
+        return 1
+
+    try:
+        entries: list[dict] = load_ledger()
+    except LedgerReadError as exc:
+        print(f"[bench cli] cannot read ledger: {exc}", file=sys.stderr)
+        return 1
+
+    records: list[dict] = [
+        e for e in entries if e.get("verdict") == SANITATION_VERDICT
+    ]
+    if not records:
+        print("Sanitation: NONE RECORDED")
+        print("  This chain has never had published copies sanitized.")
+        return 0
+
+    if record_hash:
+        records = [r for r in records if r.get("entry_hash") == record_hash]
+        if not records:
+            print(
+                f"[bench cli] no sanitation record with entry hash "
+                f"{record_hash}",
+                file=sys.stderr,
+            )
+            return 1
+
+    artifact: Path | None = Path(backup) if backup else None
+    # One artifact cannot belong to several records. Two legitimate
+    # sanitations have different backups, so applying one path to both would
+    # fail the other on a digest mismatch that is not a defect.
+    if artifact is not None and len(records) > 1:
+        print(
+            f"[bench cli] {len(records)} sanitation records exist and a "
+            f"backup was supplied. Name the one it belongs to with "
+            f"--record <entry_hash>; a backup verifies one record, not all.",
+            file=sys.stderr,
+        )
+        return 1
+
+    failures: int = 0
+
+    for record in records:
+        # A malformed record is exactly what the auditor exists to diagnose,
+        # so reading it must not raise before the defects can be printed.
+        raw_change: Any = record.get("change")
+        change: dict[str, Any] = raw_change if isinstance(raw_change, dict) else {}
+        raw_summary: Any = change.get("diff_summary")
+        summary: dict[str, Any] = (
+            raw_summary if isinstance(raw_summary, dict) else {}
+        )
+        raw_refs: Any = summary.get("refs")
+        ref_count: int = len(raw_refs) if isinstance(raw_refs, list) else 0
+
+        result: dict[str, Any] = audit_sanitation(record, artifact)
+        if result["valid"]:
+            status: str = "VALID"
+        elif result.get("incomplete"):
+            status = "INCOMPLETE"
+        else:
+            status = "INVALID"
+
+        print(f"Sanitation: {status}")
+        print(f"  entry         : {record.get('entry_hash', '-')}")
+        print(f"  recorded at   : {record.get('timestamp', '-')}")
+        print(f"  backup id     : {summary.get('backup_id', '-')}")
+        print(f"  digest        : {summary.get('backup_digest', '-')}")
+        print(f"  refs rewritten: {ref_count}")
+        print(f"  retention     : {summary.get('retention_owner', '-')}")
+        if result["digest_checked"]:
+            print(
+                f"  backup digest : "
+                f"{'matches' if result['digest_matches'] else 'DOES NOT MATCH'}"
+            )
+        else:
+            print("  backup digest : NOT CHECKED (supply the artifact path)")
+
+        if not result["valid"]:
+            failures += 1
+            for defect in result["defects"]:
+                print(f"  defect        : {defect}", file=sys.stderr)
+
+    return 1 if failures else 0
 
 
 def cmd_migrate_ledger() -> int:

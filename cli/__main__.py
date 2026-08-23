@@ -8,10 +8,13 @@ membership checks against the remaining argv. Logic lives in commands.py.
 import sys
 
 from cli.commands import (
+    cmd_attest,
     cmd_audit_retirement,
+    cmd_audit_sanitation,
     cmd_constitution,
     cmd_ledger,
     cmd_migrate_ledger,
+    cmd_record_sanitation,
     cmd_retire,
     cmd_stats,
     cmd_verify,
@@ -36,6 +39,28 @@ _USAGE: str = (
     "                             success.\n"
     "  constitution               Show current constitutional constraints\n"
     "  viewer                     Open an HTML verdict viewer in the browser\n"
+    "  attest --cutoff HASH --bench-version X.Y.Z [--out PATH]\n"
+    "                             Export a public attestation for entries up\n"
+    "                             to the declared cutoff: commitments,\n"
+    "                             verdicts, and constraint ids, with no diff,\n"
+    "                             path, or stage prose. --cutoff is required;\n"
+    "                             a checkpoint is a deliberate act, not a\n"
+    "                             running view of the tip. Not a backup.\n"
+    "  record-sanitation --refs-file PATH --backup-id ID\n"
+    "                    --backup-digest HEX --reason TEXT\n"
+    "                    --retention-owner NAME --retention-policy TEXT\n"
+    "                             Append a published-copy sanitation record.\n"
+    "                             Run AFTER the rewrite and BEFORE the push:\n"
+    "                             the record names post-image hashes, and an\n"
+    "                             unrecorded removal violates C-008. Refuses\n"
+    "                             outside a plain TTY, inside an agent\n"
+    "                             session, on a non-conforming record, and if\n"
+    "                             the chain does not still verify after.\n"
+    "  audit-sanitation [PATH]    Audit this chain's published-copy\n"
+    "                             sanitation records: structure, the live\n"
+    "                             chain's own state, and the encrypted\n"
+    "                             backup's digest when PATH is given.\n"
+    "                             Read-only; it never performs a sanitation.\n"
     "  audit-retirement [PATH]    Run C-008's auditor check on this chain's\n"
     "                             opening anchor (PATH defaults to the archive\n"
     "                             the anchor recorded)\n"
@@ -98,6 +123,39 @@ def main(argv: list[str]) -> int:
             archive_dir=_flag_value(rest, "--archive-dir"),
             reason=_flag_value(rest, "--reason"),
             remediation=_flag_value(rest, "--remediation"),
+        )
+    if command == "attest":
+        return cmd_attest(
+            cutoff=_flag_value(rest, "--cutoff"),
+            bench_version=_flag_value(rest, "--bench-version"),
+            out=_flag_value(rest, "--out"),
+        )
+    if command == "record-sanitation":
+        return cmd_record_sanitation(
+            refs_file=_flag_value(rest, "--refs-file"),
+            backup_id=_flag_value(rest, "--backup-id"),
+            backup_digest=_flag_value(rest, "--backup-digest"),
+            reason=_flag_value(rest, "--reason"),
+            retention_owner=_flag_value(rest, "--retention-owner"),
+            retention_policy=_flag_value(rest, "--retention-policy"),
+        )
+    if command == "audit-sanitation":
+        # Positionally aware: skip a flag and the value that follows it,
+        # rather than filtering by string equality. A backup path that
+        # happened to equal the record hash would otherwise be dropped.
+        positional_backup: list[str] = []
+        skip_next: bool = False
+        for arg in rest:
+            if skip_next:
+                skip_next = False
+                continue
+            if arg.startswith("-"):
+                skip_next = arg == "--record"
+                continue
+            positional_backup.append(arg)
+        return cmd_audit_sanitation(
+            backup=positional_backup[0] if positional_backup else None,
+            record_hash=_flag_value(rest, "--record"),
         )
     if command == "audit-retirement":
         positional: list[str] = [arg for arg in rest if not arg.startswith("-")]
