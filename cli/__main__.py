@@ -140,11 +140,22 @@ def main(argv: list[str]) -> int:
             retention_policy=_flag_value(rest, "--retention-policy"),
         )
     if command == "audit-sanitation":
-        positional_backup: list[str] = [
-            arg for arg in rest if not arg.startswith("-")
-        ]
+        # Positionally aware: skip a flag and the value that follows it,
+        # rather than filtering by string equality. A backup path that
+        # happened to equal the record hash would otherwise be dropped.
+        positional_backup: list[str] = []
+        skip_next: bool = False
+        for arg in rest:
+            if skip_next:
+                skip_next = False
+                continue
+            if arg.startswith("-"):
+                skip_next = arg == "--record"
+                continue
+            positional_backup.append(arg)
         return cmd_audit_sanitation(
-            positional_backup[0] if positional_backup else None
+            backup=positional_backup[0] if positional_backup else None,
+            record_hash=_flag_value(rest, "--record"),
         )
     if command == "audit-retirement":
         positional: list[str] = [arg for arg in rest if not arg.startswith("-")]

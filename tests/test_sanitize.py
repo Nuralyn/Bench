@@ -411,23 +411,64 @@ class CliAuditTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("NONE RECORDED", out)
 
-    def test_valid_record_reports_valid(self) -> None:
+    def test_without_a_backup_the_audit_is_incomplete_not_valid(self) -> None:
+        """Two of C-008's three checks is not a pass.
+
+        The digest is the only one a forged record cannot satisfy by being
+        well-formed, so reporting VALID without it would let the cheapest
+        audit look like the strongest.
+        """
         record = _record()
         healthy = {"valid": True, "genesis_hash": _GENESIS, "entries": 448}
         with patch("ledger.verify.verify_chain", return_value=healthy):
             code, out = self._run([record])
-        self.assertEqual(code, 0)
-        self.assertIn("Sanitation: VALID", out)
-        self.assertIn("BKP-A7F3", out)
-        self.assertIn("not checked", out)
+        self.assertEqual(code, 1)
+        self.assertIn("Sanitation: INCOMPLETE", out)
+        self.assertIn("NOT CHECKED", out)
 
-    def test_invalid_record_exits_nonzero(self) -> None:
+    def test_defective_record_reads_invalid_not_incomplete(self) -> None:
+        """A real defect must not be softened into 'unfinished'."""
         record = _record(chain_verified_valid=False)
         healthy = {"valid": True, "genesis_hash": _GENESIS, "entries": 448}
         with patch("ledger.verify.verify_chain", return_value=healthy):
             code, out = self._run([record])
         self.assertEqual(code, 1)
         self.assertIn("Sanitation: INVALID", out)
+
+    def test_malformed_record_is_diagnosed_not_crashed(self) -> None:
+        """The auditor exists to diagnose these; it must not raise first."""
+        healthy = {"valid": True, "genesis_hash": _GENESIS, "entries": 448}
+        for broken in (
+            {"verdict": SANITATION_VERDICT, "change": "not-a-dict"},
+            {"verdict": SANITATION_VERDICT, "change": {"diff_summary": 7}},
+            {
+                "verdict": SANITATION_VERDICT,
+                "change": {"diff_summary": {"refs": 5}},
+            },
+        ):
+            with self.subTest(broken=broken):
+                with patch("ledger.verify.verify_chain", return_value=healthy):
+                    code, out = self._run([broken])
+                self.assertEqual(code, 1)
+                self.assertIn("Sanitation: INVALID", out)
+
+    def test_refuses_when_the_chain_does_not_verify(self) -> None:
+        """Absence cannot be reported as absence over an unreadable chain."""
+        from cli.commands import cmd_audit_sanitation
+
+        broken = {"valid": False, "failure_type": "MISSING_PARENT"}
+        with patch("cli.commands.verify_chain", return_value=broken):
+            self.assertEqual(cmd_audit_sanitation(), 1)
+
+    def test_one_backup_cannot_audit_several_records(self) -> None:
+        """Two sanitations have two backups; one path cannot verify both."""
+        from cli.commands import cmd_audit_sanitation
+
+        healthy = {"valid": True, "genesis_hash": _GENESIS, "entries": 448}
+        two = [_record(), _record(backup_id="BKP-OTHER")]
+        with patch("cli.commands.verify_chain", return_value=healthy):
+            with patch("cli.commands.load_ledger", return_value=two):
+                self.assertEqual(cmd_audit_sanitation(backup="x.gpg"), 1)
 
     def test_unreadable_ledger_is_reported_not_raised(self) -> None:
         from cli.commands import cmd_audit_sanitation
