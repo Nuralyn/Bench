@@ -58,6 +58,34 @@ def pct(part: int, total: int) -> str:
     return f"{part / total * 100:.1f}%"
 
 
+def _count_veto_citations(
+    oracle_dict: dict, citation_counts: dict[str, int]
+) -> None:
+    """Tally the constraint citations of one VETO into citation_counts.
+
+    Citation entries may be plain strings or {"constraint_id": ...} dicts;
+    anything else is logged to stderr and skipped.
+    """
+    citations: Any = oracle_dict.get("constraint_citations")
+    if not isinstance(citations, list):
+        return
+    for cid in citations:
+        if isinstance(cid, str):
+            citation_counts[cid] = citation_counts.get(cid, 0) + 1
+        elif isinstance(cid, dict):
+            raw: Any = cid.get("constraint_id")
+            if isinstance(raw, str):
+                citation_counts[raw] = (
+                    citation_counts.get(raw, 0) + 1
+                )
+        else:
+            print(
+                f"[bench stats] unexpected citation type: "
+                f"{type(cid).__name__}",
+                file=sys.stderr,
+            )
+
+
 def compute_ledger_stats(entries: list[dict]) -> dict:
     """Aggregate verdict counts and constraint citations over the ledger.
 
@@ -90,23 +118,7 @@ def compute_ledger_stats(entries: list[dict]) -> dict:
             passed += 1
         elif verdict == "VETO":
             vetoed += 1
-            citations: Any = oracle_dict.get("constraint_citations")
-            if isinstance(citations, list):
-                for cid in citations:
-                    if isinstance(cid, str):
-                        citation_counts[cid] = citation_counts.get(cid, 0) + 1
-                    elif isinstance(cid, dict):
-                        raw: Any = cid.get("constraint_id")
-                        if isinstance(raw, str):
-                            citation_counts[raw] = (
-                                citation_counts.get(raw, 0) + 1
-                            )
-                    else:
-                        print(
-                            f"[bench stats] unexpected citation type: "
-                            f"{type(cid).__name__}",
-                            file=sys.stderr,
-                        )
+            _count_veto_citations(oracle_dict, citation_counts)
 
     most_cited: tuple[str, int] | None = None
     if citation_counts:

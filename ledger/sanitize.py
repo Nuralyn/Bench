@@ -101,6 +101,36 @@ _TEXT_FIELDS: tuple[str, ...] = (
 )
 
 
+def _ref_entry_defects(index: int, ref: Any) -> list[str]:
+    """Defects in one rewritten-ref entry, empty when it conforms."""
+    if not isinstance(ref, dict):
+        return [f"refs[{index}] is not an object"]
+
+    defects: list[str] = []
+    name: Any = ref.get("ref")
+    if not isinstance(name, str) or not name.startswith("refs/"):
+        defects.append(
+            f"refs[{index}].ref must be a full refname like "
+            f"'refs/heads/main', got {name!r}"
+        )
+    for side in ("pre_image", "post_image"):
+        value: Any = ref.get(side)
+        if not isinstance(value, str) or not _GIT_SHA_RE.match(value):
+            defects.append(
+                f"refs[{index}].{side} must be a 40-character git sha, "
+                f"got {value!r}"
+            )
+    if (
+        isinstance(ref.get("pre_image"), str)
+        and ref.get("pre_image") == ref.get("post_image")
+    ):
+        defects.append(
+            f"refs[{index}] pre_image equals post_image: a ref that did "
+            f"not change is not evidence of a rewrite"
+        )
+    return defects
+
+
 def _validate_refs(refs: Any) -> list[str]:
     """Defects in the rewritten-ref list, empty when it conforms."""
     if not isinstance(refs, list) or not refs:
@@ -108,54 +138,30 @@ def _validate_refs(refs: Any) -> list[str]:
 
     defects: list[str] = []
     for index, ref in enumerate(refs):
-        if not isinstance(ref, dict):
-            defects.append(f"refs[{index}] is not an object")
-            continue
-        name: Any = ref.get("ref")
-        if not isinstance(name, str) or not name.startswith("refs/"):
-            defects.append(
-                f"refs[{index}].ref must be a full refname like "
-                f"'refs/heads/main', got {name!r}"
-            )
-        for side in ("pre_image", "post_image"):
-            value: Any = ref.get(side)
-            if not isinstance(value, str) or not _GIT_SHA_RE.match(value):
-                defects.append(
-                    f"refs[{index}].{side} must be a 40-character git sha, "
-                    f"got {value!r}"
-                )
-        if (
-            isinstance(ref.get("pre_image"), str)
-            and ref.get("pre_image") == ref.get("post_image")
-        ):
-            defects.append(
-                f"refs[{index}] pre_image equals post_image: a ref that did "
-                f"not change is not evidence of a rewrite"
-            )
+        defects.extend(_ref_entry_defects(index, ref))
     return defects
 
 
-def validate_sanitation_summary(summary: Any) -> list[str]:
-    """Defects in a sanitation summary, empty when it conforms.
-
-    Callable before the record is appended, which is the only point where a
-    defect can still prevent a non-conforming sanitation from being recorded
-    as though it satisfied the constraint.
-    """
-    if not isinstance(summary, dict):
-        return [f"summary is not an object (got {type(summary).__name__})"]
-
+def _required_field_defects(summary: dict) -> list[str]:
+    """Defects for required fields that are missing or empty."""
     defects: list[str] = []
     for field in _REQUIRED_FIELDS:
         if field not in summary:
             defects.append(f"missing required field {field!r}")
         elif summary[field] in ("", None):
             defects.append(f"field {field!r} is empty")
+    return defects
 
-    # Presence is not evidence. `x in ("", None)` admits False, 0, [], and {},
-    # so a record could carry human_decision=False or retention_owner={} and
-    # report no defects while containing no decision and naming nobody. Every
-    # field C-008 expects a human to have written must actually be prose.
+
+def _text_field_defects(summary: dict) -> list[str]:
+    """Defects for fields that must carry an actual written value.
+
+    Presence is not evidence. `x in ("", None)` admits False, 0, [], and {},
+    so a record could carry human_decision=False or retention_owner={} and
+    report no defects while containing no decision and naming nobody. Every
+    field C-008 expects a human to have written must actually be prose.
+    """
+    defects: list[str] = []
     for field in _TEXT_FIELDS:
         value: Any = summary.get(field)
         if field in summary and (
@@ -165,12 +171,12 @@ def validate_sanitation_summary(summary: Any) -> list[str]:
                 f"field {field!r} must be a non-empty string, got "
                 f"{type(value).__name__}"
             )
+    return defects
 
-    if summary.get("event") != SANITATION_EVENT:
-        defects.append(
-            f"event must be {SANITATION_EVENT!r}, got {summary.get('event')!r}"
-        )
 
+def _backup_field_defects(summary: dict) -> list[str]:
+    """Defects in the backup digest, algorithm, and identifier fields."""
+    defects: list[str] = []
     digest: Any = summary.get("backup_digest")
     if not isinstance(digest, str) or not _SHA256_RE.match(digest):
         defects.append(
@@ -188,10 +194,17 @@ def validate_sanitation_summary(summary: Any) -> list[str]:
             f"backup_id must be an opaque identifier, not a path or free "
             f"text, got {backup_id!r}"
         )
+    return defects
 
-    # C-008 requires the authoritative chain to be untouched. A sanitation
-    # recorded while it does not verify would assert the one thing the
-    # operation is not allowed to change.
+
+def _chain_claim_defects(summary: dict) -> list[str]:
+    """Defects in the recorded claims about the authoritative chain.
+
+    C-008 requires the authoritative chain to be untouched. A sanitation
+    recorded while it does not verify would assert the one thing the
+    operation is not allowed to change.
+    """
+    defects: list[str] = []
     if summary.get("chain_verified_valid") is not True:
         defects.append(
             "chain_verified_valid must be true: sanitation may not leave the "
@@ -207,7 +220,12 @@ def validate_sanitation_summary(summary: Any) -> list[str]:
         defects.append(
             f"chain_entry_count must be a positive integer, got {count!r}"
         )
+    return defects
 
+
+def _opaque_field_defects(summary: dict) -> list[str]:
+    """Defects for opaque fields that carry a filesystem path."""
+    defects: list[str] = []
     for field in _OPAQUE_FIELDS:
         value: Any = summary.get(field)
         if isinstance(value, str) and _PATH_RE.search(value):
@@ -216,6 +234,30 @@ def validate_sanitation_summary(summary: Any) -> list[str]:
                 f"records carry an opaque identifier so the chain does not "
                 f"republish machine paths"
             )
+    return defects
+
+
+def validate_sanitation_summary(summary: Any) -> list[str]:
+    """Defects in a sanitation summary, empty when it conforms.
+
+    Callable before the record is appended, which is the only point where a
+    defect can still prevent a non-conforming sanitation from being recorded
+    as though it satisfied the constraint.
+    """
+    if not isinstance(summary, dict):
+        return [f"summary is not an object (got {type(summary).__name__})"]
+
+    defects: list[str] = _required_field_defects(summary)
+    defects.extend(_text_field_defects(summary))
+
+    if summary.get("event") != SANITATION_EVENT:
+        defects.append(
+            f"event must be {SANITATION_EVENT!r}, got {summary.get('event')!r}"
+        )
+
+    defects.extend(_backup_field_defects(summary))
+    defects.extend(_chain_claim_defects(summary))
+    defects.extend(_opaque_field_defects(summary))
 
     # Shape-checked when present, not required. Records written before
     # verify_binding existed carry no repository, and C-008 forbids editing
@@ -331,6 +373,105 @@ def classify_removal(status: int) -> str:
     return INCONCLUSIVE
 
 
+def _bound_ref_defects(
+    entry: Any,
+    remote_refs: Mapping[str, str],
+    local_refs: Mapping[str, str],
+) -> list[str]:
+    """Defects binding one recorded ref to the remote and the local mirror."""
+    if not isinstance(entry, dict):
+        return ["a ref entry is not an object"]
+    name: Any = entry.get("ref")
+    pre: Any = entry.get("pre_image")
+    post: Any = entry.get("post_image")
+    if not isinstance(name, str):
+        return ["a ref entry has no name"]
+
+    defects: list[str] = []
+    actual_remote: str | None = remote_refs.get(name)
+    actual_local: str | None = local_refs.get(name)
+
+    if actual_remote is None:
+        defects.append(f"{name}: recorded but absent from the remote")
+    elif actual_remote == post:
+        defects.append(
+            f"{name}: the remote is already at the recorded post-image "
+            f"{str(post)[:12]}. This warrant was already used; a second "
+            f"push under it would be an unrecorded rewrite."
+        )
+    elif actual_remote != pre:
+        defects.append(
+            f"{name}: remote is {actual_remote[:12]}, but the record was "
+            f"issued against {str(pre)[:12]}. The remote moved after the "
+            f"warrant was written."
+        )
+
+    if actual_local is None:
+        defects.append(f"{name}: recorded but absent from the local mirror")
+    elif actual_local != post:
+        defects.append(
+            f"{name}: mirror is {actual_local[:12]}, but the record "
+            f"authorizes {str(post)[:12]}. The rewrite about to be pushed "
+            f"is not the one that was authorized."
+        )
+    return defects
+
+
+def _unrecorded_ref_defects(
+    refs: list,
+    remote_refs: Mapping[str, str],
+    local_refs: Mapping[str, str],
+) -> list[str]:
+    """Defects for pushable refs the record never mentions.
+
+    Checking only the recorded refs leaves the push wider than the warrant.
+    The push is 'refs/heads/*' and 'refs/tags/*', so a ref in either the
+    remote or the mirror that the record never mentions would still be
+    created, updated, or deleted by it, under an authorization that never
+    named it. Bind the union of what the push can reach, not the subset the
+    record happens to list. refs/pull/* is excluded because it is
+    GitHub-managed and no push can touch it.
+    """
+    recorded_names: set[str] = {
+        entry.get("ref")
+        for entry in refs
+        if isinstance(entry, dict) and isinstance(entry.get("ref"), str)
+    }
+    reachable: set[str] = {
+        name
+        for name in set(remote_refs) | set(local_refs)
+        if name.startswith(PUSHABLE_PREFIXES)
+    }
+    defects: list[str] = []
+    for name in sorted(reachable - recorded_names):
+        on_remote: bool = name in remote_refs
+        in_mirror: bool = name in local_refs
+        if on_remote and not in_mirror:
+            # The push cannot delete this, but that is the smaller problem:
+            # the mirror was made without it, so the rewrite never examined
+            # it and any contaminated objects it carries survive the purge.
+            defects.append(
+                f"{name}: on the remote but absent from the mirror and "
+                f"unrecorded. The rewrite never covered it, so anything it "
+                f"carries survives the purge. Re-clone the mirror."
+            )
+        elif in_mirror and not on_remote:
+            defects.append(
+                f"{name}: in the mirror but not on the remote and "
+                f"unrecorded. The push would create it under a warrant that "
+                f"never mentioned it."
+            )
+        else:
+            # In both. A name absent from both cannot reach here: `reachable`
+            # is built from the union of the two mappings, so every name in
+            # it belongs to at least one.
+            defects.append(
+                f"{name}: present on both sides but unrecorded. The push "
+                f"would update it under a warrant that never mentioned it."
+            )
+    return defects
+
+
 def verify_binding(
     summary: Mapping[str, Any],
     repository: str,
@@ -383,87 +524,9 @@ def verify_binding(
         return defects
 
     for entry in refs:
-        if not isinstance(entry, dict):
-            defects.append("a ref entry is not an object")
-            continue
-        name: Any = entry.get("ref")
-        pre: Any = entry.get("pre_image")
-        post: Any = entry.get("post_image")
-        if not isinstance(name, str):
-            defects.append("a ref entry has no name")
-            continue
+        defects.extend(_bound_ref_defects(entry, remote_refs, local_refs))
 
-        actual_remote: str | None = remote_refs.get(name)
-        actual_local: str | None = local_refs.get(name)
-
-        if actual_remote is None:
-            defects.append(f"{name}: recorded but absent from the remote")
-        elif actual_remote == post:
-            defects.append(
-                f"{name}: the remote is already at the recorded post-image "
-                f"{str(post)[:12]}. This warrant was already used; a second "
-                f"push under it would be an unrecorded rewrite."
-            )
-        elif actual_remote != pre:
-            defects.append(
-                f"{name}: remote is {actual_remote[:12]}, but the record was "
-                f"issued against {str(pre)[:12]}. The remote moved after the "
-                f"warrant was written."
-            )
-
-        if actual_local is None:
-            defects.append(f"{name}: recorded but absent from the local mirror")
-        elif actual_local != post:
-            defects.append(
-                f"{name}: mirror is {actual_local[:12]}, but the record "
-                f"authorizes {str(post)[:12]}. The rewrite about to be pushed "
-                f"is not the one that was authorized."
-            )
-
-    # Checking only the recorded refs leaves the push wider than the warrant.
-    # The push is 'refs/heads/*' and 'refs/tags/*', so a ref in either the
-    # remote or the mirror that the record never mentions would still be
-    # created, updated, or deleted by it, under an authorization that never
-    # named it. Bind the union of what the push can reach, not the subset the
-    # record happens to list. refs/pull/* is excluded because it is
-    # GitHub-managed and no push can touch it.
-    recorded_names: set[str] = {
-        entry.get("ref")
-        for entry in refs
-        if isinstance(entry, dict) and isinstance(entry.get("ref"), str)
-    }
-    reachable: set[str] = {
-        name
-        for name in set(remote_refs) | set(local_refs)
-        if name.startswith(PUSHABLE_PREFIXES)
-    }
-    for name in sorted(reachable - recorded_names):
-        on_remote: bool = name in remote_refs
-        in_mirror: bool = name in local_refs
-        if on_remote and not in_mirror:
-            # The push cannot delete this, but that is the smaller problem:
-            # the mirror was made without it, so the rewrite never examined
-            # it and any contaminated objects it carries survive the purge.
-            defects.append(
-                f"{name}: on the remote but absent from the mirror and "
-                f"unrecorded. The rewrite never covered it, so anything it "
-                f"carries survives the purge. Re-clone the mirror."
-            )
-        elif in_mirror and not on_remote:
-            defects.append(
-                f"{name}: in the mirror but not on the remote and "
-                f"unrecorded. The push would create it under a warrant that "
-                f"never mentioned it."
-            )
-        else:
-            # In both. A name absent from both cannot reach here: `reachable`
-            # is built from the union of the two mappings, so every name in
-            # it belongs to at least one.
-            defects.append(
-                f"{name}: present on both sides but unrecorded. The push "
-                f"would update it under a warrant that never mentioned it."
-            )
-
+    defects.extend(_unrecorded_ref_defects(refs, remote_refs, local_refs))
     return defects
 
 

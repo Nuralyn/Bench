@@ -69,8 +69,9 @@ class LoadConstitutionSnapshotTests(unittest.TestCase):
         self.assertEqual(h, expected)
 
     def test_file_not_found_raises_not_found_error(self) -> None:
+        missing: str = os.path.join(self._tmp, "nope.json")
         with self.assertRaises(ConstitutionNotFoundError):
-            load_constitution_snapshot(os.path.join(self._tmp, "nope.json"))
+            load_constitution_snapshot(missing)
 
     def test_invalid_json_raises_parse_error(self) -> None:
         path: str = self._write("{{{bad json")

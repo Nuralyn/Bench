@@ -383,6 +383,44 @@ def _gh_status(endpoint: str) -> int:
     return 0
 
 
+def _probe_manifest_objects(
+    lines: list[str], repository: str
+) -> tuple[dict[str, int], list[str]]:
+    """Probe every manifest object at its own endpoint.
+
+    Returns (tally, problems): verdict counts keyed by REMOVED, PRESENT, and
+    INCONCLUSIVE, and one problem line per object that did not prove removed.
+    """
+    tally: dict[str, int] = {REMOVED: 0, PRESENT: 0, INCONCLUSIVE: 0}
+    problems: list[str] = []
+
+    for line in lines:
+        if not line.strip():
+            continue
+        parts: list[str] = line.split("\t")
+        if len(parts) != 2:
+            problems.append(f"malformed manifest line: {line!r}")
+            tally[INCONCLUSIVE] += 1
+            continue
+        sha, object_type = parts[0].strip(), parts[1].strip()
+        try:
+            endpoint: str = object_endpoint(object_type, repository, sha)
+        except SanitationError as exc:
+            problems.append(str(exc))
+            tally[INCONCLUSIVE] += 1
+            continue
+
+        # Defaults to 0 when nothing parses, and classify_removal maps 0 to
+        # inconclusive. An unparseable response must never read as removed.
+        status: int = _gh_status(endpoint)
+        verdict: str = classify_removal(status)
+        tally[verdict] += 1
+        if verdict != REMOVED:
+            problems.append(f"{sha} ({object_type}): HTTP {status} -> {verdict}")
+
+    return tally, problems
+
+
 def cmd_verify_purge(
     manifest: str | None = None, repository: str | None = None
 ) -> int:
@@ -425,32 +463,7 @@ def cmd_verify_purge(
         )
         return 1
 
-    tally: dict[str, int] = {REMOVED: 0, PRESENT: 0, INCONCLUSIVE: 0}
-    problems: list[str] = []
-
-    for line in lines:
-        if not line.strip():
-            continue
-        parts: list[str] = line.split("\t")
-        if len(parts) != 2:
-            problems.append(f"malformed manifest line: {line!r}")
-            tally[INCONCLUSIVE] += 1
-            continue
-        sha, object_type = parts[0].strip(), parts[1].strip()
-        try:
-            endpoint: str = object_endpoint(object_type, repository, sha)
-        except SanitationError as exc:
-            problems.append(str(exc))
-            tally[INCONCLUSIVE] += 1
-            continue
-
-        # Defaults to 0 when nothing parses, and classify_removal maps 0 to
-        # inconclusive. An unparseable response must never read as removed.
-        status: int = _gh_status(endpoint)
-        verdict: str = classify_removal(status)
-        tally[verdict] += 1
-        if verdict != REMOVED:
-            problems.append(f"{sha} ({object_type}): HTTP {status} -> {verdict}")
+    tally, problems = _probe_manifest_objects(lines, repository)
 
     total: int = sum(tally.values())
     print(f"Purge check: {repository}")
@@ -636,6 +649,30 @@ def cmd_audit_sanitation(
         print("  This chain has never had published copies sanitized.")
         return 0
 
+    selected: tuple[list[dict], Path | None] | None = _select_audit_targets(
+        records, record_hash, backup
+    )
+    if selected is None:
+        return 1
+    records, artifact = selected
+
+    failures: int = 0
+
+    for record in records:
+        if not _report_sanitation_record(record, artifact):
+            failures += 1
+
+    return 1 if failures else 0
+
+
+def _select_audit_targets(
+    records: list[dict], record_hash: str | None, backup: str | None
+) -> tuple[list[dict], Path | None] | None:
+    """Narrow records to the named entry and pair them with the artifact.
+
+    Returns None (after printing the defect) when the named record does not
+    exist or when one backup is offered against several records.
+    """
     if record_hash:
         records = [r for r in records if r.get("entry_hash") == record_hash]
         if not records:
@@ -644,7 +681,7 @@ def cmd_audit_sanitation(
                 f"{record_hash}",
                 file=sys.stderr,
             )
-            return 1
+            return None
 
     artifact: Path | None = Path(backup) if backup else None
     # One artifact cannot belong to several records. Two legitimate
@@ -657,51 +694,51 @@ def cmd_audit_sanitation(
             f"--record <entry_hash>; a backup verifies one record, not all.",
             file=sys.stderr,
         )
-        return 1
+        return None
+    return records, artifact
 
-    failures: int = 0
 
-    for record in records:
-        # A malformed record is exactly what the auditor exists to diagnose,
-        # so reading it must not raise before the defects can be printed.
-        raw_change: Any = record.get("change")
-        change: dict[str, Any] = raw_change if isinstance(raw_change, dict) else {}
-        raw_summary: Any = change.get("diff_summary")
-        summary: dict[str, Any] = (
-            raw_summary if isinstance(raw_summary, dict) else {}
+def _report_sanitation_record(record: dict, artifact: Path | None) -> bool:
+    """Print one sanitation record's audit report. True when it is valid."""
+    # A malformed record is exactly what the auditor exists to diagnose,
+    # so reading it must not raise before the defects can be printed.
+    raw_change: Any = record.get("change")
+    change: dict[str, Any] = raw_change if isinstance(raw_change, dict) else {}
+    raw_summary: Any = change.get("diff_summary")
+    summary: dict[str, Any] = (
+        raw_summary if isinstance(raw_summary, dict) else {}
+    )
+    raw_refs: Any = summary.get("refs")
+    ref_count: int = len(raw_refs) if isinstance(raw_refs, list) else 0
+
+    result: dict[str, Any] = audit_sanitation(record, artifact)
+    if result["valid"]:
+        status: str = "VALID"
+    elif result.get("incomplete"):
+        status = "INCOMPLETE"
+    else:
+        status = "INVALID"
+
+    print(f"Sanitation: {status}")
+    print(f"  entry         : {record.get('entry_hash', '-')}")
+    print(f"  recorded at   : {record.get('timestamp', '-')}")
+    print(f"  backup id     : {summary.get('backup_id', '-')}")
+    print(f"  digest        : {summary.get('backup_digest', '-')}")
+    print(f"  refs rewritten: {ref_count}")
+    print(f"  retention     : {summary.get('retention_owner', '-')}")
+    if result["digest_checked"]:
+        print(
+            f"  backup digest : "
+            f"{'matches' if result['digest_matches'] else 'DOES NOT MATCH'}"
         )
-        raw_refs: Any = summary.get("refs")
-        ref_count: int = len(raw_refs) if isinstance(raw_refs, list) else 0
+    else:
+        print("  backup digest : NOT CHECKED (supply the artifact path)")
 
-        result: dict[str, Any] = audit_sanitation(record, artifact)
-        if result["valid"]:
-            status: str = "VALID"
-        elif result.get("incomplete"):
-            status = "INCOMPLETE"
-        else:
-            status = "INVALID"
-
-        print(f"Sanitation: {status}")
-        print(f"  entry         : {record.get('entry_hash', '-')}")
-        print(f"  recorded at   : {record.get('timestamp', '-')}")
-        print(f"  backup id     : {summary.get('backup_id', '-')}")
-        print(f"  digest        : {summary.get('backup_digest', '-')}")
-        print(f"  refs rewritten: {ref_count}")
-        print(f"  retention     : {summary.get('retention_owner', '-')}")
-        if result["digest_checked"]:
-            print(
-                f"  backup digest : "
-                f"{'matches' if result['digest_matches'] else 'DOES NOT MATCH'}"
-            )
-        else:
-            print("  backup digest : NOT CHECKED (supply the artifact path)")
-
-        if not result["valid"]:
-            failures += 1
-            for defect in result["defects"]:
-                print(f"  defect        : {defect}", file=sys.stderr)
-
-    return 1 if failures else 0
+    if not result["valid"]:
+        for defect in result["defects"]:
+            print(f"  defect        : {defect}", file=sys.stderr)
+        return False
+    return True
 
 
 def cmd_migrate_ledger() -> int:
@@ -753,7 +790,11 @@ def cmd_migrate_ledger() -> int:
 
 def cmd_ledger(show_all: bool = False, vetoes_only: bool = False) -> int:
     """Print ledger entries (default: last 10)."""
-    entries: list[dict] = load_ledger()
+    try:
+        entries: list[dict] = load_ledger()
+    except LedgerReadError as exc:
+        print(f"[bench cli] cannot read ledger: {exc}", file=sys.stderr)
+        return 1
 
     if not entries:
         print("Ledger is empty.")
@@ -1085,14 +1126,19 @@ def _print_entry_line(entry: dict) -> None:
     print(f"  {timestamp}  {verdict:10}  {file}  [{short}]")
 
     if verdict == "VETO":
-        citations: Any = oracle_dict.get("constraint_citations")
-        if isinstance(citations, list) and citations:
-            cite_str: str = ", ".join(
-                c.get("constraint_id", str(c)) if isinstance(c, dict) else str(c)
-                for c in citations if c
-            )
-            if cite_str:
-                print(f"      citations: {cite_str}")
+        _print_veto_citations(oracle_dict)
+
+
+def _print_veto_citations(oracle_dict: dict) -> None:
+    """Print a VETO entry's constraint citations line, when it has any."""
+    citations: Any = oracle_dict.get("constraint_citations")
+    if isinstance(citations, list) and citations:
+        cite_str: str = ", ".join(
+            c.get("constraint_id", str(c)) if isinstance(c, dict) else str(c)
+            for c in citations if c
+        )
+        if cite_str:
+            print(f"      citations: {cite_str}")
 
 
 def _short_hash(value: str, length: int) -> str:

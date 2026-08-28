@@ -204,6 +204,13 @@ def _validate_hook_payload(
     if not isinstance(fp, str) or not fp:
         warnings.append(f"file_path missing or not a string (got {type(fp).__name__})")
 
+    warnings.extend(_tool_field_warnings(tool_name, tool_input))
+    return warnings
+
+
+def _tool_field_warnings(tool_name: str, tool_input: dict[str, Any]) -> list[str]:
+    """Return validation warnings for the tool-specific payload fields."""
+    warnings: list[str] = []
     if tool_name == "Write":
         content: Any = tool_input.get("content")
         if not isinstance(content, str):
@@ -258,22 +265,31 @@ def build_response_from_verdict(verdict: dict[str, Any]) -> dict[str, Any]:
     """
     decision: str = verdict.get("verdict", "PASS")
     if decision == "VETO":
-        reasoning: Any = verdict.get("reason")
-        if not isinstance(reasoning, str) or not reasoning:
-            reasoning = "Change rejected by governance pipeline."
-        violated: Any = verdict.get("violated_constraints")
-        if isinstance(violated, list) and violated:
-            tag: str = ", ".join(str(cid) for cid in violated)
-            reason: str = f"BENCH VETO [{tag}]: {reasoning}"
-        else:
-            reason = f"BENCH VETO: {reasoning}"
-        remediation_raw: Any = verdict.get("remediation")
-        if isinstance(remediation_raw, str) and remediation_raw:
-            remediation: str = f"Remediation: {remediation_raw}"
-        else:
-            remediation = "Remediation: see ledger entry for details."
-        return build_deny_response(reason, remediation)
+        return _build_veto_response(verdict)
+    return _build_pass_response(verdict)
 
+
+def _build_veto_response(verdict: dict[str, Any]) -> dict[str, Any]:
+    """Build the deny response for a VETO verdict."""
+    reasoning: Any = verdict.get("reason")
+    if not isinstance(reasoning, str) or not reasoning:
+        reasoning = "Change rejected by governance pipeline."
+    violated: Any = verdict.get("violated_constraints")
+    if isinstance(violated, list) and violated:
+        tag: str = ", ".join(str(cid) for cid in violated)
+        reason: str = f"BENCH VETO [{tag}]: {reasoning}"
+    else:
+        reason = f"BENCH VETO: {reasoning}"
+    remediation_raw: Any = verdict.get("remediation")
+    if isinstance(remediation_raw, str) and remediation_raw:
+        remediation: str = f"Remediation: {remediation_raw}"
+    else:
+        remediation = "Remediation: see ledger entry for details."
+    return build_deny_response(reason, remediation)
+
+
+def _build_pass_response(verdict: dict[str, Any]) -> dict[str, Any]:
+    """Build the allow response for a PASS verdict, with Oracle advisories."""
     message: str = "Bench governance: PASS. All constraints satisfied."
     advisories: Any = verdict.get("advisories")
     if isinstance(advisories, list):

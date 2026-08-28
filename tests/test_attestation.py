@@ -236,13 +236,15 @@ class StructuralFailureTests(unittest.TestCase):
             build_attestation(chain, _H3, _VERSION)
 
     def test_bad_version_aborts(self) -> None:
+        chain = _chain()
         with self.assertRaises(AttestationError):
-            build_attestation(_chain(), _H3, "v2")
+            build_attestation(chain, _H3, "v2")
 
     def test_unknown_cutoff_aborts(self) -> None:
         """A checkpoint must declare a boundary that exists."""
+        chain = _chain()
         with self.assertRaises(AttestationError):
-            build_attestation(_chain(), "f" * 64, _VERSION)
+            build_attestation(chain, "f" * 64, _VERSION)
 
 
 class CheckpointTests(unittest.TestCase):

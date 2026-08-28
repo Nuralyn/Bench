@@ -557,6 +557,81 @@ def _load_constitution() -> tuple[str, list, Any]:
     return constitution_hash, sources, constitution.get("version")
 
 
+def _check_archive_matches(
+    archive_result: dict, facts: dict, archive_root: Path
+) -> None:
+    """Refuse unless the archive verifies and equals the live chain.
+
+    C-008(b): this runs BEFORE anything is removed, so every refusal here
+    leaves the live chain byte-identical.
+    """
+    if not archive_result.get("valid"):
+        raise RetirementError(
+            f"refusing to retire: the archive at {archive_root} does not "
+            f"verify ({archive_result.get('failure_type', 'unknown')}: "
+            f"{archive_result.get('message', 'no detail')}). The live chain "
+            f"was not touched."
+        )
+    if int(archive_result.get("entries", -1)) != facts["entries"]:
+        raise RetirementError(
+            f"refusing to retire: the archive holds "
+            f"{archive_result.get('entries')} entries but the live chain has "
+            f"{facts['entries']}. The live chain was not touched."
+        )
+    if archive_result.get("tips") != [facts["tip_hash"]]:
+        raise RetirementError(
+            f"refusing to retire: the archive's tips "
+            f"{archive_result.get('tips')} do not match the live chain's tip "
+            f"{facts['tip_hash']}. The live chain was not touched."
+        )
+
+
+def _check_staged_matches(
+    staging: Path,
+    resolved: str,
+    moved: list[str],
+    facts: dict,
+    archive_root: Path,
+) -> None:
+    """Re-check the staged chain against the archive, restoring on drift.
+
+    A governance run in another session can append between the archive
+    verification and the segments being moved aside. Under the old sequential
+    delete that receipt was destroyed without ever appearing in the archive or
+    in the anchor's count, which is precisely the removal of an entry C-008
+    forbids without exception. Comparing the staged chain against the archive
+    turns that race into a refusal, and because the segments were moved rather
+    than deleted, the refusal restores the chain exactly as it was.
+    """
+    try:
+        staged: dict = verify_chain(str(staging / Path(resolved).name))
+        drifted: bool = (
+            not staged.get("valid")
+            or int(staged.get("entries", -1)) != facts["entries"]
+            or staged.get("tips") != [facts["tip_hash"]]
+        )
+    except Exception:
+        # Any failure raised while the chain is set aside has to put it back
+        # before it surfaces, or an unrelated fault leaves the operator with a
+        # ledger directory that looks empty. Restore, then re-raise unchanged
+        # so the real error is never masked (C-001).
+        _restore_segments(staging, resolved, moved)
+        _discard_staging(staging)
+        raise
+
+    if drifted:
+        _restore_segments(staging, resolved, moved)
+        _discard_staging(staging)
+        raise RetirementError(
+            f"refusing to retire: the live chain changed between being "
+            f"archived and being moved aside, so the archive at {archive_root} "
+            f"is already stale and retiring would destroy the entry that "
+            f"landed in between. The chain has been restored exactly as it "
+            f"was. This happens when a governed edit runs mid-retirement; "
+            f"retry with no other session writing to this ledger."
+        )
+
+
 def execute_retirement(
     *,
     archive_dir: str,
@@ -642,25 +717,7 @@ def execute_retirement(
 
     archive_ledger: str = str(archive_root / Path(resolved).name)
     archive_result: dict = verify_chain(archive_ledger)
-    if not archive_result.get("valid"):
-        raise RetirementError(
-            f"refusing to retire: the archive at {archive_root} does not "
-            f"verify ({archive_result.get('failure_type', 'unknown')}: "
-            f"{archive_result.get('message', 'no detail')}). The live chain "
-            f"was not touched."
-        )
-    if int(archive_result.get("entries", -1)) != facts["entries"]:
-        raise RetirementError(
-            f"refusing to retire: the archive holds "
-            f"{archive_result.get('entries')} entries but the live chain has "
-            f"{facts['entries']}. The live chain was not touched."
-        )
-    if archive_result.get("tips") != [facts["tip_hash"]]:
-        raise RetirementError(
-            f"refusing to retire: the archive's tips "
-            f"{archive_result.get('tips')} do not match the live chain's tip "
-            f"{facts['tip_hash']}. The live chain was not touched."
-        )
+    _check_archive_matches(archive_result, facts, archive_root)
 
     summary: dict = build_anchor_summary(
         facts,
@@ -681,44 +738,11 @@ def execute_retirement(
 
     # Move the live chain aside rather than deleting it, then re-check it
     # against the archive now that nothing can be appended to it.
-    #
-    # A governance run in another session can append between the archive
-    # verification above and this point. Under the old sequential delete that
-    # receipt was destroyed without ever appearing in the archive or in the
-    # anchor's count, which is precisely the removal of an entry C-008 forbids
-    # without exception. Comparing the staged chain against the archive turns
-    # that race into a refusal, and because the segments were moved rather than
-    # deleted, the refusal restores the chain exactly as it was.
+    # _check_staged_matches restores the moved segments and refuses if an
+    # entry landed in between, so the race is a refusal rather than a loss.
     staging: Path = ledger_dir / f".retiring-{started.strftime('%Y-%m-%dT%H%M%SZ')}"
     moved: list[str] = _stage_segments(resolved, segments, staging)
-
-    try:
-        staged: dict = verify_chain(str(staging / Path(resolved).name))
-        drifted: bool = (
-            not staged.get("valid")
-            or int(staged.get("entries", -1)) != facts["entries"]
-            or staged.get("tips") != [facts["tip_hash"]]
-        )
-    except Exception:
-        # Any failure raised while the chain is set aside has to put it back
-        # before it surfaces, or an unrelated fault leaves the operator with a
-        # ledger directory that looks empty. Restore, then re-raise unchanged
-        # so the real error is never masked (C-001).
-        _restore_segments(staging, resolved, moved)
-        _discard_staging(staging)
-        raise
-
-    if drifted:
-        _restore_segments(staging, resolved, moved)
-        _discard_staging(staging)
-        raise RetirementError(
-            f"refusing to retire: the live chain changed between being "
-            f"archived and being moved aside, so the archive at {archive_root} "
-            f"is already stale and retiring would destroy the entry that "
-            f"landed in between. The chain has been restored exactly as it "
-            f"was. This happens when a governed edit runs mid-retirement; "
-            f"retry with no other session writing to this ledger."
-        )
+    _check_staged_matches(staging, resolved, moved, facts, archive_root)
 
     anchor: dict = append_entry(
         {
