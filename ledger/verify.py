@@ -252,36 +252,54 @@ def _walk_legacy_array(entries: list[dict]) -> dict | None:
                 ),
             )
 
-        stored_prev: Any = entry.get("previous_hash")
-        if index == 0:
-            if stored_prev != _GENESIS_MARKER:
-                return _failure(
-                    entries_checked=index,
-                    failure_index=index,
-                    failure_type="INVALID_GENESIS",
-                    expected=_GENESIS_MARKER,
-                    found=repr(stored_prev),
-                    message=(
-                        "First entry must have previous_hash "
-                        f"'{_GENESIS_MARKER}'."
-                    ),
-                )
-        else:
-            if stored_prev != previous_entry_hash:
-                return _failure(
-                    entries_checked=index,
-                    failure_index=index,
-                    failure_type="CHAIN_BREAK",
-                    expected=previous_entry_hash,
-                    found=repr(stored_prev),
-                    message=(
-                        f"Entry {index} previous_hash does not match "
-                        f"entry {index - 1} entry_hash — chain broken."
-                    ),
-                )
+        link_failure: dict | None = _check_legacy_link(
+            index, entry, previous_entry_hash
+        )
+        if link_failure is not None:
+            return link_failure
 
         previous_entry_hash = stored_hash
 
+    return None
+
+
+def _check_legacy_link(
+    index: int, entry: dict, previous_entry_hash: str | None
+) -> dict | None:
+    """Check one entry's ``previous_hash`` link in the positional walk.
+
+    The first entry must carry the GENESIS sentinel; every later entry
+    must name the hash of the entry before it. Returns a ``_failure(...)``
+    dict on a broken link, else None.
+    """
+    stored_prev: Any = entry.get("previous_hash")
+    if index == 0:
+        if stored_prev != _GENESIS_MARKER:
+            return _failure(
+                entries_checked=index,
+                failure_index=index,
+                failure_type="INVALID_GENESIS",
+                expected=_GENESIS_MARKER,
+                found=repr(stored_prev),
+                message=(
+                    "First entry must have previous_hash "
+                    f"'{_GENESIS_MARKER}'."
+                ),
+            )
+        return None
+
+    if stored_prev != previous_entry_hash:
+        return _failure(
+            entries_checked=index,
+            failure_index=index,
+            failure_type="CHAIN_BREAK",
+            expected=previous_entry_hash,
+            found=repr(stored_prev),
+            message=(
+                f"Entry {index} previous_hash does not match "
+                f"entry {index - 1} entry_hash — chain broken."
+            ),
+        )
     return None
 
 
