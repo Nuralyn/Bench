@@ -214,17 +214,41 @@ def _build_edit(file_path: str, tool_input: dict) -> dict[str, Any]:
     return result
 
 
-def _build_multi_edit(file_path: str, tool_input: dict) -> dict[str, Any]:
-    edits_raw: Any = tool_input.get("edits", [])
-    if not isinstance(edits_raw, list):
-        edits_raw = []
+def _find_binary_multi_edit_leg(edits_raw: list) -> str | None:
+    """Concatenated old+new text of the first binary leg, or None."""
     for edit in edits_raw:
         if not isinstance(edit, dict):
             continue
         old_leg: str = _coerce_str(edit.get("old_string"))
         new_leg: str = _coerce_str(edit.get("new_string"))
         if _is_binary(old_leg) or _is_binary(new_leg):
-            return _binary_metadata(file_path, old_leg + new_leg, "multi_modify")
+            return old_leg + new_leg
+    return None
+
+
+def _leg_truncation_meta(
+    index: int,
+    old_meta: dict[str, Any] | None,
+    new_meta: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Truncation record for one leg, or None when neither side truncated."""
+    if old_meta is None and new_meta is None:
+        return None
+    leg: dict[str, Any] = {"index": index}
+    if old_meta is not None:
+        leg["old"] = old_meta
+    if new_meta is not None:
+        leg["new"] = new_meta
+    return leg
+
+
+def _collect_multi_edit_legs(
+    edits_raw: list,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int, int]:
+    """Truncate and budget each MultiEdit leg.
+
+    Returns (out_edits, out_trunc, omitted, fitted).
+    """
     out_edits: list[dict[str, Any]] = []
     out_trunc: list[dict[str, Any]] = []
     budget_used: int = 0
@@ -273,13 +297,22 @@ def _build_multi_edit(file_path: str, tool_input: dict) -> dict[str, Any]:
         budget_used += cost
 
         out_edits.append({"old_string": old_trunc, "new_string": new_trunc})
-        if old_meta is not None or new_meta is not None:
-            leg: dict[str, Any] = {"index": index}
-            if old_meta is not None:
-                leg["old"] = old_meta
-            if new_meta is not None:
-                leg["new"] = new_meta
+        leg: dict[str, Any] | None = _leg_truncation_meta(
+            index, old_meta, new_meta
+        )
+        if leg is not None:
             out_trunc.append(leg)
+    return out_edits, out_trunc, omitted, fitted
+
+
+def _build_multi_edit(file_path: str, tool_input: dict) -> dict[str, Any]:
+    edits_raw: Any = tool_input.get("edits", [])
+    if not isinstance(edits_raw, list):
+        edits_raw = []
+    binary_text: str | None = _find_binary_multi_edit_leg(edits_raw)
+    if binary_text is not None:
+        return _binary_metadata(file_path, binary_text, "multi_modify")
+    out_edits, out_trunc, omitted, fitted = _collect_multi_edit_legs(edits_raw)
     result: dict[str, Any] = {
         "file_path": file_path,
         "change_type": "multi_modify",
@@ -455,6 +488,46 @@ def _clamp_to_budget(lines: list[str]) -> tuple[list[str], int]:
     return head + [marker] + list(reversed(tail)), dropped
 
 
+def _select_preserved_lines(lines: list[str], original: int) -> set[int]:
+    """Indices of governance-critical lines to keep during truncation.
+
+    Keeps the first 50 lines, the last 20 lines, every line whose stripped
+    form starts with ``def `` or ``class ``, and every line containing
+    ``except`` or ``catch`` (substring match).
+    """
+    keep: set[int] = set(range(0, min(_FIRST_N, original)))
+    keep.update(range(max(0, original - _LAST_N), original))
+    for i, line in enumerate(lines):
+        stripped: str = line.lstrip()
+        if stripped.startswith(("def ", "class ")):
+            keep.add(i)
+            continue
+        if "except" in line or "catch" in line:
+            keep.add(i)
+    return keep
+
+
+def _assemble_selection(
+    lines: list[str], sorted_keep: list[int]
+) -> tuple[list[str], bool]:
+    """Render the kept lines with gap markers and per-line caps.
+
+    Returns (out_lines, capped_any).
+    """
+    out_lines: list[str] = []
+    prev: int = -1
+    capped_any: bool = False
+    for idx in sorted_keep:
+        if prev != -1 and idx != prev + 1:
+            gap: int = idx - prev - 1
+            out_lines.append(f"[BENCH TRUNCATION: {gap} lines omitted]")
+        capped_line, was_capped = _cap_line(lines[idx])
+        capped_any = capped_any or was_capped
+        out_lines.append(capped_line)
+        prev = idx
+    return out_lines, capped_any
+
+
 def _truncate_preserving(
     text: str,
 ) -> tuple[str, dict[str, Any] | None]:
@@ -474,28 +547,10 @@ def _truncate_preserving(
     if original <= MAX_DIFF_LINES and original_chars <= MAX_DIFF_CHARS:
         return text, None
 
-    keep: set[int] = set(range(0, min(_FIRST_N, original)))
-    keep.update(range(max(0, original - _LAST_N), original))
-    for i, line in enumerate(lines):
-        stripped: str = line.lstrip()
-        if stripped.startswith("def ") or stripped.startswith("class "):
-            keep.add(i)
-            continue
-        if "except" in line or "catch" in line:
-            keep.add(i)
+    keep: set[int] = _select_preserved_lines(lines, original)
 
     sorted_keep: list[int] = sorted(keep)
-    out_lines: list[str] = []
-    prev: int = -1
-    capped_any: bool = False
-    for idx in sorted_keep:
-        if prev != -1 and idx != prev + 1:
-            gap: int = idx - prev - 1
-            out_lines.append(f"[BENCH TRUNCATION: {gap} lines omitted]")
-        capped_line, was_capped = _cap_line(lines[idx])
-        capped_any = capped_any or was_capped
-        out_lines.append(capped_line)
-        prev = idx
+    out_lines, capped_any = _assemble_selection(lines, sorted_keep)
     kept: int = len(sorted_keep)
 
     # Nothing was actually cut: every line survived, none needed capping, and

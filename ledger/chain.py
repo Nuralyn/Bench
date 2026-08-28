@@ -209,6 +209,24 @@ def _redact_external_diff(diff_summary: Any) -> Any:
     return kept
 
 
+def _cap_string_field(value: Any) -> Any:
+    """Truncate ``value`` if it is a string over _MAX_FIELD_CHARS."""
+    if isinstance(value, str) and len(value) > _MAX_FIELD_CHARS:
+        return value[:_MAX_FIELD_CHARS] + " [TRUNCATED]"
+    return value
+
+
+def _cap_list_field(value: list[Any]) -> list[Any]:
+    """Cap oversized strings inside each dict item of a stage list field."""
+    new_list: list[Any] = []
+    for item in value:
+        if isinstance(item, dict):
+            new_list.append({k: _cap_string_field(v) for k, v in item.items()})
+        else:
+            new_list.append(item)
+    return new_list
+
+
 def _cap_stage_fields(stage: Any) -> Any:
     """Truncate oversized string fields in a pipeline stage dict.
 
@@ -220,24 +238,10 @@ def _cap_stage_fields(stage: Any) -> Any:
         return stage
     capped: dict[str, Any] = {}
     for key, value in stage.items():
-        if isinstance(value, str) and len(value) > _MAX_FIELD_CHARS:
-            capped[key] = value[:_MAX_FIELD_CHARS] + " [TRUNCATED]"
-        elif isinstance(value, list):
-            new_list: list[Any] = []
-            for item in value:
-                if isinstance(item, dict):
-                    new_item: dict[str, Any] = {}
-                    for k, v in item.items():
-                        if isinstance(v, str) and len(v) > _MAX_FIELD_CHARS:
-                            new_item[k] = v[:_MAX_FIELD_CHARS] + " [TRUNCATED]"
-                        else:
-                            new_item[k] = v
-                    new_list.append(new_item)
-                else:
-                    new_list.append(item)
-            capped[key] = new_list
+        if isinstance(value, list):
+            capped[key] = _cap_list_field(value)
         else:
-            capped[key] = value
+            capped[key] = _cap_string_field(value)
     serialized: str = json.dumps(capped, default=str)
     if len(serialized) > _MAX_STAGE_CHARS:
         return {
@@ -327,30 +331,8 @@ def _load_entry_files(entries_dir: Path, *, strict: bool) -> list[dict]:
 
     entries: list[dict] = []
     for entry_file in sorted(entries_dir.glob("*.json")):
-        try:
-            data: object = json.loads(entry_file.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as e:
-            if strict:
-                raise LedgerReadError(
-                    f"cannot read ledger entry {entry_file}: {e}"
-                ) from e
-            print(
-                f"[bench ledger] skipping unreadable entry {entry_file}: {e}",
-                file=sys.stderr,
-            )
-            continue
-
-        if not isinstance(data, dict):
-            if strict:
-                raise LedgerReadError(
-                    f"ledger entry {entry_file} is not a JSON object "
-                    f"(got {type(data).__name__})"
-                )
-            print(
-                f"[bench ledger] skipping malformed entry {entry_file} "
-                f"(got {type(data).__name__})",
-                file=sys.stderr,
-            )
+        data: dict | None = _read_entry_file(entry_file, strict=strict)
+        if data is None:
             continue
 
         # On the write path, being parseable is not enough. An entry with a
@@ -369,6 +351,42 @@ def _load_entry_files(entries_dir: Path, *, strict: bool) -> list[dict]:
 
         entries.append(data)
     return entries
+
+
+def _read_entry_file(entry_file: Path, *, strict: bool) -> dict | None:
+    """Parse one entry file, or return ``None`` when it is skipped.
+
+    ``strict=True`` raises ``LedgerReadError`` on any unreadable or
+    malformed file; ``strict=False`` logs to stderr and skips it, so the
+    lenient read path can still surface the rest of the history.
+    """
+    try:
+        data: object = json.loads(entry_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as e:
+        if strict:
+            raise LedgerReadError(
+                f"cannot read ledger entry {entry_file}: {e}"
+            ) from e
+        print(
+            f"[bench ledger] skipping unreadable entry {entry_file}: {e}",
+            file=sys.stderr,
+        )
+        return None
+
+    if not isinstance(data, dict):
+        if strict:
+            raise LedgerReadError(
+                f"ledger entry {entry_file} is not a JSON object "
+                f"(got {type(data).__name__})"
+            )
+        print(
+            f"[bench ledger] skipping malformed entry {entry_file} "
+            f"(got {type(data).__name__})",
+            file=sys.stderr,
+        )
+        return None
+
+    return data
 
 
 def _entry_defect(entry: dict, entry_file: Path) -> str:

@@ -32,6 +32,23 @@ class SanitizeErrorDetailTests(unittest.TestCase):
         result = _sanitize_error_detail(msg)
         self.assertIn("[REDACTED]", result)
 
+    def test_strips_uppercase_sk_key(self) -> None:
+        msg = "rejected key sk-ANT-ABCDEF1234567890"
+        result = _sanitize_error_detail(msg)
+        self.assertNotIn("sk-ANT-ABCDEF1234567890", result)
+        self.assertIn("[REDACTED]", result)
+
+    def test_strips_all_categories_in_one_message(self) -> None:
+        msg = (
+            "auth failed: api_key=sk-abcdefghij123456 "
+            "with header Bearer tok_9876543210 and spare sk-zyxwvut987654"
+        )
+        result = _sanitize_error_detail(msg)
+        self.assertNotIn("sk-abcdefghij123456", result)
+        self.assertNotIn("tok_9876543210", result)
+        self.assertNotIn("sk-zyxwvut987654", result)
+        self.assertIn("[REDACTED]", result)
+
     def test_truncates_long_messages(self) -> None:
         msg = "x" * 1000
         result = _sanitize_error_detail(msg)

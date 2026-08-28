@@ -59,8 +59,9 @@ class ClaudeCliCallTests(unittest.TestCase):
 
     @mock.patch("utils.api.shutil.which", return_value=None)
     def test_binary_missing_raises(self, _which) -> None:
+        msgs: list[dict[str, str]] = _msgs()
         with self.assertRaises(_ProviderError):
-            _claude_cli_call("claude-sonnet-4-6", "sys", _msgs(), 4096)
+            _claude_cli_call("claude-sonnet-4-6", "sys", msgs, 4096)
 
     @mock.patch("utils.api.subprocess.run")
     @mock.patch("utils.api.shutil.which", return_value="/usr/bin/claude")
@@ -68,8 +69,9 @@ class ClaudeCliCallTests(unittest.TestCase):
         run.return_value = _completed(
             stderr="boom sk-ant-secret1234567890", returncode=1
         )
+        msgs: list[dict[str, str]] = _msgs()
         with self.assertRaises(_ProviderError) as ctx:
-            _claude_cli_call("claude-sonnet-4-6", "sys", _msgs(), 4096)
+            _claude_cli_call("claude-sonnet-4-6", "sys", msgs, 4096)
         self.assertNotIn("sk-ant-secret1234567890", str(ctx.exception))
         self.assertIn("[REDACTED]", str(ctx.exception))
 
@@ -79,16 +81,18 @@ class ClaudeCliCallTests(unittest.TestCase):
     )
     @mock.patch("utils.api.shutil.which", return_value="/usr/bin/claude")
     def test_timeout_raises(self, _which, _run) -> None:
+        msgs: list[dict[str, str]] = _msgs()
         with self.assertRaises(_ProviderError) as ctx:
-            _claude_cli_call("claude-sonnet-4-6", "sys", _msgs(), 4096)
+            _claude_cli_call("claude-sonnet-4-6", "sys", msgs, 4096)
         self.assertIn("timed out", str(ctx.exception))
 
     @mock.patch("utils.api.subprocess.run")
     @mock.patch("utils.api.shutil.which", return_value="/usr/bin/claude")
     def test_malformed_json_raises(self, _which, run) -> None:
         run.return_value = _completed(stdout="not json at all")
+        msgs: list[dict[str, str]] = _msgs()
         with self.assertRaises(_ProviderError):
-            _claude_cli_call("claude-sonnet-4-6", "sys", _msgs(), 4096)
+            _claude_cli_call("claude-sonnet-4-6", "sys", msgs, 4096)
 
     @mock.patch("utils.api.subprocess.run")
     @mock.patch("utils.api.shutil.which", return_value="/usr/bin/claude")
@@ -102,15 +106,17 @@ class ClaudeCliCallTests(unittest.TestCase):
                 }
             )
         )
+        msgs: list[dict[str, str]] = _msgs()
         with self.assertRaises(_ProviderError):
-            _claude_cli_call("claude-sonnet-4-6", "sys", _msgs(), 4096)
+            _claude_cli_call("claude-sonnet-4-6", "sys", msgs, 4096)
 
     @mock.patch("utils.api.subprocess.run")
     @mock.patch("utils.api.shutil.which", return_value="/usr/bin/claude")
     def test_envelope_not_object_raises(self, _which, run) -> None:
         run.return_value = _completed(stdout="[1, 2, 3]")
+        msgs: list[dict[str, str]] = _msgs()
         with self.assertRaises(_ProviderError):
-            _claude_cli_call("claude-sonnet-4-6", "sys", _msgs(), 4096)
+            _claude_cli_call("claude-sonnet-4-6", "sys", msgs, 4096)
 
     @mock.patch("utils.api.subprocess.run")
     @mock.patch("utils.api.shutil.which", return_value="/usr/bin/claude")
@@ -212,12 +218,13 @@ class ClaudeCliCallTests(unittest.TestCase):
         # If the system-prompt temp file cannot be written, the helper must
         # raise the typed _ProviderError, never a bare OSError that would break
         # call_model's never-raises contract.
+        msgs: list[dict[str, str]] = _msgs()
         with mock.patch(
             "utils.api.tempfile.NamedTemporaryFile",
             side_effect=OSError("disk full"),
         ):
             with self.assertRaises(_ProviderError):
-                _claude_cli_call("claude-sonnet-4-6", "sys", _msgs(), 4096)
+                _claude_cli_call("claude-sonnet-4-6", "sys", msgs, 4096)
 
     @mock.patch("utils.api.subprocess.run")
     @mock.patch("utils.api.shutil.which", return_value="/usr/bin/claude")
@@ -253,8 +260,9 @@ class ClaudeCliCallTests(unittest.TestCase):
         run.return_value = _completed(
             stdout=json.dumps({"subtype": "error_max_turns", "result": "partial"})
         )
+        msgs: list[dict[str, str]] = _msgs()
         with self.assertRaises(_ProviderError):
-            _claude_cli_call("claude-sonnet-4-6", "sys", _msgs(), 4096)
+            _claude_cli_call("claude-sonnet-4-6", "sys", msgs, 4096)
 
     @mock.patch("utils.api.subprocess.run")
     @mock.patch("utils.api.shutil.which", return_value="/usr/bin/claude")

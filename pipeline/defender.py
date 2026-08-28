@@ -187,16 +187,23 @@ def _validate_defender_response(response: dict[str, Any]) -> bool:
         return False
 
     for rebuttal in rebuttals:
-        if not isinstance(rebuttal, dict):
-            return False
-        finding_index: Any = rebuttal.get("finding_index")
-        if not isinstance(finding_index, int) or isinstance(finding_index, bool):
-            return False
-        for field in _REQUIRED_REBUTTAL_STRING_FIELDS:
-            value: Any = rebuttal.get(field)
-            if not isinstance(value, str) or not value:
-                return False
-        if rebuttal["position"] not in _VALID_POSITIONS:
+        if not _is_valid_rebuttal(rebuttal):
             return False
 
+    return True
+
+
+def _is_valid_rebuttal(rebuttal: Any) -> bool:
+    """Return True if a single rebuttal entry matches the schema."""
+    if not isinstance(rebuttal, dict):
+        return False
+    finding_index: Any = rebuttal.get("finding_index")
+    if not isinstance(finding_index, int) or isinstance(finding_index, bool):
+        return False
+    for field in _REQUIRED_REBUTTAL_STRING_FIELDS:
+        value: Any = rebuttal.get(field)
+        if not isinstance(value, str) or not value:
+            return False
+    if rebuttal["position"] not in _VALID_POSITIONS:
+        return False
     return True

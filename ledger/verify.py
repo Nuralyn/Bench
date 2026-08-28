@@ -23,6 +23,7 @@ from ledger.chain import META_FILENAME as _META_FILENAME
 from ledger.chain import compute_entry_hash, resolve_ledger_path
 
 _GENESIS_MARKER: str = "GENESIS"
+_NO_LEDGER_MESSAGE: str = "No ledger found. Nothing to verify."
 _ENTRIES_DIRNAME: str = "entries"
 """Per-entry directory name, re-declared rather than imported from chain.py.
 
@@ -54,143 +55,13 @@ def verify_chain(path: str | None = None) -> dict:
         entries_dir.glob("*.json")
     )
 
-    raw: str = ""
-    if not file_path.exists():
-        if not has_entry_files:
-            return {
-                "valid": True,
-                "entries": 0,
-                "ledger_path": str(file_path),
-                "message": "No ledger found. Nothing to verify.",
-            }
-    else:
-        try:
-            raw = file_path.read_text(encoding="utf-8")
-        except OSError as e:
-            return {
-                "valid": False,
-                "entries_checked": 0,
-                "failure_index": -1,
-                "failure_type": "READ_ERROR",
-                "expected": "readable ledger file",
-                "found": str(e),
-                "message": f"Could not read ledger at {file_path}: {e}",
-            }
+    early_result, entries = _load_legacy_array(file_path, has_entry_files)
+    if early_result is not None:
+        return early_result
 
-    if not raw.strip():
-        if not has_entry_files:
-            return {
-                "valid": True,
-                "entries": 0,
-                "message": "No ledger found. Nothing to verify.",
-            }
-        data: object = []
-    else:
-        try:
-            data = json.loads(raw)
-        except json.JSONDecodeError as e:
-            return {
-                "valid": False,
-                "entries_checked": 0,
-                "failure_index": -1,
-                "failure_type": "PARSE_ERROR",
-                "expected": "valid JSON array",
-                "found": f"JSONDecodeError: {e}",
-                "message": f"Ledger at {file_path} is not valid JSON: {e}",
-            }
-
-    if not isinstance(data, list):
-        return {
-            "valid": False,
-            "entries_checked": 0,
-            "failure_index": -1,
-            "failure_type": "PARSE_ERROR",
-            "expected": "JSON array at ledger root",
-            "found": type(data).__name__,
-            "message": (
-                f"Ledger at {file_path} root must be a JSON array, "
-                f"got {type(data).__name__}"
-            ),
-        }
-
-    if len(data) == 0 and not has_entry_files:
-        return {
-            "valid": True,
-            "entries": 0,
-            "message": "No ledger found. Nothing to verify.",
-        }
-
-    entries: list[dict] = data
-    previous_entry_hash: str | None = None
-
-    for index, entry in enumerate(entries):
-        if not isinstance(entry, dict):
-            return _failure(
-                entries_checked=index,
-                failure_index=index,
-                failure_type="SCHEMA_ERROR",
-                expected="entry to be a JSON object",
-                found=type(entry).__name__,
-                message=(
-                    f"Entry {index} is not a JSON object "
-                    f"(got {type(entry).__name__})."
-                ),
-            )
-
-        stored_hash: Any = entry.get("entry_hash")
-        if not isinstance(stored_hash, str):
-            return _failure(
-                entries_checked=index,
-                failure_index=index,
-                failure_type="SCHEMA_ERROR",
-                expected="entry_hash field (string)",
-                found=repr(stored_hash),
-                message=f"Entry {index} is missing a string entry_hash.",
-            )
-
-        recomputed: str = compute_entry_hash(entry)
-        if recomputed != stored_hash:
-            return _failure(
-                entries_checked=index,
-                failure_index=index,
-                failure_type="HASH_MISMATCH",
-                expected=recomputed,
-                found=stored_hash,
-                message=(
-                    f"Entry {index} has been tampered with: stored "
-                    f"entry_hash does not match recomputed hash."
-                ),
-            )
-
-        stored_prev: Any = entry.get("previous_hash")
-        if index == 0:
-            if stored_prev != _GENESIS_MARKER:
-                return _failure(
-                    entries_checked=index,
-                    failure_index=index,
-                    failure_type="INVALID_GENESIS",
-                    expected=_GENESIS_MARKER,
-                    found=repr(stored_prev),
-                    message=(
-                        "First entry must have previous_hash "
-                        f"'{_GENESIS_MARKER}'."
-                    ),
-                )
-        else:
-            if stored_prev != previous_entry_hash:
-                return _failure(
-                    entries_checked=index,
-                    failure_index=index,
-                    failure_type="CHAIN_BREAK",
-                    expected=previous_entry_hash,
-                    found=repr(stored_prev),
-                    message=(
-                        f"Entry {index} previous_hash does not match "
-                        f"entry {index - 1} entry_hash — chain broken."
-                    ),
-                )
-
-        previous_entry_hash = stored_hash
+    walk_failure: dict | None = _walk_legacy_array(entries)
+    if walk_failure is not None:
+        return walk_failure
 
     # Scoped to the legacy array, which ledger-meta.json permanently pins. The
     # array is frozen — never appended to again — so the anchor stays a fixed
@@ -249,6 +120,187 @@ def verify_chain(path: str | None = None) -> dict:
         "tips": tips,
         "meta": meta_note,
     }
+
+
+def _load_legacy_array(
+    file_path: Path, has_entry_files: bool
+) -> tuple[dict | None, list[dict]]:
+    """Read and parse the frozen legacy array, or finish verification early.
+
+    Returns ``(early_result, entries)``. ``early_result`` is a completed
+    verification summary (trivially valid, or a structural failure in the
+    array itself) for ``verify_chain`` to return unchanged; when it is
+    None, ``entries`` is the parsed legacy array (possibly empty) and the
+    walk proceeds.
+    """
+    raw: str = ""
+    if not file_path.exists():
+        if not has_entry_files:
+            return {
+                "valid": True,
+                "entries": 0,
+                "ledger_path": str(file_path),
+                "message": _NO_LEDGER_MESSAGE,
+            }, []
+    else:
+        try:
+            raw = file_path.read_text(encoding="utf-8")
+        except OSError as e:
+            return {
+                "valid": False,
+                "entries_checked": 0,
+                "failure_index": -1,
+                "failure_type": "READ_ERROR",
+                "expected": "readable ledger file",
+                "found": str(e),
+                "message": f"Could not read ledger at {file_path}: {e}",
+            }, []
+
+    if not raw.strip():
+        if not has_entry_files:
+            return {
+                "valid": True,
+                "entries": 0,
+                "message": _NO_LEDGER_MESSAGE,
+            }, []
+        data: object = []
+    else:
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError as e:
+            return {
+                "valid": False,
+                "entries_checked": 0,
+                "failure_index": -1,
+                "failure_type": "PARSE_ERROR",
+                "expected": "valid JSON array",
+                "found": f"JSONDecodeError: {e}",
+                "message": f"Ledger at {file_path} is not valid JSON: {e}",
+            }, []
+
+    if not isinstance(data, list):
+        return {
+            "valid": False,
+            "entries_checked": 0,
+            "failure_index": -1,
+            "failure_type": "PARSE_ERROR",
+            "expected": "JSON array at ledger root",
+            "found": type(data).__name__,
+            "message": (
+                f"Ledger at {file_path} root must be a JSON array, "
+                f"got {type(data).__name__}"
+            ),
+        }, []
+
+    if len(data) == 0 and not has_entry_files:
+        return {
+            "valid": True,
+            "entries": 0,
+            "message": _NO_LEDGER_MESSAGE,
+        }, []
+
+    return None, data
+
+
+def _walk_legacy_array(entries: list[dict]) -> dict | None:
+    """Recompute every hash in the frozen array and check each link.
+
+    Returns a ``_failure(...)`` dict describing the first broken entry,
+    or None when the whole array walks clean. The checks and their order
+    are exactly the original positional walk: object shape, string
+    entry_hash, recomputed hash, then the genesis marker or the link to
+    the previous entry.
+    """
+    previous_entry_hash: str | None = None
+
+    for index, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            return _failure(
+                entries_checked=index,
+                failure_index=index,
+                failure_type="SCHEMA_ERROR",
+                expected="entry to be a JSON object",
+                found=type(entry).__name__,
+                message=(
+                    f"Entry {index} is not a JSON object "
+                    f"(got {type(entry).__name__})."
+                ),
+            )
+
+        stored_hash: Any = entry.get("entry_hash")
+        if not isinstance(stored_hash, str):
+            return _failure(
+                entries_checked=index,
+                failure_index=index,
+                failure_type="SCHEMA_ERROR",
+                expected="entry_hash field (string)",
+                found=repr(stored_hash),
+                message=f"Entry {index} is missing a string entry_hash.",
+            )
+
+        recomputed: str = compute_entry_hash(entry)
+        if recomputed != stored_hash:
+            return _failure(
+                entries_checked=index,
+                failure_index=index,
+                failure_type="HASH_MISMATCH",
+                expected=recomputed,
+                found=stored_hash,
+                message=(
+                    f"Entry {index} has been tampered with: stored "
+                    f"entry_hash does not match recomputed hash."
+                ),
+            )
+
+        link_failure: dict | None = _check_legacy_link(
+            index, entry, previous_entry_hash
+        )
+        if link_failure is not None:
+            return link_failure
+
+        previous_entry_hash = stored_hash
+
+    return None
+
+
+def _check_legacy_link(
+    index: int, entry: dict, previous_entry_hash: str | None
+) -> dict | None:
+    """Check one entry's ``previous_hash`` link in the positional walk.
+
+    The first entry must carry the GENESIS sentinel; every later entry
+    must name the hash of the entry before it. Returns a ``_failure(...)``
+    dict on a broken link, else None.
+    """
+    stored_prev: Any = entry.get("previous_hash")
+    if index == 0:
+        if stored_prev != _GENESIS_MARKER:
+            return _failure(
+                entries_checked=index,
+                failure_index=index,
+                failure_type="INVALID_GENESIS",
+                expected=_GENESIS_MARKER,
+                found=repr(stored_prev),
+                message=(
+                    "First entry must have previous_hash "
+                    f"'{_GENESIS_MARKER}'."
+                ),
+            )
+        return None
+
+    if stored_prev != previous_entry_hash:
+        return _failure(
+            entries_checked=index,
+            failure_index=index,
+            failure_type="CHAIN_BREAK",
+            expected=previous_entry_hash,
+            found=repr(stored_prev),
+            message=(
+                f"Entry {index} previous_hash does not match "
+                f"entry {index - 1} entry_hash — chain broken."
+            ),
+        )
+    return None
 
 
 def _check_meta_anchor(
@@ -351,106 +403,123 @@ def _verify_entry_files(
         return None, checked
 
     for entry_file in sorted(entries_dir.glob("*.json")):
-        try:
-            parsed: object = json.loads(entry_file.read_text(encoding="utf-8"))
-        except OSError as e:
-            return _failure(
-                entries_checked=checked,
-                failure_index=-1,
-                failure_type="READ_ERROR",
-                expected="readable ledger entry file",
-                found=str(e),
-                message=f"Could not read ledger entry {entry_file}: {e}",
-            ), checked
-        except json.JSONDecodeError as e:
-            return _failure(
-                entries_checked=checked,
-                failure_index=-1,
-                failure_type="PARSE_ERROR",
-                expected="valid JSON object",
-                found=f"JSONDecodeError: {e}",
-                message=f"Ledger entry {entry_file} is not valid JSON: {e}",
-            ), checked
+        failure, parsed = _verify_one_entry_file(entry_file, seen, checked)
+        if failure is not None:
+            return failure, checked
 
-        if not isinstance(parsed, dict):
-            return _failure(
-                entries_checked=checked,
-                failure_index=-1,
-                failure_type="SCHEMA_ERROR",
-                expected="entry to be a JSON object",
-                found=type(parsed).__name__,
-                message=(
-                    f"Ledger entry {entry_file} is not a JSON object "
-                    f"(got {type(parsed).__name__})."
-                ),
-            ), checked
-
-        stored_hash: Any = parsed.get("entry_hash")
-        if not isinstance(stored_hash, str):
-            return _failure(
-                entries_checked=checked,
-                failure_index=-1,
-                failure_type="SCHEMA_ERROR",
-                expected="entry_hash field (string)",
-                found=repr(stored_hash),
-                message=f"Ledger entry {entry_file} is missing a string entry_hash.",
-            ), checked
-
-        recomputed: str = compute_entry_hash(parsed)
-        if recomputed != stored_hash:
-            return _failure(
-                entries_checked=checked,
-                failure_index=-1,
-                failure_type="HASH_MISMATCH",
-                expected=recomputed,
-                found=stored_hash,
-                message=(
-                    f"Ledger entry {entry_file} has been tampered with: "
-                    f"stored entry_hash does not match recomputed hash."
-                ),
-            ), checked
-
-        if entry_file.stem != stored_hash:
-            return _failure(
-                entries_checked=checked,
-                failure_index=-1,
-                failure_type="FILENAME_MISMATCH",
-                expected=f"{stored_hash}.json",
-                found=entry_file.name,
-                message=(
-                    f"Ledger entry {entry_file.name} does not match the "
-                    f"entry_hash it contains."
-                ),
-            ), checked
-
-        if stored_hash in seen:
-            return _failure(
-                entries_checked=checked,
-                failure_index=-1,
-                failure_type="DUPLICATE_ENTRY",
-                expected="each entry_hash to appear once",
-                found=stored_hash,
-                message=(
-                    f"Entry {stored_hash} appears more than once across the "
-                    f"ledger."
-                ),
-            ), checked
-
-        seen[stored_hash] = parsed
+        seen[parsed["entry_hash"]] = parsed
         checked += 1
 
     return None, checked
 
 
-def _verify_dag(seen: dict[str, dict], checked: int) -> tuple[dict | None, list[str]]:
-    """Check the union forms one connected, fully-linked history.
+def _verify_one_entry_file(
+    entry_file: Path, seen: dict[str, dict], checked: int
+) -> tuple[dict | None, dict]:
+    """Validate a single per-entry file against the union built so far.
 
-    Returns ``(failure, tips)``. Every parent must resolve to a real entry, so
-    a deleted non-tip file is caught; exactly one entry may claim GENESIS; and
-    every entry must be reachable from it, so a subtree grafted on without a
-    path back to the root cannot hide. Cycles cannot occur — a parent hash has
-    to exist before a child can commit to it — and would be caught here anyway,
-    since a cycle is unreachable from genesis.
+    Returns ``(failure, parsed)``. ``failure`` is a ``_failure(...)`` dict
+    at the first defect (unreadable, not JSON, not an object, missing or
+    mismatched hash, misnamed file, duplicate hash), else None with the
+    parsed entry. ``checked`` is only reported in failures; registering
+    the entry in ``seen`` stays with the caller.
+    """
+    try:
+        parsed: object = json.loads(entry_file.read_text(encoding="utf-8"))
+    except OSError as e:
+        return _failure(
+            entries_checked=checked,
+            failure_index=-1,
+            failure_type="READ_ERROR",
+            expected="readable ledger entry file",
+            found=str(e),
+            message=f"Could not read ledger entry {entry_file}: {e}",
+        ), {}
+    except json.JSONDecodeError as e:
+        return _failure(
+            entries_checked=checked,
+            failure_index=-1,
+            failure_type="PARSE_ERROR",
+            expected="valid JSON object",
+            found=f"JSONDecodeError: {e}",
+            message=f"Ledger entry {entry_file} is not valid JSON: {e}",
+        ), {}
+
+    if not isinstance(parsed, dict):
+        return _failure(
+            entries_checked=checked,
+            failure_index=-1,
+            failure_type="SCHEMA_ERROR",
+            expected="entry to be a JSON object",
+            found=type(parsed).__name__,
+            message=(
+                f"Ledger entry {entry_file} is not a JSON object "
+                f"(got {type(parsed).__name__})."
+            ),
+        ), {}
+
+    stored_hash: Any = parsed.get("entry_hash")
+    if not isinstance(stored_hash, str):
+        return _failure(
+            entries_checked=checked,
+            failure_index=-1,
+            failure_type="SCHEMA_ERROR",
+            expected="entry_hash field (string)",
+            found=repr(stored_hash),
+            message=f"Ledger entry {entry_file} is missing a string entry_hash.",
+        ), {}
+
+    recomputed: str = compute_entry_hash(parsed)
+    if recomputed != stored_hash:
+        return _failure(
+            entries_checked=checked,
+            failure_index=-1,
+            failure_type="HASH_MISMATCH",
+            expected=recomputed,
+            found=stored_hash,
+            message=(
+                f"Ledger entry {entry_file} has been tampered with: "
+                f"stored entry_hash does not match recomputed hash."
+            ),
+        ), {}
+
+    if entry_file.stem != stored_hash:
+        return _failure(
+            entries_checked=checked,
+            failure_index=-1,
+            failure_type="FILENAME_MISMATCH",
+            expected=f"{stored_hash}.json",
+            found=entry_file.name,
+            message=(
+                f"Ledger entry {entry_file.name} does not match the "
+                f"entry_hash it contains."
+            ),
+        ), {}
+
+    if stored_hash in seen:
+        return _failure(
+            entries_checked=checked,
+            failure_index=-1,
+            failure_type="DUPLICATE_ENTRY",
+            expected="each entry_hash to appear once",
+            found=stored_hash,
+            message=(
+                f"Entry {stored_hash} appears more than once across the "
+                f"ledger."
+            ),
+        ), {}
+
+    return None, parsed
+
+
+def _scan_links(
+    seen: dict[str, dict], checked: int
+) -> tuple[dict | None, list[str]]:
+    """Validate every entry's ``previous_hash`` link and collect genesis claims.
+
+    Returns ``(failure, genesis)``. ``failure`` is a ``_failure(...)`` dict
+    at the first malformed link or unresolvable parent, else None with the
+    hashes of every entry claiming the GENESIS sentinel.
     """
     genesis: list[str] = []
     for entry_hash, entry in seen.items():
@@ -500,6 +569,23 @@ def _verify_dag(seen: dict[str, dict], checked: int) -> tuple[dict | None, list[
                         f"which is not present in the ledger."
                     ),
                 ), []
+
+    return None, genesis
+
+
+def _verify_dag(seen: dict[str, dict], checked: int) -> tuple[dict | None, list[str]]:
+    """Check the union forms one connected, fully-linked history.
+
+    Returns ``(failure, tips)``. Every parent must resolve to a real entry, so
+    a deleted non-tip file is caught; exactly one entry may claim GENESIS; and
+    every entry must be reachable from it, so a subtree grafted on without a
+    path back to the root cannot hide. Cycles cannot occur — a parent hash has
+    to exist before a child can commit to it — and would be caught here anyway,
+    since a cycle is unreachable from genesis.
+    """
+    link_failure, genesis = _scan_links(seen, checked)
+    if link_failure is not None:
+        return link_failure, []
 
     if len(genesis) != 1:
         return _failure(

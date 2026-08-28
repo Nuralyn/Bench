@@ -254,9 +254,10 @@ class StrictWritePathTests(unittest.TestCase):
         """The corruption path: `{}` yields no tips, so the next entry would
         have been written with an empty parent list and become a second root."""
         (self._entries / "junk.json").write_text("{}", encoding="utf-8")
+        result: dict = _result()
 
         with self.assertRaises(LedgerReadError):
-            append_entry(_result(), path=self._ledger)
+            append_entry(result, path=self._ledger)
 
     def test_hash_mismatch_in_an_existing_entry_blocks_the_append(self) -> None:
         entry: dict = append_entry(_result(), path=self._ledger)
@@ -264,18 +265,20 @@ class StrictWritePathTests(unittest.TestCase):
         tampered: dict = json.loads(target.read_text(encoding="utf-8"))
         tampered["verdict"] = "VETO"
         target.write_text(json.dumps(tampered, indent=2), encoding="utf-8")
+        result: dict = _result()
 
         with self.assertRaises(LedgerReadError):
-            append_entry(_result(), path=self._ledger)
+            append_entry(result, path=self._ledger)
 
     def test_misnamed_entry_file_blocks_the_append(self) -> None:
         entry: dict = append_entry(_result(), path=self._ledger)
         (self._entries / f"{entry['entry_hash']}.json").rename(
             self._entries / "wrong-name.json"
         )
+        result: dict = _result()
 
         with self.assertRaises(LedgerReadError):
-            append_entry(_result(), path=self._ledger)
+            append_entry(result, path=self._ledger)
 
 
 class SummaryEndpointTests(unittest.TestCase):

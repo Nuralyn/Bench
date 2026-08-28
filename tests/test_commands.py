@@ -26,6 +26,7 @@ from cli.commands import (  # noqa: E402
     cmd_verify,
     cmd_viewer,
 )
+from ledger.chain import LedgerReadError  # noqa: E402
 from pipeline.constitution import ConstitutionError  # noqa: E402
 
 
@@ -154,6 +155,17 @@ class CmdLedgerTests(unittest.TestCase):
         text: str = out.getvalue()
         self.assertIn("b.py", text)
         self.assertNotIn("a.py", text)
+
+    def test_unreadable_ledger_exits_one(self) -> None:
+        err = io.StringIO()
+        with patch(
+            "cli.commands.load_ledger",
+            side_effect=LedgerReadError("corrupted ledger at x"),
+        ):
+            with redirect_stderr(err):
+                code: int = cmd_ledger()
+        self.assertEqual(code, 1)
+        self.assertIn("cannot read ledger", err.getvalue())
 
 
 class CmdStatsTests(unittest.TestCase):
