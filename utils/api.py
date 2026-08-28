@@ -82,15 +82,18 @@ _RETRY_NUDGE: str = (
 
 
 _MAX_ERROR_DETAIL_CHARS: int = 500
-_SENSITIVE_PATTERN: re.Pattern[str] = re.compile(
-    r"(sk-[A-Za-z0-9_-]{10,}|Bearer\s+\S+|api[_-]?key[\"']?\s*[:=]\s*\S+)",
-    re.IGNORECASE,
+_SENSITIVE_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"sk-[a-z0-9_-]{10,}", re.IGNORECASE),
+    re.compile(r"Bearer\s+\S+", re.IGNORECASE),
+    re.compile(r"api[_-]?key[\"']?\s*[:=]\s*\S+", re.IGNORECASE),
 )
 
 
 def _sanitize_error_detail(text: str) -> str:
     """Strip potential API keys and truncate error details."""
-    scrubbed: str = _SENSITIVE_PATTERN.sub("[REDACTED]", text)
+    scrubbed: str = text
+    for pattern in _SENSITIVE_PATTERNS:
+        scrubbed = pattern.sub("[REDACTED]", scrubbed)
     if len(scrubbed) > _MAX_ERROR_DETAIL_CHARS:
         return scrubbed[:_MAX_ERROR_DETAIL_CHARS] + "... [truncated]"
     return scrubbed
@@ -238,6 +241,28 @@ def strip_code_fences(text: str) -> str:
     return inner.strip()
 
 
+def _anthropic_text_blocks(content: Any) -> str:
+    """Concatenate the text blocks of an Anthropic response content list.
+
+    Adaptive-thinking models (Sonnet 5 runs adaptive thinking by default
+    when `thinking` is unset) can return a thinking block as content[0];
+    reading content[0].text would then yield "" and force a spurious
+    PARSE_FAILURE, which the stage reports as PIPELINE_ERROR and the runner
+    fails closed on, denying a legitimate change. Anchor selection to the
+    documented "text" block type (and require non-empty text) so thinking,
+    tool_use, or any future non-text block cannot leak into the governed
+    reply body.
+    """
+    texts: list[str] = []
+    for block in content:
+        if getattr(block, "type", None) != "text":
+            continue
+        block_text = getattr(block, "text", "")
+        if isinstance(block_text, str) and block_text:
+            texts.append(block_text)
+    return "".join(texts)
+
+
 def _anthropic_call(
     model: str,
     system_prompt: str,
@@ -284,23 +309,7 @@ def _anthropic_call(
         text: str = ""
         content = getattr(response, "content", None)
         if content:
-            # Concatenate the text blocks. Adaptive-thinking models (Sonnet 5
-            # runs adaptive thinking by default when `thinking` is unset) can
-            # return a thinking block as content[0]; reading content[0].text
-            # would then yield "" and force a spurious PARSE_FAILURE, which the
-            # stage reports as PIPELINE_ERROR and the runner fails closed on,
-            # denying a legitimate change. Anchor selection to the documented
-            # "text" block type (and require non-empty text) so thinking,
-            # tool_use, or any future non-text block cannot leak into the
-            # governed reply body.
-            texts: list[str] = []
-            for block in content:
-                if getattr(block, "type", None) != "text":
-                    continue
-                block_text = getattr(block, "text", "")
-                if isinstance(block_text, str) and block_text:
-                    texts.append(block_text)
-            text = "".join(texts)
+            text = _anthropic_text_blocks(content)
 
         usage = getattr(response, "usage", None)
         input_tokens: int = (
@@ -400,6 +409,142 @@ def _coerce_int(value: Any) -> int:
         return 0
 
 
+def _flatten_cli_messages(messages: list[dict[str, str]]) -> str:
+    """Flatten messages into a single text body for stdin.
+
+    Single-turn calls pass the user content as-is; the parse-retry path
+    (user/assistant/user) is rendered with role labels so the prior reply
+    and the JSON nudge survive. The system prompt is NOT folded in here:
+    it goes to --system-prompt-file so it keeps system priority over this
+    (untrusted) payload.
+    """
+    if len(messages) == 1:
+        return messages[0].get("content", "")
+    return "\n\n".join(
+        f"{m.get('role', 'user').upper()}: {m.get('content', '')}"
+        for m in messages
+    )
+
+
+def _resolve_cli_timeout() -> float:
+    """Per-stage timeout in seconds, from BENCH_CLAUDE_TIMEOUT when valid.
+
+    Falls back to _DEFAULT_CLAUDE_CLI_TIMEOUT (with a stderr note) when the
+    variable is unparseable or not positive.
+    """
+    timeout: float = _DEFAULT_CLAUDE_CLI_TIMEOUT
+    timeout_raw: str = os.environ.get("BENCH_CLAUDE_TIMEOUT", "")
+    if timeout_raw:
+        try:
+            parsed_timeout: float = float(timeout_raw)
+        except ValueError:
+            print(
+                f"[bench api] invalid BENCH_CLAUDE_TIMEOUT={timeout_raw!r}; "
+                f"using {_DEFAULT_CLAUDE_CLI_TIMEOUT}s",
+                file=sys.stderr,
+            )
+        else:
+            if parsed_timeout > 0:
+                timeout = parsed_timeout
+            else:
+                print(
+                    f"[bench api] BENCH_CLAUDE_TIMEOUT={timeout_raw!r} must be "
+                    f"> 0; using {_DEFAULT_CLAUDE_CLI_TIMEOUT}s",
+                    file=sys.stderr,
+                )
+    return timeout
+
+
+def _write_system_prompt_file(system_prompt: str) -> str | None:
+    """Write the stage system prompt to a temp file for --system-prompt-file.
+
+    Returns the file path, or None when system_prompt is empty. Raises
+    _ProviderError when the write fails, after removing the partially
+    created file. The caller owns removal of a returned path.
+    """
+    if not system_prompt:
+        return None
+    sys_prompt_path: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".txt", delete=False, encoding="utf-8"
+        ) as f:
+            # Record the path before writing: the file already exists on disk
+            # once NamedTemporaryFile is opened, so if the write (or the
+            # close-time flush) raises, the cleanup below still finds it.
+            sys_prompt_path = f.name
+            f.write(system_prompt)
+    except OSError as e:
+        if sys_prompt_path is not None:
+            try:
+                os.unlink(sys_prompt_path)
+            except OSError as cleanup_err:
+                print(
+                    "[bench api] failed to remove temp system-prompt file "
+                    f"after write error: {cleanup_err}",
+                    file=sys.stderr,
+                )
+        raise _ProviderError(
+            "claude_code: failed to write system prompt file: "
+            f"{type(e).__name__}: {_sanitize_error_detail(str(e))}"
+        ) from e
+    return sys_prompt_path
+
+
+def _parse_cli_result(
+    completed: subprocess.CompletedProcess,
+) -> tuple[str, int, int]:
+    """Extract (text, input_tokens, output_tokens) from a finished `claude` run.
+
+    Raises _ProviderError when the call exited non-zero or the JSON envelope
+    is malformed or reports an error.
+    """
+    if completed.returncode != 0:
+        detail: str = _sanitize_error_detail(
+            completed.stderr or completed.stdout or ""
+        )
+        raise _ProviderError(
+            f"claude_code: `claude` exited {completed.returncode}: {detail}"
+        )
+
+    try:
+        envelope: Any = json.loads(completed.stdout)
+    except json.JSONDecodeError as e:
+        raise _ProviderError(
+            "claude_code: response was not valid JSON: "
+            f"{_sanitize_error_detail(completed.stdout)}"
+        ) from e
+
+    if not isinstance(envelope, dict):
+        raise _ProviderError(
+            "claude_code: response envelope was not a JSON object"
+        )
+
+    if envelope.get("is_error") or envelope.get("subtype") != "success":
+        detail = _sanitize_error_detail(str(envelope.get("result", envelope)))
+        raise _ProviderError(f"claude_code: CLI reported error: {detail}")
+
+    text: str = envelope.get("result", "") or ""
+
+    usage = envelope.get("usage")
+    if isinstance(usage, dict):
+        # Claude Code applies prompt caching automatically, so most real input
+        # lands in the cache fields; sum all three so the ledger reflects true
+        # input consumption. Coercion is defensive: a malformed token value must
+        # not break call_model's never-raises contract.
+        input_tokens: int = (
+            _coerce_int(usage.get("input_tokens"))
+            + _coerce_int(usage.get("cache_creation_input_tokens"))
+            + _coerce_int(usage.get("cache_read_input_tokens"))
+        )
+        output_tokens: int = _coerce_int(usage.get("output_tokens"))
+    else:
+        input_tokens = 0
+        output_tokens = 0
+
+    return text, input_tokens, output_tokens
+
+
 def _claude_cli_call(
     model: str,
     system_prompt: str,
@@ -433,39 +578,8 @@ def _claude_cli_call(
     if binary is None:
         raise _ProviderError("claude_code: `claude` binary not found on PATH")
 
-    # Flatten messages into a single text body for stdin. Single-turn calls pass
-    # the user content as-is; the parse-retry path (user/assistant/user) is
-    # rendered with role labels so the prior reply and the JSON nudge survive.
-    # The system prompt is NOT folded in here — it goes to --system-prompt-file
-    # below so it keeps system priority over this (untrusted) payload.
-    if len(messages) == 1:
-        body: str = messages[0].get("content", "")
-    else:
-        body = "\n\n".join(
-            f"{m.get('role', 'user').upper()}: {m.get('content', '')}"
-            for m in messages
-        )
-
-    timeout: float = _DEFAULT_CLAUDE_CLI_TIMEOUT
-    timeout_raw: str = os.environ.get("BENCH_CLAUDE_TIMEOUT", "")
-    if timeout_raw:
-        try:
-            parsed_timeout: float = float(timeout_raw)
-        except ValueError:
-            print(
-                f"[bench api] invalid BENCH_CLAUDE_TIMEOUT={timeout_raw!r}; "
-                f"using {_DEFAULT_CLAUDE_CLI_TIMEOUT}s",
-                file=sys.stderr,
-            )
-        else:
-            if parsed_timeout > 0:
-                timeout = parsed_timeout
-            else:
-                print(
-                    f"[bench api] BENCH_CLAUDE_TIMEOUT={timeout_raw!r} must be "
-                    f"> 0; using {_DEFAULT_CLAUDE_CLI_TIMEOUT}s",
-                    file=sys.stderr,
-                )
+    body: str = _flatten_cli_messages(messages)
+    timeout: float = _resolve_cli_timeout()
 
     child_env: dict[str, str] = dict(os.environ)
     child_env["BENCH_SUBPROCESS"] = "1"
@@ -476,31 +590,7 @@ def _claude_cli_call(
     # system-priority prompt), without the multi-line-argv truncation cmd.exe
     # inflicts on --system-prompt for a .cmd/.bat shim. The file is ephemeral
     # (model input only, never a governed project file) and removed in finally.
-    sys_prompt_path: str | None = None
-    if system_prompt:
-        try:
-            with tempfile.NamedTemporaryFile(
-                mode="w", suffix=".txt", delete=False, encoding="utf-8"
-            ) as f:
-                # Record the path before writing: the file already exists on disk
-                # once NamedTemporaryFile is opened, so if the write (or the
-                # close-time flush) raises, the cleanup below still finds it.
-                sys_prompt_path = f.name
-                f.write(system_prompt)
-        except OSError as e:
-            if sys_prompt_path is not None:
-                try:
-                    os.unlink(sys_prompt_path)
-                except OSError as cleanup_err:
-                    print(
-                        "[bench api] failed to remove temp system-prompt file "
-                        f"after write error: {cleanup_err}",
-                        file=sys.stderr,
-                    )
-            raise _ProviderError(
-                "claude_code: failed to write system prompt file: "
-                f"{type(e).__name__}: {_sanitize_error_detail(str(e))}"
-            ) from e
+    sys_prompt_path: str | None = _write_system_prompt_file(system_prompt)
 
     # Give the judge NO tools at all: --tools "" removes the built-in tools and
     # --strict-mcp-config (with no --mcp-config) removes every MCP server, so an
@@ -568,47 +658,4 @@ def _claude_cli_call(
                     file=sys.stderr,
                 )
 
-    if completed.returncode != 0:
-        detail: str = _sanitize_error_detail(
-            completed.stderr or completed.stdout or ""
-        )
-        raise _ProviderError(
-            f"claude_code: `claude` exited {completed.returncode}: {detail}"
-        )
-
-    try:
-        envelope: Any = json.loads(completed.stdout)
-    except json.JSONDecodeError as e:
-        raise _ProviderError(
-            "claude_code: response was not valid JSON: "
-            f"{_sanitize_error_detail(completed.stdout)}"
-        ) from e
-
-    if not isinstance(envelope, dict):
-        raise _ProviderError(
-            "claude_code: response envelope was not a JSON object"
-        )
-
-    if envelope.get("is_error") or envelope.get("subtype") != "success":
-        detail = _sanitize_error_detail(str(envelope.get("result", envelope)))
-        raise _ProviderError(f"claude_code: CLI reported error: {detail}")
-
-    text: str = envelope.get("result", "") or ""
-
-    usage = envelope.get("usage")
-    if isinstance(usage, dict):
-        # Claude Code applies prompt caching automatically, so most real input
-        # lands in the cache fields; sum all three so the ledger reflects true
-        # input consumption. Coercion is defensive: a malformed token value must
-        # not break call_model's never-raises contract.
-        input_tokens: int = (
-            _coerce_int(usage.get("input_tokens"))
-            + _coerce_int(usage.get("cache_creation_input_tokens"))
-            + _coerce_int(usage.get("cache_read_input_tokens"))
-        )
-        output_tokens: int = _coerce_int(usage.get("output_tokens"))
-    else:
-        input_tokens = 0
-        output_tokens = 0
-
-    return text, input_tokens, output_tokens
+    return _parse_cli_result(completed)

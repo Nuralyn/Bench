@@ -48,7 +48,8 @@ _BENCH_LEDGER_PATH: str = str(BENCH_ROOT / ".bench" / "bench-ledger.json")
 class ComputeEntryHashTests(unittest.TestCase):
     def test_deterministic_for_identical_entries(self) -> None:
         entry: dict = {"a": 1, "b": "hello"}
-        self.assertEqual(compute_entry_hash(entry), compute_entry_hash(entry))
+        twin: dict = {"a": 1, "b": "hello"}
+        self.assertEqual(compute_entry_hash(entry), compute_entry_hash(twin))
 
     def test_excludes_entry_hash_field(self) -> None:
         base: dict = {"a": 1, "b": 2}
@@ -475,8 +476,9 @@ class AppendEntryTests(unittest.TestCase):
         """
         with patch("ledger.chain.compute_entry_hash", return_value="deadbeef"):
             append_entry(self._minimal_result(), path=self._ledger)
+            colliding: dict = self._minimal_result()
             with self.assertRaises(LedgerReadError):
-                append_entry(self._minimal_result(), path=self._ledger)
+                append_entry(colliding, path=self._ledger)
 
     def test_corrupt_legacy_array_raises_and_is_left_on_disk(self) -> None:
         """Fail closed, and preserve the evidence.
@@ -486,9 +488,10 @@ class AppendEntryTests(unittest.TestCase):
         """
         Path(self._ledger).write_text("{not json", encoding="utf-8")
         before: bytes = Path(self._ledger).read_bytes()
+        result: dict = self._minimal_result()
 
         with self.assertRaises(LedgerReadError):
-            append_entry(self._minimal_result(), path=self._ledger)
+            append_entry(result, path=self._ledger)
 
         self.assertEqual(Path(self._ledger).read_bytes(), before)
 

@@ -92,14 +92,29 @@ def _flag_value(rest: list[str], flag: str) -> str | None:
     return rest[index + 1]
 
 
-def main(argv: list[str]) -> int:
-    if len(argv) < 2:
-        print(_USAGE, end="")
-        return 1
+def _audit_sanitation_backup(rest: list[str]) -> str | None:
+    """Positional backup path for audit-sanitation, or None when absent.
 
-    command: str = argv[1]
-    rest: list[str] = argv[2:]
+    Positionally aware: skip a flag and the value that follows it,
+    rather than filtering by string equality. A backup path that
+    happened to equal the record hash would otherwise be dropped.
+    """
+    positional_backup: list[str] = []
+    skip_next: bool = False
+    for arg in rest:
+        if skip_next:
+            skip_next = False
+            continue
+        if arg.startswith("-"):
+            skip_next = arg == "--record"
+            continue
+        positional_backup.append(arg)
+    return positional_backup[0] if positional_backup else None
 
+
+def _run_report_command(command: str, rest: list[str]) -> int | None:
+    """Dispatch the read-and-report commands. None when ``command`` is none
+    of them."""
     if command == "verify":
         return cmd_verify()
     if command == "ledger":
@@ -120,6 +135,12 @@ def main(argv: list[str]) -> int:
         return cmd_constitution()
     if command == "viewer":
         return cmd_viewer()
+    return None
+
+
+def _run_custody_command(command: str, rest: list[str]) -> int | None:
+    """Dispatch the retirement, sanitation, and attestation commands. None
+    when ``command`` is none of them."""
     if command == "retire":
         return cmd_retire(
             archive_dir=_flag_value(rest, "--archive-dir"),
@@ -154,26 +175,30 @@ def main(argv: list[str]) -> int:
             repository=_flag_value(rest, "--repository"),
         )
     if command == "audit-sanitation":
-        # Positionally aware: skip a flag and the value that follows it,
-        # rather than filtering by string equality. A backup path that
-        # happened to equal the record hash would otherwise be dropped.
-        positional_backup: list[str] = []
-        skip_next: bool = False
-        for arg in rest:
-            if skip_next:
-                skip_next = False
-                continue
-            if arg.startswith("-"):
-                skip_next = arg == "--record"
-                continue
-            positional_backup.append(arg)
         return cmd_audit_sanitation(
-            backup=positional_backup[0] if positional_backup else None,
+            backup=_audit_sanitation_backup(rest),
             record_hash=_flag_value(rest, "--record"),
         )
     if command == "audit-retirement":
         positional: list[str] = [arg for arg in rest if not arg.startswith("-")]
         return cmd_audit_retirement(positional[0] if positional else None)
+    return None
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) < 2:
+        print(_USAGE, end="")
+        return 1
+
+    command: str = argv[1]
+    rest: list[str] = argv[2:]
+
+    result: int | None = _run_report_command(command, rest)
+    if result is not None:
+        return result
+    result = _run_custody_command(command, rest)
+    if result is not None:
+        return result
     if command in ("-h", "--help", "help"):
         print(_USAGE, end="")
         return 0

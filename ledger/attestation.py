@@ -225,11 +225,8 @@ def validate_document(document: Any) -> list[str]:
     return defects
 
 
-def _validate_record(index: int, record: Any) -> list[str]:
-    """Defects in one record, empty when it conforms."""
-    if not isinstance(record, dict):
-        return [f"records[{index}] is not an object"]
-
+def _record_shape_defects(index: int, record: dict) -> list[str]:
+    """Defects in one record's field set, empty when it conforms."""
     defects: list[str] = []
     extra: set[str] = set(record) - set(_RECORD_FIELDS)
     if extra:
@@ -237,9 +234,12 @@ def _validate_record(index: int, record: Any) -> list[str]:
     for field in _RECORD_FIELDS:
         if field not in record:
             defects.append(f"records[{index}] missing {field!r}")
-    if defects:
-        return defects
+    return defects
 
+
+def _record_scalar_defects(index: int, record: dict) -> list[str]:
+    """Defects in one record's scalar fields, empty when they conform."""
+    defects: list[str] = []
     if record["seq"] != index:
         defects.append(f"records[{index}].seq is {record['seq']}, expected {index}")
     if not _TIMESTAMP_RE.match(str(record["timestamp"])):
@@ -248,6 +248,12 @@ def _validate_record(index: int, record: Any) -> list[str]:
         defects.append(f"records[{index}].verdict is not a known verdict")
     if not isinstance(record["pipeline_error"], bool):
         defects.append(f"records[{index}].pipeline_error is not a boolean")
+    return defects
+
+
+def _record_commitment_defects(index: int, record: dict) -> list[str]:
+    """Defects in one record's commitment hashes, empty when they conform."""
+    defects: list[str] = []
     for field in ("commitment", "constitution_commitment"):
         if not _SHA256_RE.match(str(record[field])):
             defects.append(f"records[{index}].{field} is not a 64-hex hash")
@@ -256,6 +262,12 @@ def _validate_record(index: int, record: Any) -> list[str]:
         not isinstance(p, str) or not _SHA256_RE.match(p) for p in parents
     ):
         defects.append(f"records[{index}].previous_commitment is not hashes")
+    return defects
+
+
+def _record_constraint_defects(index: int, record: dict) -> list[str]:
+    """Defects in one record's constraint fields, empty when they conform."""
+    defects: list[str] = []
     ids: Any = record["constraint_ids"]
     if not isinstance(ids, list) or any(
         not isinstance(i, str) or not _CONSTRAINT_RE.match(i) for i in ids
@@ -268,6 +280,21 @@ def _validate_record(index: int, record: Any) -> list[str]:
         or not 0 <= count <= _MAX_UNMAPPED
     ):
         defects.append(f"records[{index}].unmapped_citation_count out of range")
+    return defects
+
+
+def _validate_record(index: int, record: Any) -> list[str]:
+    """Defects in one record, empty when it conforms."""
+    if not isinstance(record, dict):
+        return [f"records[{index}] is not an object"]
+
+    defects: list[str] = _record_shape_defects(index, record)
+    if defects:
+        return defects
+
+    defects.extend(_record_scalar_defects(index, record))
+    defects.extend(_record_commitment_defects(index, record))
+    defects.extend(_record_constraint_defects(index, record))
     return defects
 
 

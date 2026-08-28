@@ -114,29 +114,30 @@ class MergeFloorTests(unittest.TestCase):
             "rule": "Anything goes.",
             "severity": "warning",
         }])
+        core: dict = _core()
         with self.assertRaises(ConstitutionFloorError) as ctx:
-            merge_constitutions(_core(), hostile)
+            merge_constitutions(core, hostile)
         self.assertIn("C-007", str(ctx.exception))
 
     def test_rejects_downgrading_a_core_severity(self) -> None:
+        core: dict = _core()
+        project: dict = _project(severity_overrides={"C-001": "warning"})
         with self.assertRaises(ConstitutionFloorError) as ctx:
-            merge_constitutions(
-                _core(), _project(severity_overrides={"C-001": "warning"})
-            )
+            merge_constitutions(core, project)
         self.assertIn("only raise", str(ctx.exception))
 
     def test_rejects_restating_the_same_severity(self) -> None:
         """Equal is not a raise; restating is how a reword would sneak in."""
+        core: dict = _core()
+        project: dict = _project(severity_overrides={"C-001": "veto"})
         with self.assertRaises(ConstitutionFloorError):
-            merge_constitutions(
-                _core(), _project(severity_overrides={"C-001": "veto"})
-            )
+            merge_constitutions(core, project)
 
     def test_rejects_override_of_unknown_constraint(self) -> None:
+        core: dict = _core()
+        project: dict = _project(severity_overrides={"C-999": "veto"})
         with self.assertRaises(ConstitutionFloorError) as ctx:
-            merge_constitutions(
-                _core(), _project(severity_overrides={"C-999": "veto"})
-            )
+            merge_constitutions(core, project)
         self.assertIn("C-999", str(ctx.exception))
 
     def test_omitting_a_core_constraint_does_not_remove_it(self) -> None:
@@ -151,8 +152,10 @@ class MergeFloorTests(unittest.TestCase):
 
 class MergeSchemaTests(unittest.TestCase):
     def test_rejects_non_list_constraints(self) -> None:
+        core: dict = _core()
+        project: dict = _project(constraints={"id": "P-001"})
         with self.assertRaises(ConstitutionSchemaError):
-            merge_constitutions(_core(), _project(constraints={"id": "P-001"}))
+            merge_constitutions(core, project)
 
     def test_rejects_duplicate_project_ids(self) -> None:
         dup: dict = {
@@ -161,28 +164,34 @@ class MergeSchemaTests(unittest.TestCase):
             "rule": "r",
             "severity": "veto",
         }
+        core: dict = _core()
+        project: dict = _project(constraints=[dup, dict(dup)])
         with self.assertRaises(ConstitutionSchemaError):
-            merge_constitutions(_core(), _project(constraints=[dup, dict(dup)]))
+            merge_constitutions(core, project)
 
     def test_rejects_missing_required_fields(self) -> None:
+        core: dict = _core()
+        project: dict = _project(constraints=[{"id": "P-002"}])
         with self.assertRaises(ConstitutionSchemaError) as ctx:
-            merge_constitutions(
-                _core(), _project(constraints=[{"id": "P-002"}])
-            )
+            merge_constitutions(core, project)
         self.assertIn("missing required field", str(ctx.exception))
 
     def test_rejects_unknown_severity(self) -> None:
+        core: dict = _core()
+        project: dict = _project(constraints=[{
+            "id": "P-003",
+            "name": "n",
+            "rule": "r",
+            "severity": "advisory",
+        }])
         with self.assertRaises(ConstitutionSchemaError):
-            merge_constitutions(_core(), _project(constraints=[{
-                "id": "P-003",
-                "name": "n",
-                "rule": "r",
-                "severity": "advisory",
-            }]))
+            merge_constitutions(core, project)
 
     def test_rejects_non_dict_severity_overrides(self) -> None:
+        core: dict = _core()
+        project: dict = _project(severity_overrides=["C-001"])
         with self.assertRaises(ConstitutionSchemaError):
-            merge_constitutions(_core(), _project(severity_overrides=["C-001"]))
+            merge_constitutions(core, project)
 
 
 class ResolveTests(unittest.TestCase):

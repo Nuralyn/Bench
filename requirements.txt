@@ -1,3 +1,5 @@
-anthropic>=0.122.0
+# Pinned exactly so installs are reproducible and CI cannot drift to an
+# unvetted release (supply-chain hardening; see .github/workflows/tests.yml).
+anthropic==1.2.0
 # openai is a soft dependency: install it only if you set
 # BENCH_PROVIDER=openrouter (see utils/api.py).

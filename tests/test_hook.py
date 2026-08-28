@@ -77,12 +77,12 @@ class BuildResponseFromVerdictTests(unittest.TestCase):
     def test_veto_uses_default_reason_when_missing(self) -> None:
         resp: dict = build_response_from_verdict({"verdict": "VETO"})
         reason: str = resp["hookSpecificOutput"]["permissionDecisionReason"]
-        self.assertTrue(len(reason) > 0)
+        self.assertGreater(len(reason), 0)
 
     def test_veto_uses_default_remediation_when_missing(self) -> None:
         resp: dict = build_response_from_verdict({"verdict": "VETO"})
         ctx: str = resp["hookSpecificOutput"]["additionalContext"]
-        self.assertTrue(len(ctx) > 0)
+        self.assertGreater(len(ctx), 0)
 
     def test_missing_verdict_treated_as_pass(self) -> None:
         resp: dict = build_response_from_verdict({})
@@ -344,67 +344,58 @@ class TestFallbackExternalNormalization(unittest.TestCase):
     ValueError branch. Covers C-005 requirement cited in the docstring."""
 
     def test_escape_repo_root_normalizes_relative_to_cwd(self) -> None:
+        import contextlib
         import os
         import tempfile
 
-        original = _hook_module._build_diff_info_hardened
-        original_cwd: str = os.getcwd()
         with tempfile.TemporaryDirectory() as tmpdir:
             external_file: str = os.path.join(tmpdir, "src", "app.py")
-            try:
-                _hook_module._build_diff_info_hardened = None
-                os.chdir(tmpdir)
+            with (
+                patch.object(_hook_module, "_build_diff_info_hardened", None),
+                contextlib.chdir(tmpdir),
+            ):
                 info: dict = _hook_module.extract_diff_info(
                     "Write",
                     {"file_path": external_file, "content": "x = 1"},
                 )
-            finally:
-                os.chdir(original_cwd)
-                _hook_module._build_diff_info_hardened = original
         self.assertEqual(info["file_path"], os.path.join("src", "app.py"))
         self.assertTrue(info.get("_path_normalized_external"))
 
     def test_cross_drive_valueerror_normalizes_to_cwd(self) -> None:
         import os
 
-        original = _hook_module._build_diff_info_hardened
-        try:
-            _hook_module._build_diff_info_hardened = None
-            original_relpath = os.path.relpath
-            call_count: list[int] = [0]
+        original_relpath = os.path.relpath
+        call_count: list[int] = [0]
 
-            def mock_relpath(path: str, start: str) -> str:
-                call_count[0] += 1
-                if call_count[0] == 1:
-                    raise ValueError("path is on mount 'D:', start on mount 'C:'")
-                return original_relpath(path, start)
+        def mock_relpath(path: str, start: str) -> str:
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise ValueError("path is on mount 'D:', start on mount 'C:'")
+            return original_relpath(path, start)
 
-            with patch("os.path.relpath", side_effect=mock_relpath):
-                info: dict = _hook_module.extract_diff_info(
-                    "Edit",
-                    {
-                        "file_path": os.path.join(os.getcwd(), "utils", "api.py"),
-                        "old_string": "a",
-                        "new_string": "b",
-                    },
-                )
-        finally:
-            _hook_module._build_diff_info_hardened = original
+        with (
+            patch.object(_hook_module, "_build_diff_info_hardened", None),
+            patch("os.path.relpath", side_effect=mock_relpath),
+        ):
+            info: dict = _hook_module.extract_diff_info(
+                "Edit",
+                {
+                    "file_path": os.path.join(os.getcwd(), "utils", "api.py"),
+                    "old_string": "a",
+                    "new_string": "b",
+                },
+            )
         self.assertTrue(info.get("_path_normalized_external"))
         self.assertNotEqual(info["file_path"], "[PATH_TRAVERSAL_BLOCKED]")
 
     def test_escape_both_roots_returns_absolute(self) -> None:
         import os
 
-        original = _hook_module._build_diff_info_hardened
-        try:
-            _hook_module._build_diff_info_hardened = None
+        with patch.object(_hook_module, "_build_diff_info_hardened", None):
             info: dict = _hook_module.extract_diff_info(
                 "Write",
                 {"file_path": "../../../etc/passwd", "content": "x"},
             )
-        finally:
-            _hook_module._build_diff_info_hardened = original
         self.assertTrue(os.path.isabs(info["file_path"]))
         self.assertTrue(info.get("_path_normalized_external"))
 

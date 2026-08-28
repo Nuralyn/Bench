@@ -142,23 +142,28 @@ def load_constitution_snapshot(
         )
 
     for index, constraint in enumerate(constraints):
-        if not isinstance(constraint, dict):
-            raise ConstitutionSchemaError(
-                f"constraints[{index}] must be a JSON object, "
-                f"got {type(constraint).__name__}"
-            )
-        for field in _REQUIRED_CONSTRAINT_FIELDS:
-            if field not in constraint:
-                raise ConstitutionSchemaError(
-                    f"constraints[{index}] missing required field: '{field}'"
-                )
-            value: object = constraint[field]
-            if not isinstance(value, str) or not value:
-                raise ConstitutionSchemaError(
-                    f"constraints[{index}].{field} must be a non-empty string"
-                )
+        _validate_constraint_entry(index, constraint)
 
     return data, constitution_hash
+
+
+def _validate_constraint_entry(index: int, constraint: object) -> None:
+    """Raise ConstitutionSchemaError if a constraint entry is malformed."""
+    if not isinstance(constraint, dict):
+        raise ConstitutionSchemaError(
+            f"constraints[{index}] must be a JSON object, "
+            f"got {type(constraint).__name__}"
+        )
+    for field in _REQUIRED_CONSTRAINT_FIELDS:
+        if field not in constraint:
+            raise ConstitutionSchemaError(
+                f"constraints[{index}] missing required field: '{field}'"
+            )
+        value: object = constraint[field]
+        if not isinstance(value, str) or not value:
+            raise ConstitutionSchemaError(
+                f"constraints[{index}].{field} must be a non-empty string"
+            )
 
 
 def merge_constitutions(core: dict, project: dict) -> dict:
@@ -189,38 +194,7 @@ def merge_constitutions(core: dict, project: dict) -> dict:
     additions: list[dict] = []
     seen: set[str] = set()
     for constraint in raw_additions:
-        if not isinstance(constraint, dict):
-            raise ConstitutionSchemaError(
-                f"project constraint must be an object, got "
-                f"{type(constraint).__name__}"
-            )
-        cid: str = str(constraint.get("id", ""))
-        if not cid.startswith(_PROJECT_ID_PREFIX):
-            raise ConstitutionFloorError(
-                f"project constraint {cid!r} must use the reserved "
-                f"{_PROJECT_ID_PREFIX}* namespace; {_CORE_ID_PREFIX}* ids are "
-                f"Bench's core and cannot be redefined by a project"
-            )
-        if cid in seen:
-            raise ConstitutionSchemaError(
-                f"project defines constraint {cid!r} more than once"
-            )
-        missing: list[str] = [
-            field
-            for field in _REQUIRED_CONSTRAINT_FIELDS
-            if field not in constraint
-        ]
-        if missing:
-            raise ConstitutionSchemaError(
-                f"project constraint {cid!r} is missing required field(s): "
-                f"{', '.join(missing)}"
-            )
-        severity: str = str(constraint.get("severity", ""))
-        if severity not in _SEVERITY_RANK:
-            raise ConstitutionSchemaError(
-                f"project constraint {cid!r} has unknown severity "
-                f"{severity!r}; expected one of {sorted(_SEVERITY_RANK)}"
-            )
+        cid: str = _validate_project_constraint(constraint, seen)
         seen.add(cid)
         additions.append(constraint)
 
@@ -238,9 +212,74 @@ def merge_constitutions(core: dict, project: dict) -> dict:
             f"{', '.join(sorted(unknown))}"
         )
 
+    merged_core: list[dict] = _apply_severity_overrides(
+        core_constraints, raw_overrides
+    )
+
+    return {
+        "constitution": (
+            f"{core.get('constitution', 'bench')}"
+            f"+{project.get('constitution', 'project')}"
+        ),
+        "version": core.get("version"),
+        "project_version": project.get("version"),
+        "constraints": merged_core + additions,
+    }
+
+
+def _validate_project_constraint(constraint: object, seen: set[str]) -> str:
+    """Validate one project-layer constraint and return its id.
+
+    Raises ConstitutionFloorError for namespace violations and
+    ConstitutionSchemaError for structurally invalid entries.
+    """
+    if not isinstance(constraint, dict):
+        raise ConstitutionSchemaError(
+            f"project constraint must be an object, got "
+            f"{type(constraint).__name__}"
+        )
+    cid: str = str(constraint.get("id", ""))
+    if not cid.startswith(_PROJECT_ID_PREFIX):
+        raise ConstitutionFloorError(
+            f"project constraint {cid!r} must use the reserved "
+            f"{_PROJECT_ID_PREFIX}* namespace; {_CORE_ID_PREFIX}* ids are "
+            f"Bench's core and cannot be redefined by a project"
+        )
+    if cid in seen:
+        raise ConstitutionSchemaError(
+            f"project defines constraint {cid!r} more than once"
+        )
+    missing: list[str] = [
+        field
+        for field in _REQUIRED_CONSTRAINT_FIELDS
+        if field not in constraint
+    ]
+    if missing:
+        raise ConstitutionSchemaError(
+            f"project constraint {cid!r} is missing required field(s): "
+            f"{', '.join(missing)}"
+        )
+    severity: str = str(constraint.get("severity", ""))
+    if severity not in _SEVERITY_RANK:
+        raise ConstitutionSchemaError(
+            f"project constraint {cid!r} has unknown severity "
+            f"{severity!r}; expected one of {sorted(_SEVERITY_RANK)}"
+        )
+    return cid
+
+
+def _apply_severity_overrides(
+    core_constraints: list[dict], raw_overrides: dict
+) -> list[dict]:
+    """Return core constraints with severity_overrides applied.
+
+    A project layer may only raise a core severity. A downgrade or restatement
+    raises ConstitutionFloorError; an unknown severity raises
+    ConstitutionSchemaError.
+    """
     merged_core: list[dict] = []
     for constraint in core_constraints:
-        cid = str(constraint.get("id", ""))
+        cid: str = str(constraint.get("id", ""))
         if cid not in raw_overrides:
             merged_core.append(constraint)
             continue
@@ -262,16 +301,7 @@ def merge_constitutions(core: dict, project: dict) -> dict:
         raised["severity"] = requested
         raised["severity_raised_by_project"] = True
         merged_core.append(raised)
-
-    return {
-        "constitution": (
-            f"{core.get('constitution', 'bench')}"
-            f"+{project.get('constitution', 'project')}"
-        ),
-        "version": core.get("version"),
-        "project_version": project.get("version"),
-        "constraints": merged_core + additions,
-    }
+    return merged_core
 
 
 def load_governing_constitution() -> tuple[dict, str, list[dict]]:

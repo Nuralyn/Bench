@@ -217,28 +217,52 @@ def _validate_oracle_response(response: dict[str, Any]) -> bool:
     if confidence not in _VALID_CONFIDENCES:
         return False
 
-    citations: Any = response.get("constraint_citations")
+    if not _validate_citations(response.get("constraint_citations"), verdict):
+        return False
+
+    if not _validate_advisories(response.get("advisories")):
+        return False
+
+    return _validate_remediation(response, verdict)
+
+
+def _validate_citations(citations: Any, verdict: Any) -> bool:
+    """Return True if the constraint_citations field matches the schema."""
     if not isinstance(citations, list):
         return False
     if verdict == "VETO" and len(citations) == 0:
         return False
     for citation in citations:
-        if not isinstance(citation, dict):
+        if not _is_valid_citation(citation):
             return False
-        for field in _REQUIRED_CITATION_FIELDS:
-            value: Any = citation.get(field)
-            if not isinstance(value, str) or not value:
-                return False
-        if citation["disposition"] not in _VALID_DISPOSITIONS:
-            return False
+    return True
 
-    advisories: Any = response.get("advisories")
+
+def _is_valid_citation(citation: Any) -> bool:
+    """Return True if a single citation entry matches the schema."""
+    if not isinstance(citation, dict):
+        return False
+    for field in _REQUIRED_CITATION_FIELDS:
+        value: Any = citation.get(field)
+        if not isinstance(value, str) or not value:
+            return False
+    if citation["disposition"] not in _VALID_DISPOSITIONS:
+        return False
+    return True
+
+
+def _validate_advisories(advisories: Any) -> bool:
+    """Return True if the advisories field matches the schema."""
     if not isinstance(advisories, list):
         return False
     for advisory in advisories:
         if not isinstance(advisory, str) or not advisory:
             return False
+    return True
 
+
+def _validate_remediation(response: dict[str, Any], verdict: Any) -> bool:
+    """Return True if the remediation field matches the schema for verdict."""
     if "remediation" not in response:
         return False
     remediation: Any = response["remediation"]
@@ -248,5 +272,4 @@ def _validate_oracle_response(response: dict[str, Any]) -> bool:
     else:  # PASS
         if remediation is not None:
             return False
-
     return True

@@ -285,25 +285,28 @@ class HumanGateTests(unittest.TestCase):
         ]
 
     def test_refuses_inside_an_agent_session(self) -> None:
+        refs: list[dict] = self._refs()
         for marker in ("CLAUDECODE", "BENCH_SUBPROCESS", "CI"):
             with self.subTest(marker=marker):
                 with self.assertRaises(SanitationError) as ctx:
                     confirm_sanitation_interactively(
-                        self._refs(), "BKP-1", env={marker: "1"}
+                        refs, "BKP-1", env={marker: "1"}
                     )
                 self.assertIn(marker, str(ctx.exception))
 
     def test_refuses_without_a_tty(self) -> None:
+        refs: list[dict] = self._refs()
         with self.assertRaises(SanitationError) as ctx:
             confirm_sanitation_interactively(
-                self._refs(), "BKP-1", env={}, stdin_isatty=lambda: False
+                refs, "BKP-1", env={}, stdin_isatty=lambda: False
             )
         self.assertIn("not a TTY", str(ctx.exception))
 
     def test_refuses_on_wrong_phrase(self) -> None:
+        refs: list[dict] = self._refs()
         with self.assertRaises(SanitationError) as ctx:
             confirm_sanitation_interactively(
-                self._refs(),
+                refs,
                 "BKP-1",
                 env={},
                 stdin_isatty=lambda: True,
