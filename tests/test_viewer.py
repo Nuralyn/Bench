@@ -238,6 +238,42 @@ class ViewerStatsParityTests(unittest.TestCase):
         self.assertIn(expected_passed, cli_out)
         self.assertIn(expected_vetoed, cli_out)
 
+    def test_banner_reports_pipeline_errors_like_cmd_stats(self) -> None:
+        """A fail-closed VETO is counted as a pipeline error on both surfaces.
+
+        Bench fails closed: a stage that times out or returns an unparseable
+        response records verdict VETO with pipeline_error true. cmd_stats has
+        always printed that count separately; the banner did not, so a spike
+        of timeouts read as a strict judge (audit finding 2).
+        """
+        chain: list[dict] = _build_valid_chain(
+            3, verdicts=["PASS", "VETO", "PASS"]
+        )
+        failed: dict = dict(chain[1])
+        failed["pipeline_error"] = True
+        failed["oracle"] = {"status": "PIPELINE_ERROR", "error": "TIMEOUT"}
+        failed["entry_hash"] = compute_entry_hash(failed)
+        chain[1] = failed
+        chain[2]["previous_hash"] = failed["entry_hash"]
+        chain[2]["entry_hash"] = compute_entry_hash(chain[2])
+        self._write_chain(chain)
+        html_out: str = generate_viewer_html(self._path())
+
+        stats: dict = compute_ledger_stats(chain)
+        self.assertEqual(stats["pipeline_errors"], 1)
+        self.assertIn(
+            '<div class="label">Pipeline errors</div>'
+            '<div class="value err">1</div>',
+            html_out,
+        )
+
+        buf: io.StringIO = io.StringIO()
+        with patch("cli.commands.load_ledger", return_value=chain), patch(
+            "cli.commands.verify_chain", return_value={"valid": True}
+        ), contextlib.redirect_stdout(buf):
+            cmd_stats()
+        self.assertIn("Pipeline errors        : 1", buf.getvalue())
+
     def test_anchor_only_ledger_renders_zero_rates(self) -> None:
         chain: list[dict] = []
         self._append_anchor(chain)
