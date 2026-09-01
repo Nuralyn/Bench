@@ -31,3 +31,27 @@ jobs:
         run: pip install --only-binary ':all:' --require-hashes -r requirements.lock
       - name: Run tests
         run: python -m unittest discover -s tests -v
+
+  browser-tests:
+    # tests/test_viewer_browser.py loads the generated ledger viewer in
+    # headless Chromium. It skips itself when Playwright is absent, so the
+    # matrix job above never runs it; this job installs the dev lock and
+    # the browser, and BENCH_REQUIRE_BROWSER turns that skip into a failure
+    # so a broken install cannot pass as a green run.
+    runs-on: ubuntu-latest
+    env:
+      BENCH_REQUIRE_BROWSER: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          pip install --only-binary ':all:' --require-hashes -r requirements.lock
+          pip install --only-binary ':all:' --require-hashes -r requirements-dev.lock
+      - name: Install Chromium
+        # Playwright fetches the browser build pinned to its own version.
+        run: python -m playwright install --with-deps chromium
+      - name: Run browser tests
+        run: python -m unittest tests.test_viewer_browser -v
