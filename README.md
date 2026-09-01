@@ -172,6 +172,12 @@ cd bench
 # Install
 pip install -r requirements.txt
 
+# Optional: the browser-level viewer test (tests/test_viewer_browser.py)
+# needs Playwright and Chromium. Without them that module skips itself;
+# CI runs it in its own job.
+pip install -r requirements-dev.txt
+python -m playwright install chromium
+
 # Enable the ledger commit guard (once per clone). It refuses a commit that
 # stages operational ledger data. An entry embeds the full diff of the change
 # it governs, so a committed chain publishes every change it ever saw. CI
