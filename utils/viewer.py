@@ -27,7 +27,16 @@ from typing import Any
 
 from ledger.chain import load_ledger, resolve_ledger_path
 from ledger.verify import verify_chain
-from utils.stats import compute_ledger_stats, pct
+from utils.stats import (
+    GOVERNANCE_SCOPE_DIRS,
+    GOVERNANCE_SCOPE_FILES,
+    citations_by_constraint,
+    compute_ledger_stats,
+    pct,
+    stats_by_scope,
+    stats_by_week,
+    tokens_by_stage,
+)
 
 _HASH_SHORT_LEN: int = 12
 
@@ -197,9 +206,10 @@ def _build_html(
         f"  <div class=\"tile\"><div class=\"label\">Passed</div><div class=\"value ok\">{passed} <span class=\"pct\">({passed_pct})</span></div></div>\n"
         f"  <div class=\"tile\"><div class=\"label\">Vetoed</div><div class=\"value err\">{vetoed} <span class=\"pct\">({vetoed_pct})</span></div></div>\n"
         f"  <div class=\"tile\"><div class=\"label\">Pipeline errors</div><div class=\"value {pipeline_class}\">{pipeline_errors}</div></div>\n"
-        f"  <div class=\"tile\"><div class=\"label\">Most cited</div><div class=\"value mono small\">{cited_label}</div></div>\n"
+        f"  <div class=\"tile\"><div class=\"label\">Most violated</div><div class=\"value mono small\">{cited_label}</div></div>\n"
         f"  <div class=\"tile\"><div class=\"label\">Chain status</div><div class=\"value {chain_class}\">{chain_label_esc}</div>{chain_note_html}</div>\n"
         "</section>\n"
+        f"{_build_dashboard(entries)}"
         "<section class=\"filter-bar\" role=\"tablist\" aria-label=\"Verdict filter\">\n"
         "  <button type=\"button\" class=\"filter active\" data-filter-value=\"all\" role=\"tab\" aria-selected=\"true\">All</button>\n"
         "  <button type=\"button\" class=\"filter\" data-filter-value=\"PASS\" role=\"tab\" aria-selected=\"false\">PASS</button>\n"
@@ -237,6 +247,231 @@ def _build_error_html(message: str) -> str:
         "<p>The viewer could not be built. See stderr for a full traceback.</p>\n"
         f"<pre>{safe}</pre>\n"
         "</body></html>\n"
+    )
+
+
+# Chart marks wear the same colors as the verdict badges, so red is a veto
+# and amber is a pipeline error everywhere on the page. Each chart carries a
+# single series, so the only color requirement is contrast against the card
+# surface (#22223a): 3.6:1 for the red, 9.5:1 for the amber. Text in the
+# charts uses the page's text tokens, never a series color.
+_CHART_VETO: str = "#f87171"
+_CHART_ERROR: str = "#f59e0b"
+_CHART_TEXT: str = "#e8e8f0"
+_CHART_MUTED: str = "#94a3b8"
+_CHART_GRID: str = "#3a3a55"
+
+
+def _rate(numerator: int, denominator: int) -> float:
+    """numerator/denominator as a percentage; 0.0 when the denominator is 0."""
+    return numerator / denominator * 100 if denominator else 0.0
+
+
+def _nice_ceiling(value: float) -> int:
+    """Smallest clean axis maximum (in percent) at or above ``value``."""
+    for step in (1, 2, 5, 10, 20, 25, 50, 100):
+        if value <= step:
+            return step
+    return 100
+
+
+def _column_path(x: float, y: float, w: float, h: float, r: float) -> str:
+    """SVG path for a column with rounded top corners and a square base."""
+    if h <= r:
+        return f"M{x:.1f},{y:.1f}h{w:.1f}v{h:.1f}h-{w:.1f}Z"
+    return (
+        f"M{x:.1f},{y + r:.1f}"
+        f"a{r},{r} 0 0 1 {r},-{r}"
+        f"h{w - 2 * r:.1f}"
+        f"a{r},{r} 0 0 1 {r},{r}"
+        f"v{h - r:.1f}"
+        f"h-{w:.1f}Z"
+    )
+
+
+def _rate_columns_svg(
+    rows: list[dict],
+    numerator: str,
+    denominator: str,
+    color: str,
+    title: str,
+) -> str:
+    """A single-series column chart of rows[numerator]/rows[denominator].
+
+    One column per row, labelled by its ISO week, with the rate on each cap
+    and the count in a hover title. Inline SVG, no script: every number is
+    computed here from the same tallies the table beside it prints.
+    """
+    left, right, top, bottom = 34, 8, 18, 26
+    slot, col_w, radius, height = 40, 24, 4, 160
+    width: int = left + right + slot * max(len(rows), 1)
+    plot_h: int = height - top - bottom
+    baseline: int = top + plot_h
+    rates: list[float] = [
+        _rate(int(row.get(numerator, 0)), int(row.get(denominator, 0)))
+        for row in rows
+    ]
+    y_max: int = _nice_ceiling(max(rates, default=0.0))
+
+    parts: list[str] = [
+        f'<figure class="chart"><figcaption>{html.escape(title)}</figcaption>',
+        f'<svg viewBox="0 0 {width} {height}" width="{width}" height="{height}" '
+        f'role="img" aria-label="{html.escape(title)}">',
+    ]
+    for fraction in (0.0, 0.5, 1.0):
+        y: float = baseline - plot_h * fraction
+        parts.append(
+            f'<line x1="{left}" y1="{y:.1f}" x2="{width - right}" y2="{y:.1f}" '
+            f'stroke="{_CHART_GRID}" stroke-width="1"/>'
+        )
+        parts.append(
+            f'<text x="{left - 4}" y="{y + 3:.1f}" text-anchor="end" '
+            f'font-size="10" fill="{_CHART_MUTED}">{y_max * fraction:g}%</text>'
+        )
+    for index, (row, rate) in enumerate(zip(rows, rates)):
+        x: float = left + index * slot + (slot - col_w) / 2
+        h: float = plot_h * rate / y_max
+        y = baseline - h
+        week: str = html.escape(str(row.get("week", "")))
+        count: int = int(row.get(numerator, 0))
+        total: int = int(row.get(denominator, 0))
+        parts.append(
+            f'<path d="{_column_path(x, y, col_w, h, radius)}" fill="{color}">'
+            f"<title>{week}: {count} of {total} ({rate:.1f}%)</title></path>"
+        )
+        parts.append(
+            f'<text x="{x + col_w / 2:.1f}" y="{y - 4:.1f}" text-anchor="middle" '
+            f'font-size="10" fill="{_CHART_TEXT}">{rate:.1f}%</text>'
+        )
+        parts.append(
+            f'<text x="{x + col_w / 2:.1f}" y="{height - 8}" text-anchor="middle" '
+            f'font-size="10" fill="{_CHART_MUTED}">{week[-3:]}</text>'
+        )
+    parts.append("</svg></figure>")
+    return "".join(parts)
+
+
+def _table(headers: list[str], rows: list[list[str]], empty: str) -> str:
+    """An HTML table with escaped cells; ``empty`` fills a ledger with no rows."""
+    head: str = "".join(f"<th>{html.escape(h)}</th>" for h in headers)
+    if not rows:
+        body: str = (
+            f'<tr><td colspan="{len(headers)}" class="empty">'
+            f"{html.escape(empty)}</td></tr>"
+        )
+    else:
+        body = "".join(
+            "<tr>" + "".join(f"<td>{html.escape(c)}</td>" for c in row) + "</tr>"
+            for row in rows
+        )
+    return f"<table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>"
+
+
+def _verdict_cells(row: dict) -> list[str]:
+    """Governed, passed, vetoed, pipeline errors, veto rate, error rate."""
+    adjudicated: int = int(row.get("adjudicated", 0))
+    vetoed: int = int(row.get("vetoed", 0))
+    errors: int = int(row.get("pipeline_errors", 0))
+    return [
+        f"{adjudicated:,}",
+        f"{int(row.get('passed', 0)):,}",
+        f"{vetoed:,}",
+        f"{errors:,}",
+        pct(vetoed, adjudicated),
+        pct(errors, adjudicated),
+    ]
+
+
+_VERDICT_HEADERS: list[str] = [
+    "Governed", "Passed", "Vetoed", "Pipeline errors", "Veto rate", "Error rate",
+]
+
+
+def _build_dashboard(entries: list[dict]) -> str:
+    """The dashboard section: weekly rates, scope, constraints, tokens.
+
+    Every figure comes from utils.stats, the same helpers cmd_stats and the
+    banner use, so this section can only ever restate what they count.
+    """
+    weeks: list[dict] = stats_by_week(entries)
+    scopes: list[dict] = stats_by_scope(entries)
+    citations: list[dict] = citations_by_constraint(entries)
+    tokens: dict[str, dict[str, int]] = tokens_by_stage(entries)
+
+    week_rows: list[list[str]] = [
+        [str(row.get("week", ""))] + _verdict_cells(row) for row in weeks
+    ]
+    scope_rows: list[list[str]] = [
+        [str(row.get("scope", ""))] + _verdict_cells(row) for row in scopes
+    ]
+    citation_rows: list[list[str]] = [
+        [
+            str(row.get("constraint_id", "")),
+            f"{int(row.get('violated', 0)):,}",
+            f"{int(row.get('cited', 0)):,}",
+        ]
+        for row in citations
+    ]
+    token_rows: list[list[str]] = []
+    for stage in ("challenger", "defender", "oracle", "total"):
+        figures: dict[str, int] = tokens.get(stage, {})
+        count: int = int(figures.get("entries", 0))
+        inp: int = int(figures.get("input", 0))
+        out: int = int(figures.get("output", 0))
+        token_rows.append([
+            stage,
+            f"{count:,}",
+            f"{inp:,}",
+            f"{out:,}",
+            f"{inp // count:,}" if count else "n/a",
+            f"{out // count:,}" if count else "n/a",
+        ])
+
+    governance_paths: str = ", ".join(
+        sorted(f"{d}/" for d in GOVERNANCE_SCOPE_DIRS)
+        + sorted(GOVERNANCE_SCOPE_FILES)
+    )
+    return (
+        '<section class="dashboard" aria-label="Dashboard">\n'
+        '<div class="card" id="dash-weeks">\n'
+        "  <h2>Verdicts per week</h2>\n"
+        '  <div class="charts">'
+        + _rate_columns_svg(weeks, "vetoed", "adjudicated", _CHART_VETO, "Veto rate")
+        + _rate_columns_svg(
+            weeks, "pipeline_errors", "adjudicated", _CHART_ERROR,
+            "Pipeline error rate",
+        )
+        + "</div>\n  "
+        + _table(["Week"] + _VERDICT_HEADERS, week_rows, "No governed changes yet.")
+        + '\n  <p class="fine">Vetoed includes pipeline errors: Bench fails closed, '
+        "so a stage that times out or answers unparseably records a VETO. "
+        "A rising error rate means the judge is failing, not that the code "
+        "got worse.</p>\n"
+        "</div>\n"
+        '<div class="card" id="dash-scope">\n'
+        "  <h2>Verdicts by scope</h2>\n  "
+        + _table(["Scope"] + _VERDICT_HEADERS, scope_rows, "No governed changes yet.")
+        + f'\n  <p class="fine">Governance is the C-007 scope: {html.escape(governance_paths)}. '
+        "Everything else in the project is other.</p>\n"
+        "</div>\n"
+        '<div class="card" id="dash-constraints">\n'
+        "  <h2>Constraints in vetoes</h2>\n  "
+        + _table(
+            ["Constraint", "Violated", "Cited"], citation_rows,
+            "No veto has cited a constraint.",
+        )
+        + '\n  <p class="fine">Violated counts vetoes the Oracle ruled on this '
+        "constraint. Cited counts every veto that mentioned it, including "
+        "ones that cleared it while vetoing on another.</p>\n"
+        "</div>\n"
+        '<div class="card" id="dash-tokens">\n'
+        "  <h2>Tokens by stage</h2>\n  "
+        + _table(
+            ["Stage", "Entries", "Input", "Output", "Input / entry", "Output / entry"],
+            token_rows, "No token figures recorded.",
+        )
+        + "\n</div>\n"
+        "</section>\n"
     )
 
 
@@ -279,6 +514,41 @@ header h1 { margin: 0; font-size: 1.5rem; font-weight: 500; letter-spacing: 0.02
   margin-top: 0.35rem; font-size: 0.78rem; color: #94a3b8;
   font-family: ui-monospace, Menlo, Consolas, monospace; word-break: break-word;
 }
+.dashboard {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+  gap: 0.75rem; padding: 1rem 2rem;
+  border-bottom: 1px solid #3a3a55;
+}
+.dashboard .card {
+  background: #22223a; border: 1px solid #3a3a55; border-radius: 4px;
+  padding: 0.75rem 1rem; min-width: 0;
+}
+.dashboard #dash-weeks { grid-column: 1 / -1; }
+.dashboard h2 {
+  margin: 0 0 0.5rem; font-size: 0.8rem; font-weight: 500;
+  text-transform: uppercase; letter-spacing: 0.08em; color: #a78bfa;
+}
+.dashboard .charts { display: flex; flex-wrap: wrap; gap: 1.5rem; margin-bottom: 0.5rem; }
+.dashboard .chart { margin: 0; max-width: 100%; overflow-x: auto; }
+.dashboard .chart figcaption {
+  font-size: 0.78rem; color: #94a3b8; margin-bottom: 0.25rem;
+}
+.dashboard .chart svg { display: block; font-family: ui-monospace, Menlo, Consolas, monospace; }
+.dashboard table {
+  width: 100%; border-collapse: collapse; font-size: 0.82rem;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+}
+.dashboard th, .dashboard td {
+  padding: 0.3rem 0.5rem; border-bottom: 1px solid #3a3a55; text-align: right;
+  white-space: nowrap;
+}
+.dashboard th:first-child, .dashboard td:first-child { text-align: left; }
+.dashboard th {
+  color: #94a3b8; font-weight: 500; font-size: 0.7rem;
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.dashboard td.empty { text-align: center; color: #94a3b8; font-style: italic; }
+.dashboard .fine { margin: 0.5rem 0 0; font-size: 0.75rem; color: #94a3b8; }
 .filter-bar {
   display: flex; gap: 0.5rem;
   padding: 1rem 2rem 0.75rem;
