@@ -955,7 +955,16 @@ def cmd_viewer() -> int:
     target: Path = Path(resolve_ledger_path()).parent / "viewer.html"
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(html_content, encoding="utf-8")
+        # Owner-only from creation, matching the ledger's own entry files,
+        # since the page embeds every diff body the chain holds. O_TRUNC
+        # keeps an existing file's mode, so the chmod covers a rewrite too.
+        # Windows honours only the read-only bit; both calls are no-ops there.
+        fd: int = os.open(
+            target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600
+        )
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(html_content)
+        os.chmod(target, 0o600)
     except OSError as e:
         print(f"[bench cli] viewer write failed: {e}", file=sys.stderr)
         return 1

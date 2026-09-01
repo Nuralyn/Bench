@@ -340,6 +340,10 @@ class CmdViewerTests(unittest.TestCase):
             target.read_text(encoding="utf-8"),
             "<!doctype html><title>t</title>",
         )
+        if os.name == "posix":
+            # Owner-only, like the ledger's entry files. Windows keeps only
+            # the read-only bit, so there is nothing to assert there.
+            self.assertEqual(target.stat().st_mode & 0o777, 0o600)
         opened.assert_called_once_with(target.resolve().as_uri())
 
     def test_generation_failure_exits_one(self) -> None:
