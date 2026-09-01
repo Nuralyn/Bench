@@ -28,7 +28,11 @@ if str(_REPO_ROOT) not in sys.path:
 
 from tests._ledger_fixtures import build_valid_chain as _build_valid_chain  # noqa: E402
 from cli.commands import cmd_stats  # noqa: E402
-from ledger.chain import ANCHOR_VERDICT, compute_entry_hash  # noqa: E402
+from ledger.chain import (  # noqa: E402
+    ANCHOR_VERDICT,
+    compute_entry_hash,
+    resolve_entries_dir,
+)
 from ledger.retire import ANCHOR_TOOL  # noqa: E402
 from utils.stats import compute_ledger_stats, pct  # noqa: E402
 from utils.viewer import generate_viewer_html  # noqa: E402
@@ -92,6 +96,31 @@ class GenerateViewerHtmlTests(unittest.TestCase):
         self._write_chain(chain)
         html_out: str = generate_viewer_html(self._path())
         self.assertIn("BROKEN AT ENTRY #2", html_out)
+
+    def test_entries_dir_failure_reports_type_not_entry_zero(self) -> None:
+        """A failure with no array position names its type, not "#0".
+
+        verify_chain reports entries-directory failures (MISSING_PARENT,
+        ORPHAN_ENTRY, DUPLICATE_ENTRY, FILENAME_MISMATCH) with failure_index
+        -1 because no position in the legacy array applies. The banner used
+        to format that as "BROKEN AT ENTRY #0" and dropped the message that
+        names the offending hash (audit finding 4).
+        """
+        chain: list[dict] = _build_valid_chain(2)
+        self._write_chain(chain)
+        entries_dir: Path = Path(resolve_entries_dir(self._path()))
+        entries_dir.mkdir()
+        orphan: dict = dict(chain[1])
+        orphan["entry_id"] = "id-orphan"
+        orphan["previous_hash"] = ["f" * 64]
+        orphan["entry_hash"] = compute_entry_hash(orphan)
+        (entries_dir / f"{orphan['entry_hash']}.json").write_text(
+            json.dumps(orphan), encoding="utf-8"
+        )
+        html_out: str = generate_viewer_html(self._path())
+        self.assertIn("BROKEN (MISSING_PARENT)", html_out)
+        self.assertNotIn("ENTRY #0", html_out)
+        self.assertIn('<div class="note">Entry ', html_out)
 
     def test_markup_in_data_is_unicode_escaped(self) -> None:
         """Every ``<``, ``>``, and ``&`` in embedded data is a \\uXXXX escape.

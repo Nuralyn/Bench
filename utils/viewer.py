@@ -104,10 +104,16 @@ def _compute_chain_status(ledger_path: str) -> dict:
         )
     except (TypeError, ValueError):
         idx = None
+    # verify_chain reports entries-directory failures (MISSING_PARENT,
+    # ORPHAN_ENTRY, DUPLICATE_ENTRY, FILENAME_MISMATCH) with index -1: no
+    # position in the legacy array applies, so there is no entry number.
+    if idx is not None and idx < 0:
+        idx = None
 
     return {
         "status": "BROKEN",
         "failure_index": idx,
+        "failure_type": str(result.get("failure_type", "")),
         "message": str(result.get("message", "Chain broken.")),
     }
 
@@ -139,6 +145,7 @@ def _build_html(
         cited_label = "n/a"
 
     chain_status_str: str = str(chain_status.get("status", "EMPTY"))
+    chain_note_html: str = ""
     if chain_status_str == "VALID":
         chain_label: str = "VALID"
         chain_class: str = "ok"
@@ -147,11 +154,20 @@ def _build_html(
         chain_class = "dim"
     else:
         idx_val: Any = chain_status.get("failure_index")
-        suffix: str = (
-            f" AT ENTRY #{idx_val + 1}" if isinstance(idx_val, int) else ""
-        )
+        failure_type: str = str(chain_status.get("failure_type") or "")
+        if isinstance(idx_val, int):
+            suffix: str = f" AT ENTRY #{idx_val + 1}"
+        elif failure_type:
+            suffix = f" ({failure_type})"
+        else:
+            suffix = ""
         chain_label = f"BROKEN{suffix}"
         chain_class = "err"
+        # The verifier's message names the offending hash; a bare BROKEN
+        # label would leave the auditor to rerun verify to learn which.
+        note: str = html.escape(str(chain_status.get("message") or ""))
+        if note:
+            chain_note_html = f'<div class="note">{note}</div>'
     chain_label_esc: str = html.escape(chain_label)
 
     return (
@@ -175,7 +191,7 @@ def _build_html(
         f"  <div class=\"tile\"><div class=\"label\">Passed</div><div class=\"value ok\">{passed} <span class=\"pct\">({passed_pct})</span></div></div>\n"
         f"  <div class=\"tile\"><div class=\"label\">Vetoed</div><div class=\"value err\">{vetoed} <span class=\"pct\">({vetoed_pct})</span></div></div>\n"
         f"  <div class=\"tile\"><div class=\"label\">Most cited</div><div class=\"value mono small\">{cited_label}</div></div>\n"
-        f"  <div class=\"tile\"><div class=\"label\">Chain status</div><div class=\"value {chain_class}\">{chain_label_esc}</div></div>\n"
+        f"  <div class=\"tile\"><div class=\"label\">Chain status</div><div class=\"value {chain_class}\">{chain_label_esc}</div>{chain_note_html}</div>\n"
         "</section>\n"
         "<section class=\"filter-bar\" role=\"tablist\" aria-label=\"Verdict filter\">\n"
         "  <button type=\"button\" class=\"filter active\" data-filter-value=\"all\" role=\"tab\" aria-selected=\"true\">All</button>\n"
@@ -252,6 +268,10 @@ header h1 { margin: 0; font-size: 1.5rem; font-weight: 500; letter-spacing: 0.02
 .tile .value.small { font-size: 0.95rem; }
 .tile .value.mono { font-family: ui-monospace, Menlo, Consolas, monospace; word-break: break-word; }
 .tile .pct { font-size: 0.9rem; color: #94a3b8; font-weight: 400; }
+.tile .note {
+  margin-top: 0.35rem; font-size: 0.78rem; color: #94a3b8;
+  font-family: ui-monospace, Menlo, Consolas, monospace; word-break: break-word;
+}
 .filter-bar {
   display: flex; gap: 0.5rem;
   padding: 1rem 2rem 0.75rem;
