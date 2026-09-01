@@ -1,0 +1,11 @@
+# Development-only dependencies. The runtime lock does not include these;
+# CI installs requirements-dev.lock in the browser-tests job only. Regenerate
+# the lock exactly as for requirements.lock:
+#   python -m piptools compile --generate-hashes --strip-extras \
+#     --output-file requirements-dev.lock requirements-dev.txt
+# and land it the same way: by deliberate human decision after reading the
+# diff (CLAUDE.md rule 1). The browser test (tests/test_viewer_browser.py)
+# skips itself when playwright is not importable, so the default test run
+# needs none of this. Install the browser with:
+#   python -m playwright install chromium
+playwright==1.60.0

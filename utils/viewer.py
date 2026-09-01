@@ -31,6 +31,27 @@ from utils.stats import compute_ledger_stats, pct
 
 _HASH_SHORT_LEN: int = 12
 
+# Characters that must never appear literally inside an inline <script>
+# data block, mapped to their JSON \uXXXX escapes (the convention Django's
+# json_script uses). Escaping only "</script" is not enough: an unclosed
+# "<!--<script" in governed content drops the HTML parser into the
+# script-data-double-escaped state, the page's own closing tag is swallowed
+# into the script, and nothing renders. Escaping every "<" closes that
+# whole class rather than one spelling of it.
+_JSON_SCRIPT_ESCAPES: dict[str, str] = {
+    "<": "\\u003C",
+    ">": "\\u003E",
+    "&": "\\u0026",
+}
+
+
+def _embed_json(value: Any) -> str:
+    """Serialize ``value`` for safe inlining inside a <script> element."""
+    text: str = json.dumps(value, default=str)
+    for raw, escaped in _JSON_SCRIPT_ESCAPES.items():
+        text = text.replace(raw, escaped)
+    return text
+
 
 def generate_viewer_html(ledger_path: str | None = None) -> str:
     """Return a complete self-contained HTML string rendering the ledger.
@@ -83,10 +104,16 @@ def _compute_chain_status(ledger_path: str) -> dict:
         )
     except (TypeError, ValueError):
         idx = None
+    # verify_chain reports entries-directory failures (MISSING_PARENT,
+    # ORPHAN_ENTRY, DUPLICATE_ENTRY, FILENAME_MISMATCH) with index -1: no
+    # position in the legacy array applies, so there is no entry number.
+    if idx is not None and idx < 0:
+        idx = None
 
     return {
         "status": "BROKEN",
         "failure_index": idx,
+        "failure_type": str(result.get("failure_type", "")),
         "message": str(result.get("message", "Chain broken.")),
     }
 
@@ -97,8 +124,8 @@ def _build_html(
     entries: list[dict],
 ) -> str:
     """Assemble the full HTML document as a single string."""
-    entries_json: str = json.dumps(entries, default=str).replace("</", "<\\/")
-    chain_json: str = json.dumps(chain_status).replace("</", "<\\/")
+    entries_json: str = _embed_json(entries)
+    chain_json: str = _embed_json(chain_status)
 
     # Rates are computed over adjudicated entries, excluding chain-retirement
     # anchors, exactly as cmd_stats does: the shared stats helper exists so
@@ -118,6 +145,7 @@ def _build_html(
         cited_label = "n/a"
 
     chain_status_str: str = str(chain_status.get("status", "EMPTY"))
+    chain_note_html: str = ""
     if chain_status_str == "VALID":
         chain_label: str = "VALID"
         chain_class: str = "ok"
@@ -126,12 +154,27 @@ def _build_html(
         chain_class = "dim"
     else:
         idx_val: Any = chain_status.get("failure_index")
-        suffix: str = (
-            f" AT ENTRY #{idx_val + 1}" if isinstance(idx_val, int) else ""
-        )
+        failure_type: str = str(chain_status.get("failure_type") or "")
+        if isinstance(idx_val, int):
+            suffix: str = f" AT ENTRY #{idx_val + 1}"
+        elif failure_type:
+            suffix = f" ({failure_type})"
+        else:
+            suffix = ""
         chain_label = f"BROKEN{suffix}"
         chain_class = "err"
+        # The verifier's message names the offending hash; a bare BROKEN
+        # label would leave the auditor to rerun verify to learn which.
+        note: str = html.escape(str(chain_status.get("message") or ""))
+        if note:
+            chain_note_html = f'<div class="note">{note}</div>'
     chain_label_esc: str = html.escape(chain_label)
+
+    # Fail-closed entries carry verdict VETO with pipeline_error true, so
+    # the vetoed count above includes them. cmd_stats prints this count
+    # separately; without it here a run of timeouts reads as a strict judge.
+    pipeline_errors: int = int(stats.get("pipeline_errors", 0))
+    pipeline_class: str = "err" if pipeline_errors else "dim"
 
     return (
         "<!doctype html>\n"
@@ -153,8 +196,9 @@ def _build_html(
         f"  <div class=\"tile\"><div class=\"label\">Governed changes</div><div class=\"value\">{adjudicated}</div></div>\n"
         f"  <div class=\"tile\"><div class=\"label\">Passed</div><div class=\"value ok\">{passed} <span class=\"pct\">({passed_pct})</span></div></div>\n"
         f"  <div class=\"tile\"><div class=\"label\">Vetoed</div><div class=\"value err\">{vetoed} <span class=\"pct\">({vetoed_pct})</span></div></div>\n"
+        f"  <div class=\"tile\"><div class=\"label\">Pipeline errors</div><div class=\"value {pipeline_class}\">{pipeline_errors}</div></div>\n"
         f"  <div class=\"tile\"><div class=\"label\">Most cited</div><div class=\"value mono small\">{cited_label}</div></div>\n"
-        f"  <div class=\"tile\"><div class=\"label\">Chain status</div><div class=\"value {chain_class}\">{chain_label_esc}</div></div>\n"
+        f"  <div class=\"tile\"><div class=\"label\">Chain status</div><div class=\"value {chain_class}\">{chain_label_esc}</div>{chain_note_html}</div>\n"
         "</section>\n"
         "<section class=\"filter-bar\" role=\"tablist\" aria-label=\"Verdict filter\">\n"
         "  <button type=\"button\" class=\"filter active\" data-filter-value=\"all\" role=\"tab\" aria-selected=\"true\">All</button>\n"
@@ -231,6 +275,10 @@ header h1 { margin: 0; font-size: 1.5rem; font-weight: 500; letter-spacing: 0.02
 .tile .value.small { font-size: 0.95rem; }
 .tile .value.mono { font-family: ui-monospace, Menlo, Consolas, monospace; word-break: break-word; }
 .tile .pct { font-size: 0.9rem; color: #94a3b8; font-weight: 400; }
+.tile .note {
+  margin-top: 0.35rem; font-size: 0.78rem; color: #94a3b8;
+  font-family: ui-monospace, Menlo, Consolas, monospace; word-break: break-word;
+}
 .filter-bar {
   display: flex; gap: 0.5rem;
   padding: 1rem 2rem 0.75rem;
@@ -271,6 +319,7 @@ ol#entries {
   padding: 0.75rem 1rem; cursor: pointer; user-select: none;
 }
 .entry .summary:hover { background: #2a2a44; }
+.entry .summary:focus-visible { outline: 2px solid #a78bfa; outline-offset: -2px; }
 .entry .summary .idx {
   flex: 0 0 3.5rem; color: #94a3b8;
   font-family: ui-monospace, Menlo, Consolas, monospace;
@@ -309,7 +358,8 @@ ol#entries {
 }
 .badge.pass { background: #4ade80; color: #0a0a14; }
 .badge.veto { background: #f87171; color: #1a1a2e; }
-.badge.fail-open { background: #94a3b8; color: #1a1a2e; }
+.badge.other { background: #3a3a55; color: #e8e8f0; }
+.badge.pipeline-error { background: #f59e0b; color: #1a1a2e; }
 .badge.concern { background: #f59e0b; color: #1a1a2e; }
 .badge.observation { background: #60a5fa; color: #0a0a14; }
 .badge.violated { background: #f87171; color: #1a1a2e; }
@@ -422,10 +472,10 @@ ol#entries {
   padding-left: 1.25rem;
 }
 .detail ul li { margin: 0.2rem 0; font-size: 0.88rem; }
-#entries-root[data-filter="PASS"] .entry[data-verdict="VETO"],
-#entries-root[data-filter="PASS"] .entry[data-verdict="NONE"] { display: none; }
-#entries-root[data-filter="VETO"] .entry[data-verdict="PASS"],
-#entries-root[data-filter="VETO"] .entry[data-verdict="NONE"] { display: none; }
+/* A filter shows only its own verdict. Listing the verdicts to hide let
+   SANITATION and ANCHOR entries through both filters. */
+#entries-root[data-filter="PASS"] .entry:not([data-verdict="PASS"]),
+#entries-root[data-filter="VETO"] .entry:not([data-verdict="VETO"]) { display: none; }
 footer {
   padding: 1rem 2rem;
   color: #94a3b8;
@@ -497,7 +547,9 @@ _JS: str = """
           for (const dk in v) {
             if (Object.prototype.hasOwnProperty.call(v, dk)) node.dataset[dk] = v[dk];
           }
-        } else if (k === 'onclick') node.addEventListener('click', v);
+        } else if (k.indexOf('on') === 0 && typeof v === 'function') {
+          node.addEventListener(k.slice(2), v);
+        }
         else if (k === 'text') node.textContent = v;
         else node.setAttribute(k, v);
       }
@@ -557,6 +609,21 @@ _JS: str = """
     return node;
   }
 
+  function preField(k, text) {
+    return el('div', { class: 'field' },
+      el('div', { class: 'k', text: k }),
+      el('div', { class: 'v' }, el('pre', { text: String(text) }))
+    );
+  }
+
+  // Every diff_summary shape utils.diff.build_diff_info writes gets its own
+  // rendering. Anything else falls through to the raw dump, which is a
+  // signal that this list needs a new branch, not a display mode.
+  const DIFF_SUMMARY_KEYS = [
+    'file_path', 'change_type', 'content', 'formatted_diff',
+    'old_string', 'new_string', 'redacted', 'note', 'truncation'
+  ];
+
   function renderChange(ch) {
     const container = el('div');
     if (!ch || typeof ch !== 'object') {
@@ -570,42 +637,56 @@ _JS: str = """
     if (ds == null) {
       // nothing
     } else if (typeof ds === 'string') {
-      container.appendChild(el('div', { class: 'field' },
-        el('div', { class: 'k', text: 'diff' }),
-        el('div', { class: 'v' }, el('pre', { text: ds }))
-      ));
+      container.appendChild(preField('diff', ds));
     } else if (typeof ds === 'object') {
       if (ds.file_path && ds.file_path !== ch.file) {
         container.appendChild(field('diff file', ds.file_path));
       }
       if (ds.change_type) container.appendChild(field('change type', ds.change_type));
-      if (ds.content != null) {
-        container.appendChild(el('div', { class: 'field' },
-          el('div', { class: 'k', text: 'content' }),
-          el('div', { class: 'v' }, el('pre', { text: String(ds.content) }))
-        ));
+      if (ds.redacted) {
+        container.appendChild(field('diff', ds.note || 'Diff body omitted.'));
       }
-      if (ds.formatted_diff != null) {
-        container.appendChild(el('div', { class: 'field' },
-          el('div', { class: 'k', text: 'formatted diff' }),
-          el('div', { class: 'v' }, el('pre', { text: String(ds.formatted_diff) }))
-        ));
+      if (ds.content != null) container.appendChild(preField('content', ds.content));
+      if (ds.formatted_diff != null) container.appendChild(preField('formatted diff', ds.formatted_diff));
+      if (ds.old_string != null) container.appendChild(preField('old', ds.old_string));
+      if (ds.new_string != null) container.appendChild(preField('new', ds.new_string));
+      if (ds.truncation != null) {
+        // Write truncation is a flat record; Edit nests one under old and
+        // new, MultiEdit a list. Nested values are serialized so line and
+        // character counts never flatten to "[object Object]".
+        const t = ds.truncation;
+        const show = function(v) {
+          return (v && typeof v === 'object') ? JSON.stringify(v) : String(v);
+        };
+        const parts = (t && typeof t === 'object' && !Array.isArray(t))
+          ? Object.keys(t).map(function(k) { return k + ' ' + show(t[k]); })
+          : [show(t)];
+        container.appendChild(field('truncation', parts.join(', ')));
       }
       const extra = {};
       let extraCount = 0;
-      const known = ['file_path', 'content', 'change_type', 'formatted_diff'];
       for (const k in ds) {
         if (!Object.prototype.hasOwnProperty.call(ds, k)) continue;
-        if (known.indexOf(k) === -1) { extra[k] = ds[k]; extraCount++; }
+        if (DIFF_SUMMARY_KEYS.indexOf(k) === -1) { extra[k] = ds[k]; extraCount++; }
       }
       if (extraCount > 0) {
-        container.appendChild(el('div', { class: 'field' },
-          el('div', { class: 'k', text: 'raw' }),
-          el('div', { class: 'v' }, el('pre', { text: JSON.stringify(extra, null, 2) }))
-        ));
+        container.appendChild(preField('raw', JSON.stringify(extra, null, 2)));
       }
     }
     return container;
+  }
+
+  // A stage that failed records status PIPELINE_ERROR with an error code
+  // and, when the model answered at all, the raw response that did not
+  // validate. Dropping those left the auditor with a bare status line.
+  function appendStageError(container, stage) {
+    if (stage.error != null) container.appendChild(field('error', stage.error));
+    if (stage.raw_response != null) {
+      const raw = (typeof stage.raw_response === 'string')
+        ? stage.raw_response
+        : JSON.stringify(stage.raw_response, null, 2);
+      container.appendChild(preField('raw response', raw));
+    }
   }
 
   function renderChallenger(ch) {
@@ -615,6 +696,7 @@ _JS: str = """
       return container;
     }
     container.appendChild(field('status', ch.status));
+    appendStageError(container, ch);
     const findings = Array.isArray(ch.findings) ? ch.findings : [];
     if (findings.length === 0) {
       container.appendChild(el('p', { text: ch.status === 'CLEAR' ? 'No findings reported.' : 'No findings in entry.' }));
@@ -649,6 +731,7 @@ _JS: str = """
       return container;
     }
     container.appendChild(field('status', df.status));
+    appendStageError(container, df);
     if (df.summary) container.appendChild(field('summary', df.summary));
     const rebuttals = Array.isArray(df.rebuttals) ? df.rebuttals : [];
     rebuttals.forEach(function(r) {
@@ -717,12 +800,14 @@ _JS: str = """
       return container;
     }
     if (or.verdict) {
-      const cls = or.verdict === 'PASS' ? 'pass' : or.verdict === 'VETO' ? 'veto' : '';
+      const cls = or.verdict === 'PASS' ? 'pass' : or.verdict === 'VETO' ? 'veto' : 'other';
       container.appendChild(el('div', { class: 'field' },
         el('div', { class: 'k', text: 'verdict' }),
         el('div', { class: 'v' }, el('span', { class: 'badge ' + cls, text: or.verdict }))
       ));
     }
+    if (or.status) container.appendChild(field('status', or.status));
+    appendStageError(container, or);
     if (or.confidence) container.appendChild(field('confidence', or.confidence));
     if (or.reasoning) {
       container.appendChild(el('div', { class: 'field' },
@@ -802,10 +887,9 @@ _JS: str = """
   function renderEntry(entry, index) {
     const verdict = verdictOf(entry);
     const pipelineErr = hasPipelineError(entry);
-    const verdictLabel = verdict || (pipelineErr ? 'FAIL-OPEN' : '-');
     const verdictCssKey = verdict === 'PASS' ? 'pass'
       : verdict === 'VETO' ? 'veto'
-      : (pipelineErr ? 'fail-open' : '');
+      : (verdict ? 'other' : '');
     const dataVerdict = verdict || 'NONE';
 
     const change = (entry.change && typeof entry.change === 'object') ? entry.change : {};
@@ -814,22 +898,39 @@ _JS: str = """
 
     const li = el('li', {
       class: 'entry',
-      dataset: { verdict: dataVerdict }
+      dataset: { verdict: dataVerdict, pipelineError: pipelineErr ? 'true' : 'false' }
     });
 
-    const badge = (verdictLabel !== '-')
-      ? el('span', { class: 'badge ' + verdictCssKey, text: verdictLabel })
+    const badge = verdict
+      ? el('span', { class: 'badge ' + verdictCssKey, text: verdict })
       : el('span', { class: 'mono', text: '-' });
+    // Bench fails closed: a stage that timed out or returned an unparseable
+    // response records VETO with pipeline_error. That VETO is a pipeline
+    // failure, not a ruling, and the row must say so.
+    const errorBadge = pipelineErr
+      ? el('span', { class: 'badge pipeline-error', text: 'PIPELINE ERROR' })
+      : null;
 
+    function toggle() {
+      const expanded = li.classList.toggle('expanded');
+      summary.setAttribute('aria-expanded', String(expanded));
+    }
     const summary = el('div', {
       class: 'summary',
-      onclick: function() { li.classList.toggle('expanded'); }
+      role: 'button',
+      tabindex: '0',
+      'aria-expanded': 'false',
+      onclick: toggle,
+      onkeydown: function(e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+      }
     },
       el('span', { class: 'idx', text: '#' + (index + 1) }),
       el('span', { class: 'ts', text: fmtTimestamp(entry.timestamp) }),
       el('span', { class: 'file', title: file, text: file }),
       el('span', { class: 'tool', text: tool }),
       badge,
+      errorBadge,
       el('span', { class: 'hash', text: shortHash(entry.entry_hash) })
     );
     li.appendChild(summary);

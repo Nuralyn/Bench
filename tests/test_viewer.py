@@ -28,7 +28,11 @@ if str(_REPO_ROOT) not in sys.path:
 
 from tests._ledger_fixtures import build_valid_chain as _build_valid_chain  # noqa: E402
 from cli.commands import cmd_stats  # noqa: E402
-from ledger.chain import ANCHOR_VERDICT, compute_entry_hash  # noqa: E402
+from ledger.chain import (  # noqa: E402
+    ANCHOR_VERDICT,
+    compute_entry_hash,
+    resolve_entries_dir,
+)
 from ledger.retire import ANCHOR_TOOL  # noqa: E402
 from utils.stats import compute_ledger_stats, pct  # noqa: E402
 from utils.viewer import generate_viewer_html  # noqa: E402
@@ -93,14 +97,65 @@ class GenerateViewerHtmlTests(unittest.TestCase):
         html_out: str = generate_viewer_html(self._path())
         self.assertIn("BROKEN AT ENTRY #2", html_out)
 
-    def test_script_close_tags_in_data_are_escaped(self) -> None:
-        chain: list[dict] = _build_valid_chain(1)
+    def test_entries_dir_failure_reports_type_not_entry_zero(self) -> None:
+        """A failure with no array position names its type, not "#0".
+
+        verify_chain reports entries-directory failures (MISSING_PARENT,
+        ORPHAN_ENTRY, DUPLICATE_ENTRY, FILENAME_MISMATCH) with failure_index
+        -1 because no position in the legacy array applies. The banner used
+        to format that as "BROKEN AT ENTRY #0" and dropped the message that
+        names the offending hash (audit finding 4).
+        """
+        chain: list[dict] = _build_valid_chain(2)
+        self._write_chain(chain)
+        entries_dir: Path = Path(resolve_entries_dir(self._path()))
+        entries_dir.mkdir()
+        orphan: dict = dict(chain[1])
+        orphan["entry_id"] = "id-orphan"
+        orphan["previous_hash"] = ["f" * 64]
+        orphan["entry_hash"] = compute_entry_hash(orphan)
+        (entries_dir / f"{orphan['entry_hash']}.json").write_text(
+            json.dumps(orphan), encoding="utf-8"
+        )
+        html_out: str = generate_viewer_html(self._path())
+        self.assertIn("BROKEN (MISSING_PARENT)", html_out)
+        self.assertNotIn("ENTRY #0", html_out)
+        self.assertIn('<div class="note">Entry ', html_out)
+
+    def test_markup_in_data_is_unicode_escaped(self) -> None:
+        """Every ``<``, ``>``, and ``&`` in embedded data is a \\uXXXX escape.
+
+        Escaping only ``</script`` is not enough. An Edit whose old_string
+        holds ``<!--<script`` with no closing ``-->`` in the same snippet
+        puts the HTML parser into the script-data-double-escaped state, the
+        page's own closing ``</script>`` is swallowed into the script, and
+        the viewer renders a banner over zero entries with no console error
+        (audit finding 1, reproduced in Chrome).
+        """
+        chain: list[dict] = _build_valid_chain(2)
         chain[0]["change"]["file"] = "evil</script><script>alert(1)"
         chain[0]["entry_hash"] = compute_entry_hash(chain[0])
+        chain[1]["previous_hash"] = chain[0]["entry_hash"]
+        chain[1]["change"]["diff_summary"] = {
+            "file_path": "index.html",
+            "change_type": "modify",
+            "old_string": '<!--<script src="a.js">',
+            "new_string": "a & b",
+        }
+        chain[1]["entry_hash"] = compute_entry_hash(chain[1])
         self._write_chain(chain)
         html_out: str = generate_viewer_html(self._path())
-        self.assertNotIn("evil</script>", html_out)
-        self.assertIn("evil<\\/script>", html_out)
+        script: str = html_out.split("<script>", 1)[1]
+        data: str = script.split("const CHAIN_STATUS", 1)[0]
+        self.assertNotIn("<", data)
+        self.assertNotIn(">", data)
+        self.assertNotIn("&", data)
+        self.assertIn("evil\\u003C/script\\u003E", html_out)
+        self.assertIn("\\u003C!--\\u003Cscript", html_out)
+        # The escapes are plain JSON, so the browser parses back exactly
+        # what was written to disk.
+        payload: str = data.split("=", 1)[1].strip().rstrip(";")
+        self.assertEqual(json.loads(payload), chain)
 
     def test_generation_failure_returns_error_page(self) -> None:
         with patch(
@@ -182,6 +237,42 @@ class ViewerStatsParityTests(unittest.TestCase):
         cli_out: str = buf.getvalue()
         self.assertIn(expected_passed, cli_out)
         self.assertIn(expected_vetoed, cli_out)
+
+    def test_banner_reports_pipeline_errors_like_cmd_stats(self) -> None:
+        """A fail-closed VETO is counted as a pipeline error on both surfaces.
+
+        Bench fails closed: a stage that times out or returns an unparseable
+        response records verdict VETO with pipeline_error true. cmd_stats has
+        always printed that count separately; the banner did not, so a spike
+        of timeouts read as a strict judge (audit finding 2).
+        """
+        chain: list[dict] = _build_valid_chain(
+            3, verdicts=["PASS", "VETO", "PASS"]
+        )
+        failed: dict = dict(chain[1])
+        failed["pipeline_error"] = True
+        failed["oracle"] = {"status": "PIPELINE_ERROR", "error": "TIMEOUT"}
+        failed["entry_hash"] = compute_entry_hash(failed)
+        chain[1] = failed
+        chain[2]["previous_hash"] = failed["entry_hash"]
+        chain[2]["entry_hash"] = compute_entry_hash(chain[2])
+        self._write_chain(chain)
+        html_out: str = generate_viewer_html(self._path())
+
+        stats: dict = compute_ledger_stats(chain)
+        self.assertEqual(stats["pipeline_errors"], 1)
+        self.assertIn(
+            '<div class="label">Pipeline errors</div>'
+            '<div class="value err">1</div>',
+            html_out,
+        )
+
+        buf: io.StringIO = io.StringIO()
+        with patch("cli.commands.load_ledger", return_value=chain), patch(
+            "cli.commands.verify_chain", return_value={"valid": True}
+        ), contextlib.redirect_stdout(buf):
+            cmd_stats()
+        self.assertIn("Pipeline errors        : 1", buf.getvalue())
 
     def test_anchor_only_ledger_renders_zero_rates(self) -> None:
         chain: list[dict] = []
