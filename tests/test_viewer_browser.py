@@ -67,6 +67,10 @@ def _build_fixture_chain() -> list[dict[str, Any]]:
         "change_type": "modify",
         "old_string": _SCRIPT_SNIPPET,
         "new_string": '<script src="b.js">',
+        # utils.diff._build_edit nests one truncation record per side.
+        "truncation": {
+            "old": {"original_lines": 362, "truncated_lines": 73},
+        },
     }
     # 3: a fail-closed VETO. The Oracle never ruled; the stage timed out.
     chain[2]["verdict"] = "VETO"
@@ -187,6 +191,10 @@ class ViewerBrowserTests(unittest.TestCase):
         self.assertIn(
             _SCRIPT_SNIPPET, row.locator(".detail pre").first.text_content()
         )
+        # Nested truncation records keep their counts.
+        detail: str = row.locator(".detail").inner_text()
+        self.assertIn('"original_lines":362', detail)
+        self.assertNotIn("[object Object]", detail)
 
     def test_fail_closed_veto_is_labelled_a_pipeline_error(self) -> None:
         rows: Locator = self.page.locator('.entry[data-pipeline-error="true"]')

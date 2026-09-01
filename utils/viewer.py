@@ -651,10 +651,16 @@ _JS: str = """
       if (ds.old_string != null) container.appendChild(preField('old', ds.old_string));
       if (ds.new_string != null) container.appendChild(preField('new', ds.new_string));
       if (ds.truncation != null) {
+        // Write truncation is a flat record; Edit nests one under old and
+        // new, MultiEdit a list. Nested values are serialized so line and
+        // character counts never flatten to "[object Object]".
         const t = ds.truncation;
-        const parts = (t && typeof t === 'object')
-          ? Object.keys(t).map(function(k) { return k + ' ' + String(t[k]); })
-          : [String(t)];
+        const show = function(v) {
+          return (v && typeof v === 'object') ? JSON.stringify(v) : String(v);
+        };
+        const parts = (t && typeof t === 'object' && !Array.isArray(t))
+          ? Object.keys(t).map(function(k) { return k + ' ' + show(t[k]); })
+          : [show(t)];
         container.appendChild(field('truncation', parts.join(', ')));
       }
       const extra = {};
