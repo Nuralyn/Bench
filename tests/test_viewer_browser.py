@@ -266,7 +266,9 @@ class ViewerBrowserTests(unittest.TestCase):
         # squeezed the lower cards until their tables spilled past the card
         # edge. Every table must fit its card with no internal scrolling,
         # and the page must never scroll horizontally.
-        for width in (1920, 1400, 1000):
+        # 1701 is the narrowest three-column layout; 1400 the widest
+        # two-column one; 1000 is single column.
+        for width in (1920, 1701, 1400, 1000):
             self.page.set_viewport_size({"width": width, "height": 1080})
             cards: list[dict[str, Any]] = self.page.evaluate(
                 "[...document.querySelectorAll('.dashboard .card')].map(c => {"
