@@ -23,6 +23,7 @@ import html
 import json
 import sys
 import traceback
+from pathlib import Path
 from typing import Any
 
 from ledger.chain import load_ledger, resolve_ledger_path
@@ -78,7 +79,11 @@ def generate_viewer_html(ledger_path: str | None = None) -> str:
         entries: list[dict] = load_ledger(resolved)
         chain_status: dict = _compute_chain_status(resolved)
         stats: dict = compute_ledger_stats(entries)
-        return _build_html(stats, chain_status, entries)
+        # The ledger lives at <project>/.bench/bench-ledger.json, so the
+        # project it governs is two levels up. BENCH_LEDGER_PATH can point
+        # elsewhere; the scope split is then relative to that location.
+        project_root: str = str(Path(resolved).resolve().parent.parent)
+        return _build_html(stats, chain_status, entries, project_root)
     except Exception as e:
         print(
             f"[bench viewer] generate_viewer_html failed: "
@@ -131,6 +136,7 @@ def _build_html(
     stats: dict,
     chain_status: dict,
     entries: list[dict],
+    project_root: str,
 ) -> str:
     """Assemble the full HTML document as a single string."""
     entries_json: str = _embed_json(entries)
@@ -209,7 +215,7 @@ def _build_html(
         f"  <div class=\"tile\"><div class=\"label\">Most violated</div><div class=\"value mono small\">{cited_label}</div></div>\n"
         f"  <div class=\"tile\"><div class=\"label\">Chain status</div><div class=\"value {chain_class}\">{chain_label_esc}</div>{chain_note_html}</div>\n"
         "</section>\n"
-        f"{_build_dashboard(entries)}"
+        f"{_build_dashboard(entries, project_root)}"
         "<section class=\"filter-bar\" role=\"tablist\" aria-label=\"Verdict filter\">\n"
         "  <button type=\"button\" class=\"filter active\" data-filter-value=\"all\" role=\"tab\" aria-selected=\"true\">All</button>\n"
         "  <button type=\"button\" class=\"filter\" data-filter-value=\"PASS\" role=\"tab\" aria-selected=\"false\">PASS</button>\n"
@@ -387,14 +393,17 @@ _VERDICT_HEADERS: list[str] = [
 ]
 
 
-def _build_dashboard(entries: list[dict]) -> str:
+def _build_dashboard(entries: list[dict], project_root: str) -> str:
     """The dashboard section: weekly rates, scope, constraints, tokens.
 
     Every figure comes from utils.stats, the same helpers cmd_stats and the
     banner use, so this section can only ever restate what they count.
+    ``project_root`` anchors the scope split: governance is a top-level
+    C-007 directory or file of that project, never a same-named directory
+    deeper in the tree or a file outside it.
     """
     weeks: list[dict] = stats_by_week(entries)
-    scopes: list[dict] = stats_by_scope(entries)
+    scopes: list[dict] = stats_by_scope(entries, project_root)
     citations: list[dict] = citations_by_constraint(entries)
     tokens: dict[str, dict[str, int]] = tokens_by_stage(entries)
 

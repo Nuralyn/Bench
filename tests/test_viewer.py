@@ -210,7 +210,10 @@ class DashboardTests(unittest.TestCase):
             ]), html_out)
         self.assertEqual(html_out.count("<path d="), 4)  # 2 weeks x 2 charts
 
-        scopes: list[dict] = stats_by_scope(chain)
+        # generate_viewer_html anchors scope at the ledger's grandparent.
+        scopes: list[dict] = stats_by_scope(
+            chain, str(Path(self._path()).resolve().parent.parent)
+        )
         self.assertEqual(
             [(r["scope"], r["adjudicated"], r["vetoed"]) for r in scopes],
             [("governance", 1, 1), ("other", 2, 0)],

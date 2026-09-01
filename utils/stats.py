@@ -8,6 +8,7 @@ callers own all presentation.
 
 import datetime
 import sys
+from pathlib import PurePosixPath
 from typing import Any
 
 from ledger.chain import ANCHOR_VERDICT
@@ -72,18 +73,28 @@ OTHER_SCOPE: str = "other"
 UNKNOWN_WEEK: str = "unknown"
 
 
-def scope_of_file(path: str) -> str:
-    """GOVERNANCE_SCOPE for a C-007 file, else OTHER_SCOPE.
+def scope_of_file(path: str, project_root: str) -> str:
+    """GOVERNANCE_SCOPE for a C-007 file of the project, else OTHER_SCOPE.
 
-    A file is governance when it sits under a GOVERNANCE_SCOPE_DIRS directory
-    or is named in GOVERNANCE_SCOPE_FILES. Accepts relative or absolute paths
-    with either separator. Only directory components are matched against the
-    directory set, so a file merely named hooks.md is not governance.
+    A file is governance when, relative to ``project_root``, its top-level
+    directory is in GOVERNANCE_SCOPE_DIRS or it is a top-level file named in
+    GOVERNANCE_SCOPE_FILES. Matching only the top level keeps a governed
+    project's own ``src/pipeline/`` out of the governance scope; a file
+    outside the project is never governance. Either separator is accepted.
     """
-    parts: list[str] = str(path).replace("\\", "/").split("/")
-    if any(part in GOVERNANCE_SCOPE_DIRS for part in parts[:-1]):
+    normalized: str = str(path).replace("\\", "/")
+    root: str = str(project_root).replace("\\", "/").rstrip("/")
+    if PurePosixPath(normalized).is_absolute() or (
+        len(normalized) > 1 and normalized[1] == ":"
+    ):
+        if root and normalized.startswith(root + "/"):
+            normalized = normalized[len(root) + 1:]
+        else:
+            return OTHER_SCOPE
+    parts: list[str] = normalized.split("/")
+    if len(parts) > 1 and parts[0] in GOVERNANCE_SCOPE_DIRS:
         return GOVERNANCE_SCOPE
-    if parts[-1] in GOVERNANCE_SCOPE_FILES:
+    if len(parts) == 1 and parts[0] in GOVERNANCE_SCOPE_FILES:
         return GOVERNANCE_SCOPE
     return OTHER_SCOPE
 
@@ -104,6 +115,9 @@ def _tally_verdicts(entries: list[dict]) -> dict[str, int]:
     Returns {"total", "passed", "vetoed", "pipeline_errors", "anchors",
     "adjudicated"}. Fail-closed entries carry verdict VETO and a pipeline
     error, so they are counted in both vetoed and pipeline_errors.
+    Adjudicated is passed plus vetoed: chain-retirement anchors and
+    published-copy sanitation records are bookkeeping, not rulings, and
+    neither may inflate the denominator of a rate.
     """
     passed: int = 0
     vetoed: int = 0
@@ -121,14 +135,13 @@ def _tally_verdicts(entries: list[dict]) -> dict[str, int]:
             passed += 1
         elif verdict == "VETO":
             vetoed += 1
-    total: int = len(entries)
     return {
-        "total": total,
+        "total": len(entries),
         "passed": passed,
         "vetoed": vetoed,
         "pipeline_errors": pipeline_errors,
         "anchors": anchors,
-        "adjudicated": total - anchors,
+        "adjudicated": passed + vetoed,
     }
 
 
@@ -154,17 +167,19 @@ def stats_by_week(entries: list[dict]) -> list[dict]:
     return _group_tallies(groups, "week")
 
 
-def stats_by_scope(entries: list[dict]) -> list[dict]:
+def stats_by_scope(entries: list[dict], project_root: str) -> list[dict]:
     """Verdict tallies for the governance scope and everything else.
 
-    Both rows are always present, so a project with no pipeline changes
-    reports zeros rather than a missing row.
+    ``project_root`` is the directory the ledger governs; see scope_of_file
+    for how a change's file is classified against it. Both rows are always
+    present, so a project with no pipeline changes reports zeros rather
+    than a missing row.
     """
     groups: dict[str, list[dict]] = {GOVERNANCE_SCOPE: [], OTHER_SCOPE: []}
     for entry in entries:
         change: Any = entry.get("change")
         file: Any = change.get("file", "") if isinstance(change, dict) else ""
-        groups[scope_of_file(str(file))].append(entry)
+        groups[scope_of_file(str(file), project_root)].append(entry)
     return _group_tallies(groups, "scope")
 
 
@@ -192,7 +207,12 @@ def _parse_citation(citation: Any) -> tuple[str, bool] | None:
 
 
 def _citation_tallies(entries: list[dict]) -> dict[str, dict[str, int]]:
-    """Per constraint over VETO entries: {"cited": n, "violated": n}."""
+    """Per constraint over VETO entries: {"cited": n, "violated": n}.
+
+    Both figures count vetoes, not mentions: a constraint an Oracle response
+    cites twice is tallied once for that entry, and once as violated if any
+    of its citations there found it so.
+    """
     tallies: dict[str, dict[str, int]] = {}
     for entry in entries:
         if entry_verdict(entry) != "VETO":
@@ -203,16 +223,22 @@ def _citation_tallies(entries: list[dict]) -> dict[str, dict[str, int]]:
         )
         if not isinstance(citations, list):
             continue
+        cited: set[str] = set()
+        violated: set[str] = set()
         for citation in citations:
             parsed: tuple[str, bool] | None = _parse_citation(citation)
             if parsed is None:
                 continue
-            cid, violated = parsed
+            cid, is_violated = parsed
+            cited.add(cid)
+            if is_violated:
+                violated.add(cid)
+        for cid in cited:
             row: dict[str, int] = tallies.setdefault(
                 cid, {"cited": 0, "violated": 0}
             )
             row["cited"] += 1
-            if violated:
+            if cid in violated:
                 row["violated"] += 1
     return tallies
 

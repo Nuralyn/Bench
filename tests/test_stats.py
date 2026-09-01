@@ -98,11 +98,13 @@ class ComputeLedgerStatsTests(unittest.TestCase):
         self.assertEqual(stats["most_cited"], ("C-001", 2))
 
     def test_dict_citations_counted(self) -> None:
+        # Two vetoes, one citation each. (This test once put both citations
+        # in a single veto and expected 2, which pinned the double count
+        # that CitationTableTests.test_a_constraint_counts_once_per_veto
+        # now forbids.)
         entries: list[dict] = [
-            _veto_entry([
-                {"constraint_id": "C-007", "disposition": "VIOLATED"},
-                {"constraint_id": "C-007", "disposition": "VIOLATED"},
-            ]),
+            _veto_entry([{"constraint_id": "C-007", "disposition": "VIOLATED"}]),
+            _veto_entry([{"constraint_id": "C-007", "disposition": "VIOLATED"}]),
         ]
         stats: dict = compute_ledger_stats(entries)
         self.assertEqual(stats["most_cited"], ("C-007", 2))
@@ -241,28 +243,45 @@ def _counts(row: dict) -> tuple[int, int, int, int]:
     )
 
 
+_ROOT: str = "C:/Users/x/Bench"
+
+
 class ScopeTests(unittest.TestCase):
-    def test_governance_directories_in_any_path_form(self) -> None:
+    def test_top_level_governance_paths_in_any_form(self) -> None:
         for path in (
             "pipeline/oracle.py",
             "ledger/chain.py",
             "hooks/pre-tool-use.py",
+            "ledger/entries/deadbeef.json",  # nested below a top-level dir
             "C:/Users/x/Bench/ledger/verify.py",
             "C:\\Users\\x\\Bench\\hooks\\pre-tool-use.py",
             "bench.json",  # the constitution, named by C-007
             "C:/Users/x/Bench/bench.json",
         ):
-            self.assertEqual(scope_of_file(path), "governance", path)
+            self.assertEqual(scope_of_file(path, _ROOT), "governance", path)
+
+    def test_posix_root_is_handled_too(self) -> None:
+        self.assertEqual(
+            scope_of_file("/home/x/proj/pipeline/a.py", "/home/x/proj"),
+            "governance",
+        )
+        self.assertEqual(
+            scope_of_file("/home/x/other/pipeline/a.py", "/home/x/proj"),
+            "other",
+        )
 
     def test_everything_else_is_other(self) -> None:
         for path in (
             "utils/viewer.py",
             "tests/test_ledger_dag.py",
-            "docs/bench.json.md",
+            "src/pipeline/etl.py",  # a governed project's own pipeline dir
+            "docs/bench.json",  # not the top-level constitution
             "hooks.md",  # a file, not a directory
+            "C:/Users/x/Elsewhere/pipeline/a.py",  # outside the project
+            "C:/Users/x/Bench-fork/pipeline/a.py",  # prefix, not the root
             "",
         ):
-            self.assertEqual(scope_of_file(path), "other", path)
+            self.assertEqual(scope_of_file(path, _ROOT), "other", path)
 
     def test_stats_by_scope_tallies_each_group(self) -> None:
         entries: list[dict] = [
@@ -271,13 +290,13 @@ class ScopeTests(unittest.TestCase):
             _change("README.md", "PASS"),
             _change("utils/x.py", "VETO", pipeline_error=True),
         ]
-        rows: list[dict] = stats_by_scope(entries)
+        rows: list[dict] = stats_by_scope(entries, _ROOT)
         self.assertEqual([r["scope"] for r in rows], ["governance", "other"])
         self.assertEqual(_counts(rows[0]), (2, 1, 1, 0))
         self.assertEqual(_counts(rows[1]), (2, 1, 1, 1))
 
     def test_both_scopes_present_for_an_empty_ledger(self) -> None:
-        rows: list[dict] = stats_by_scope([])
+        rows: list[dict] = stats_by_scope([], _ROOT)
         self.assertEqual([r["scope"] for r in rows], ["governance", "other"])
         self.assertEqual([_counts(r) for r in rows], [(0, 0, 0, 0)] * 2)
 
@@ -307,7 +326,44 @@ class WeekTests(unittest.TestCase):
         self.assertEqual(_counts(rows[1]), (1, 1, 0, 0))
 
 
+class SanitationRecordTests(unittest.TestCase):
+    def test_sanitation_records_are_not_adjudicated(self) -> None:
+        # ledger/sanitize.py records a published-copy sanitation with verdict
+        # SANITATION. It is bookkeeping like an anchor: neither passed nor
+        # vetoed, so it must not inflate the denominator of any rate.
+        entries: list[dict] = [
+            _change("a.py", "PASS"),
+            _change("b.py", "VETO"),
+            _change("published copies", "SANITATION"),
+        ]
+        stats: dict = compute_ledger_stats(entries)
+        self.assertEqual(stats["total"], 3)
+        self.assertEqual(stats["adjudicated"], 2)
+        self.assertEqual(pct(stats["vetoed"], stats["adjudicated"]), "50.0%")
+        week: dict = stats_by_week(entries)[0]
+        self.assertEqual(_counts(week), (2, 1, 1, 0))
+
+
 class CitationTableTests(unittest.TestCase):
+    def test_a_constraint_counts_once_per_veto(self) -> None:
+        # One Oracle response may cite a constraint more than once; the
+        # columns count vetoes, so the second mention must not add another.
+        entries: list[dict] = [
+            _veto_entry([
+                {"constraint_id": "C-007", "disposition": "VIOLATED"},
+                {"constraint_id": "C-007", "disposition": "VIOLATED"},
+                {"constraint_id": "C-007", "disposition": "SATISFIED"},
+            ]),
+            _veto_entry(["C-007", "C-007"]),
+        ]
+        self.assertEqual(
+            citations_by_constraint(entries),
+            [{"constraint_id": "C-007", "cited": 2, "violated": 2}],
+        )
+        self.assertEqual(
+            compute_ledger_stats(entries)["most_cited"], ("C-007", 2)
+        )
+
     def test_cited_and_violated_are_counted_separately(self) -> None:
         entries: list[dict] = [
             _veto_entry([
