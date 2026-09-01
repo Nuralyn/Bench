@@ -9,7 +9,9 @@ Run: python -m unittest discover -s tests -p test_commands.py -v
 
 import io
 import os
+import shutil
 import sys
+import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -310,24 +312,35 @@ class CmdConstitutionTests(unittest.TestCase):
 
 
 class CmdViewerTests(unittest.TestCase):
-    def test_writes_html_and_exits_zero(self) -> None:
+    def test_writes_html_beside_the_ledger_and_exits_zero(self) -> None:
+        """The page lands in the ledger directory, created if needed.
+
+        It embeds every diff body the chain holds, so it belongs beside the
+        gitignored chain rather than in the system temp directory, where the
+        old implementation left it with no cleanup (audit finding 8).
+        """
+        tmp: str = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+        ledger_path: str = os.path.join(tmp, ".bench", "bench-ledger.json")
+        target: Path = Path(tmp) / ".bench" / "viewer.html"
         out = io.StringIO()
         with patch(
             "cli.commands.generate_viewer_html",
             return_value="<!doctype html><title>t</title>",
-        ):
-            with patch("cli.commands.webbrowser.open", return_value=True):
-                with redirect_stdout(out):
-                    code: int = cmd_viewer()
+        ), patch(
+            "cli.commands.resolve_ledger_path", return_value=ledger_path
+        ), patch(
+            "cli.commands.webbrowser.open", return_value=True
+        ) as opened:
+            with redirect_stdout(out):
+                code: int = cmd_viewer()
         self.assertEqual(code, 0)
-        text: str = out.getvalue()
-        self.assertIn("Bench viewer written to:", text)
-        tmp_path: str = text.split("Bench viewer written to:")[1].strip()
-        self.addCleanup(
-            lambda: os.path.exists(tmp_path) and os.remove(tmp_path)
+        self.assertIn(f"Bench viewer written to: {target}", out.getvalue())
+        self.assertEqual(
+            target.read_text(encoding="utf-8"),
+            "<!doctype html><title>t</title>",
         )
-        written: str = Path(tmp_path).read_text(encoding="utf-8")
-        self.assertIn("<!doctype html>", written)
+        opened.assert_called_once_with(target.resolve().as_uri())
 
     def test_generation_failure_exits_one(self) -> None:
         err = io.StringIO()

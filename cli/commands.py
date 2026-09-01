@@ -16,10 +16,8 @@ the real ``sys.stdin.isatty`` and ``input``, and renders the result.
 
 import json
 import os
-import stat
 import subprocess
 import sys
-import tempfile
 import webbrowser
 from pathlib import Path
 from typing import Any
@@ -937,7 +935,14 @@ def cmd_constitution() -> int:
 
 
 def cmd_viewer() -> int:
-    """Generate the HTML ledger viewer, write it to a tempfile, open browser."""
+    """Generate the HTML ledger viewer beside the ledger and open it.
+
+    The page embeds every entry, diff bodies included, so it is written next
+    to the chain it renders (``<ledger dir>/viewer.html``, inside the
+    gitignored ``.bench/`` directory) rather than to the system temp
+    directory, where it outlived the session with no cleanup and no
+    protection beyond a chmod that Windows ignores.
+    """
     try:
         html_content: str = generate_viewer_html()
     except Exception as e:
@@ -947,30 +952,16 @@ def cmd_viewer() -> int:
         )
         return 1
 
+    target: Path = Path(resolve_ledger_path()).parent / "viewer.html"
     try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            suffix=".html",
-            prefix="bench-viewer-",
-            delete=False,
-            encoding="utf-8",
-        ) as fh:
-            fh.write(html_content)
-            tmp_path: str = fh.name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(html_content, encoding="utf-8")
     except OSError as e:
         print(f"[bench cli] viewer write failed: {e}", file=sys.stderr)
         return 1
 
-    try:
-        os.chmod(tmp_path, stat.S_IRUSR | stat.S_IWUSR)
-    except OSError as e:
-        print(
-            f"[bench cli] could not restrict temp file permissions: {e}",
-            file=sys.stderr,
-        )
-
-    print(f"Bench viewer written to: {tmp_path}")
-    if not webbrowser.open(f"file://{tmp_path}"):
+    print(f"Bench viewer written to: {target}")
+    if not webbrowser.open(target.resolve().as_uri()):
         print(
             "[bench cli] could not auto-open browser; open the path above manually.",
             file=sys.stderr,
