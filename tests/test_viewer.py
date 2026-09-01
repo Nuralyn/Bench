@@ -93,14 +93,40 @@ class GenerateViewerHtmlTests(unittest.TestCase):
         html_out: str = generate_viewer_html(self._path())
         self.assertIn("BROKEN AT ENTRY #2", html_out)
 
-    def test_script_close_tags_in_data_are_escaped(self) -> None:
-        chain: list[dict] = _build_valid_chain(1)
+    def test_markup_in_data_is_unicode_escaped(self) -> None:
+        """Every ``<``, ``>``, and ``&`` in embedded data is a \\uXXXX escape.
+
+        Escaping only ``</script`` is not enough. An Edit whose old_string
+        holds ``<!--<script`` with no closing ``-->`` in the same snippet
+        puts the HTML parser into the script-data-double-escaped state, the
+        page's own closing ``</script>`` is swallowed into the script, and
+        the viewer renders a banner over zero entries with no console error
+        (audit finding 1, reproduced in Chrome).
+        """
+        chain: list[dict] = _build_valid_chain(2)
         chain[0]["change"]["file"] = "evil</script><script>alert(1)"
         chain[0]["entry_hash"] = compute_entry_hash(chain[0])
+        chain[1]["previous_hash"] = chain[0]["entry_hash"]
+        chain[1]["change"]["diff_summary"] = {
+            "file_path": "index.html",
+            "change_type": "modify",
+            "old_string": '<!--<script src="a.js">',
+            "new_string": "a & b",
+        }
+        chain[1]["entry_hash"] = compute_entry_hash(chain[1])
         self._write_chain(chain)
         html_out: str = generate_viewer_html(self._path())
-        self.assertNotIn("evil</script>", html_out)
-        self.assertIn("evil<\\/script>", html_out)
+        script: str = html_out.split("<script>", 1)[1]
+        data: str = script.split("const CHAIN_STATUS", 1)[0]
+        self.assertNotIn("<", data)
+        self.assertNotIn(">", data)
+        self.assertNotIn("&", data)
+        self.assertIn("evil\\u003C/script\\u003E", html_out)
+        self.assertIn("\\u003C!--\\u003Cscript", html_out)
+        # The escapes are plain JSON, so the browser parses back exactly
+        # what was written to disk.
+        payload: str = data.split("=", 1)[1].strip().rstrip(";")
+        self.assertEqual(json.loads(payload), chain)
 
     def test_generation_failure_returns_error_page(self) -> None:
         with patch(

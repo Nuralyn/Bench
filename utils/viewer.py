@@ -31,6 +31,27 @@ from utils.stats import compute_ledger_stats, pct
 
 _HASH_SHORT_LEN: int = 12
 
+# Characters that must never appear literally inside an inline <script>
+# data block, mapped to their JSON \uXXXX escapes (the convention Django's
+# json_script uses). Escaping only "</script" is not enough: an unclosed
+# "<!--<script" in governed content drops the HTML parser into the
+# script-data-double-escaped state, the page's own closing tag is swallowed
+# into the script, and nothing renders. Escaping every "<" closes that
+# whole class rather than one spelling of it.
+_JSON_SCRIPT_ESCAPES: dict[str, str] = {
+    "<": "\\u003C",
+    ">": "\\u003E",
+    "&": "\\u0026",
+}
+
+
+def _embed_json(value: Any) -> str:
+    """Serialize ``value`` for safe inlining inside a <script> element."""
+    text: str = json.dumps(value, default=str)
+    for raw, escaped in _JSON_SCRIPT_ESCAPES.items():
+        text = text.replace(raw, escaped)
+    return text
+
 
 def generate_viewer_html(ledger_path: str | None = None) -> str:
     """Return a complete self-contained HTML string rendering the ledger.
@@ -97,8 +118,8 @@ def _build_html(
     entries: list[dict],
 ) -> str:
     """Assemble the full HTML document as a single string."""
-    entries_json: str = json.dumps(entries, default=str).replace("</", "<\\/")
-    chain_json: str = json.dumps(chain_status).replace("</", "<\\/")
+    entries_json: str = _embed_json(entries)
+    chain_json: str = _embed_json(chain_status)
 
     # Rates are computed over adjudicated entries, excluding chain-retirement
     # anchors, exactly as cmd_stats does: the shared stats helper exists so
