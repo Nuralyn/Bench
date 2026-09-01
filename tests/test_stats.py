@@ -17,10 +17,16 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from utils.stats import (  # noqa: E402
+    citations_by_constraint,
     compute_ledger_stats,
     entry_has_pipeline_error,
     entry_verdict,
     pct,
+    scope_of_file,
+    stats_by_scope,
+    stats_by_week,
+    tokens_by_stage,
+    week_of,
 )
 
 
@@ -212,6 +218,183 @@ class FailClosedStatsTests(unittest.TestCase):
         self.assertEqual(stats["vetoed"], 2)
         self.assertEqual(stats["pipeline_errors"], 2)
         self.assertEqual(stats["passed"], 0)
+
+
+def _change(
+    file: str,
+    verdict: str,
+    timestamp: str = "2026-07-24T18:44:07+00:00",
+    pipeline_error: bool = False,
+) -> dict:
+    return {
+        "timestamp": timestamp,
+        "verdict": verdict,
+        "pipeline_error": pipeline_error,
+        "change": {"file": file, "tool": "Edit"},
+        "oracle": {} if pipeline_error else {"verdict": verdict},
+    }
+
+
+def _counts(row: dict) -> tuple[int, int, int, int]:
+    return (
+        row["adjudicated"], row["passed"], row["vetoed"], row["pipeline_errors"]
+    )
+
+
+class ScopeTests(unittest.TestCase):
+    def test_governance_directories_in_any_path_form(self) -> None:
+        for path in (
+            "pipeline/oracle.py",
+            "ledger/chain.py",
+            "hooks/pre-tool-use.py",
+            "C:/Users/x/Bench/ledger/verify.py",
+            "C:\\Users\\x\\Bench\\hooks\\pre-tool-use.py",
+            "bench.json",  # the constitution, named by C-007
+            "C:/Users/x/Bench/bench.json",
+        ):
+            self.assertEqual(scope_of_file(path), "governance", path)
+
+    def test_everything_else_is_other(self) -> None:
+        for path in (
+            "utils/viewer.py",
+            "tests/test_ledger_dag.py",
+            "docs/bench.json.md",
+            "hooks.md",  # a file, not a directory
+            "",
+        ):
+            self.assertEqual(scope_of_file(path), "other", path)
+
+    def test_stats_by_scope_tallies_each_group(self) -> None:
+        entries: list[dict] = [
+            _change("pipeline/oracle.py", "PASS"),
+            _change("pipeline/runner.py", "VETO"),
+            _change("README.md", "PASS"),
+            _change("utils/x.py", "VETO", pipeline_error=True),
+        ]
+        rows: list[dict] = stats_by_scope(entries)
+        self.assertEqual([r["scope"] for r in rows], ["governance", "other"])
+        self.assertEqual(_counts(rows[0]), (2, 1, 1, 0))
+        self.assertEqual(_counts(rows[1]), (2, 1, 1, 1))
+
+    def test_both_scopes_present_for_an_empty_ledger(self) -> None:
+        rows: list[dict] = stats_by_scope([])
+        self.assertEqual([r["scope"] for r in rows], ["governance", "other"])
+        self.assertEqual([_counts(r) for r in rows], [(0, 0, 0, 0)] * 2)
+
+
+class WeekTests(unittest.TestCase):
+    def test_week_of_is_the_iso_week(self) -> None:
+        self.assertEqual(week_of("2026-07-24T18:44:07+00:00"), "2026-W30")
+        self.assertEqual(week_of("2026-01-01T00:00:00+00:00"), "2026-W01")
+
+    def test_week_of_unparseable_is_unknown(self) -> None:
+        for bad in ("", "not a date", "2026-13-40T00:00:00", None):
+            self.assertEqual(week_of(bad), "unknown", repr(bad))
+
+    def test_stats_by_week_orders_buckets_and_tallies(self) -> None:
+        anchor: dict = _change("ledger/bench-ledger.json", "ANCHOR",
+                               timestamp="2026-07-25T00:00:00+00:00")
+        entries: list[dict] = [
+            _change("a.py", "PASS", timestamp="2026-08-10T00:00:00+00:00"),
+            _change("b.py", "PASS"),
+            _change("c.py", "VETO", pipeline_error=True),
+            anchor,
+        ]
+        rows: list[dict] = stats_by_week(entries)
+        self.assertEqual([r["week"] for r in rows], ["2026-W30", "2026-W33"])
+        self.assertEqual(_counts(rows[0]), (2, 1, 1, 1))
+        self.assertEqual(rows[0]["anchors"], 1)
+        self.assertEqual(_counts(rows[1]), (1, 1, 0, 0))
+
+
+class CitationTableTests(unittest.TestCase):
+    def test_cited_and_violated_are_counted_separately(self) -> None:
+        entries: list[dict] = [
+            _veto_entry([
+                {"constraint_id": "C-007", "disposition": "VIOLATED"},
+                {"constraint_id": "C-001", "disposition": "SATISFIED"},
+                {"constraint_id": "C-003", "disposition": "NOT_APPLICABLE"},
+            ]),
+            _veto_entry(["C-007"]),  # legacy string: the veto named it
+            _veto_entry([{"constraint_id": "C-007"}]),  # no disposition
+            {"oracle": {"verdict": "PASS", "constraint_citations": [
+                {"constraint_id": "C-001", "disposition": "SATISFIED"},
+            ]}},
+        ]
+        rows: list[dict] = citations_by_constraint(entries)
+        self.assertEqual(
+            rows,
+            [
+                {"constraint_id": "C-001", "cited": 1, "violated": 0},
+                {"constraint_id": "C-003", "cited": 1, "violated": 0},
+                {"constraint_id": "C-007", "cited": 3, "violated": 3},
+            ],
+        )
+
+    def test_most_cited_counts_only_violations(self) -> None:
+        # Every veto cites C-001 as SATISFIED; only one found C-002 VIOLATED.
+        # The headline is the constraint that drove a veto, not the one the
+        # Oracle mentioned most while clearing it.
+        entries: list[dict] = [
+            _veto_entry([
+                {"constraint_id": "C-001", "disposition": "SATISFIED"},
+                {"constraint_id": "C-002", "disposition": "VIOLATED"},
+            ]),
+            _veto_entry([
+                {"constraint_id": "C-001", "disposition": "SATISFIED"},
+            ]),
+        ]
+        stats: dict = compute_ledger_stats(entries)
+        self.assertEqual(stats["most_cited"], ("C-002", 1))
+
+    def test_no_violations_means_no_headline(self) -> None:
+        entries: list[dict] = [
+            _veto_entry([{"constraint_id": "C-001", "disposition": "SATISFIED"}]),
+        ]
+        self.assertIsNone(compute_ledger_stats(entries)["most_cited"])
+
+
+class TokensByStageTests(unittest.TestCase):
+    def test_sums_per_stage_and_overall(self) -> None:
+        entries: list[dict] = [
+            {
+                "challenger": {"_tokens": {"input": 10, "output": 2}},
+                "defender": {"_tokens": {"input": 5, "output": 1}},
+                "oracle": {"_tokens": {"input": 7, "output": 3}},
+            },
+            {
+                "challenger": {"tokens_used": {"input": 1, "output": 1}},
+                "oracle": {"_tokens": {}},
+            },
+            {"verdict": "VETO", "pipeline_error": True},
+        ]
+        totals: dict = tokens_by_stage(entries)
+        self.assertEqual(
+            totals["challenger"], {"input": 11, "output": 3, "entries": 2}
+        )
+        self.assertEqual(
+            totals["defender"], {"input": 5, "output": 1, "entries": 1}
+        )
+        self.assertEqual(
+            totals["oracle"], {"input": 7, "output": 3, "entries": 1}
+        )
+        self.assertEqual(
+            totals["total"], {"input": 23, "output": 7, "entries": 2}
+        )
+
+    def test_non_numeric_figures_are_ignored(self) -> None:
+        entries: list[dict] = [
+            {"oracle": {"_tokens": {"input": "many", "output": None}}},
+            {"oracle": {"_tokens": {"input": True, "output": 4.5}}},
+            {"oracle": {"_tokens": "n/a"}},
+        ]
+        totals: dict = tokens_by_stage(entries)
+        self.assertEqual(
+            totals["oracle"], {"input": 0, "output": 0, "entries": 0}
+        )
+        self.assertEqual(
+            totals["total"], {"input": 0, "output": 0, "entries": 0}
+        )
 
 
 if __name__ == "__main__":

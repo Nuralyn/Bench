@@ -861,13 +861,15 @@ def cmd_stats() -> int:
         # Chain-retirement markers (C-008). Not adjudicated changes, so they
         # sit outside the pass/veto rates above.
         print(f"Chain anchors          : {anchors}")
+    # The constraint most often found VIOLATED in a veto. Mentions the
+    # Oracle cleared while vetoing on another constraint do not count.
     if most_cited is not None:
         print(
-            f"Most cited constraint  : {most_cited[0]} "
+            f"Most violated          : {most_cited[0]} "
             f"({most_cited[1]} veto(es))"
         )
     else:
-        print("Most cited constraint  : n/a")
+        print("Most violated          : n/a")
     print(f"Constitution hash      : {_short_hash(latest_cons_hash, 16)}")
     print(f"Ledger integrity       : {integrity}")
 
