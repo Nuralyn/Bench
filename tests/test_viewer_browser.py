@@ -261,6 +261,30 @@ class ViewerBrowserTests(unittest.TestCase):
             self.page.locator("#dash-tokens tbody td").all_text_contents(),
         )
 
+    def test_dashboard_tables_stay_inside_their_cards(self) -> None:
+        # On a wide screen the grid once opened an empty fourth column and
+        # squeezed the lower cards until their tables spilled past the card
+        # edge. Every table must fit its card with no internal scrolling,
+        # and the page must never scroll horizontally.
+        for width in (1920, 1400, 1000):
+            self.page.set_viewport_size({"width": width, "height": 1080})
+            cards: list[dict[str, Any]] = self.page.evaluate(
+                "[...document.querySelectorAll('.dashboard .card')].map(c => {"
+                "  const t = c.querySelector('table');"
+                "  return {id: c.id, width: c.clientWidth,"
+                "          fits: t.getBoundingClientRect().right"
+                "                <= c.getBoundingClientRect().right,"
+                "          scrolls: c.scrollWidth > c.clientWidth};"
+                "})"
+            )
+            for card in cards:
+                self.assertTrue(card["fits"], (width, card))
+                self.assertFalse(card["scrolls"], (width, card))
+            self.assertLessEqual(
+                self.page.evaluate("document.documentElement.scrollWidth"),
+                width,
+            )
+
     def test_summary_row_is_keyboard_operable(self) -> None:
         row: Locator = self._entry(1)
         summary: Locator = row.locator(".summary")

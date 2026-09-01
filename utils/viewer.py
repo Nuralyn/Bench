@@ -523,14 +523,20 @@ header h1 { margin: 0; font-size: 1.5rem; font-weight: 500; letter-spacing: 0.02
   margin-top: 0.35rem; font-size: 0.78rem; color: #94a3b8;
   font-family: ui-monospace, Menlo, Consolas, monospace; word-break: break-word;
 }
+/* Three cards share the second row. auto-fit was tried first: on a wide
+   screen it opened a fourth, empty column and squeezed the three cards
+   until their tables spilled past the card edge. */
 .dashboard {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.75rem; padding: 1rem 2rem;
   border-bottom: 1px solid #3a3a55;
 }
+@media (max-width: 1100px) {
+  .dashboard { grid-template-columns: minmax(0, 1fr); }
+}
 .dashboard .card {
   background: #22223a; border: 1px solid #3a3a55; border-radius: 4px;
-  padding: 0.75rem 1rem; min-width: 0;
+  padding: 0.75rem 1rem; min-width: 0; overflow-x: auto;
 }
 .dashboard #dash-weeks { grid-column: 1 / -1; }
 .dashboard h2 {
@@ -549,8 +555,8 @@ header h1 { margin: 0; font-size: 1.5rem; font-weight: 500; letter-spacing: 0.02
 }
 .dashboard th, .dashboard td {
   padding: 0.3rem 0.5rem; border-bottom: 1px solid #3a3a55; text-align: right;
-  white-space: nowrap;
 }
+.dashboard td { white-space: nowrap; }  /* headers may wrap; figures never */
 .dashboard th:first-child, .dashboard td:first-child { text-align: left; }
 .dashboard th {
   color: #94a3b8; font-weight: 500; font-size: 0.7rem;
