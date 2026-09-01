@@ -34,7 +34,13 @@ from ledger.chain import (  # noqa: E402
     resolve_entries_dir,
 )
 from ledger.retire import ANCHOR_TOOL  # noqa: E402
-from utils.stats import compute_ledger_stats, pct  # noqa: E402
+from utils.stats import (  # noqa: E402
+    citations_by_constraint,
+    compute_ledger_stats,
+    pct,
+    stats_by_scope,
+    stats_by_week,
+)
 from utils.viewer import generate_viewer_html  # noqa: E402
 
 
@@ -164,6 +170,109 @@ class GenerateViewerHtmlTests(unittest.TestCase):
             html_out: str = generate_viewer_html(self._path())
         self.assertIn("generation failed", html_out)
         self.assertIn("RuntimeError: boom", html_out)
+
+
+class DashboardTests(unittest.TestCase):
+    """The dashboard restates utils.stats; it never counts on its own."""
+
+    def setUp(self) -> None:
+        self._tmp: str = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self._tmp)
+
+    def _path(self) -> str:
+        return os.path.join(self._tmp, "ledger.json")
+
+    def _render(self, chain: list[dict]) -> str:
+        Path(self._path()).write_text(json.dumps(chain), encoding="utf-8")
+        return generate_viewer_html(self._path())
+
+    @staticmethod
+    def _row(cells: list[str]) -> str:
+        return "<tr>" + "".join(f"<td>{c}</td>" for c in cells) + "</tr>"
+
+    def test_weekly_and_scope_tables_match_the_helpers(self) -> None:
+        chain: list[dict] = _build_valid_chain(
+            3, verdicts=["PASS", "VETO", "PASS"]
+        )
+        chain[1]["change"]["file"] = "pipeline/oracle.py"
+        chain[1]["entry_hash"] = compute_entry_hash(chain[1])
+        chain[2]["timestamp"] = "2026-01-12T00:00:00+00:00"  # next ISO week
+        chain[2]["previous_hash"] = chain[1]["entry_hash"]
+        chain[2]["entry_hash"] = compute_entry_hash(chain[2])
+        html_out: str = self._render(chain)
+
+        for row in stats_by_week(chain):
+            self.assertIn(self._row([
+                row["week"], str(row["adjudicated"]), str(row["passed"]),
+                str(row["vetoed"]), str(row["pipeline_errors"]),
+                pct(row["vetoed"], row["adjudicated"]),
+                pct(row["pipeline_errors"], row["adjudicated"]),
+            ]), html_out)
+        self.assertEqual(html_out.count("<path d="), 4)  # 2 weeks x 2 charts
+
+        # generate_viewer_html anchors scope at the ledger's grandparent.
+        scopes: list[dict] = stats_by_scope(
+            chain, str(Path(self._path()).resolve().parent.parent)
+        )
+        self.assertEqual(
+            [(r["scope"], r["adjudicated"], r["vetoed"]) for r in scopes],
+            [("governance", 1, 1), ("other", 2, 0)],
+        )
+        for row in scopes:
+            self.assertIn(
+                f"<tr><td>{row['scope']}</td><td>{row['adjudicated']}</td>",
+                html_out,
+            )
+
+    def test_constraint_table_separates_violated_from_cited(self) -> None:
+        chain: list[dict] = _build_valid_chain(2, verdicts=["VETO", "VETO"])
+        chain[1]["oracle"]["constraint_citations"] = [
+            {"constraint_id": "C-001", "disposition": "SATISFIED"},
+            {"constraint_id": "C-007", "disposition": "VIOLATED"},
+        ]
+        chain[1]["entry_hash"] = compute_entry_hash(chain[1])
+        html_out: str = self._render(chain)
+        rows: list[dict] = citations_by_constraint(chain)
+        self.assertEqual(
+            [(r["constraint_id"], r["violated"], r["cited"]) for r in rows],
+            [("C-001", 1, 2), ("C-007", 1, 1)],
+        )
+        self.assertIn(self._row(["C-001", "1", "2"]), html_out)
+        self.assertIn(self._row(["C-007", "1", "1"]), html_out)
+        self.assertIn("Most violated", html_out)
+
+    def test_constraint_ids_are_escaped(self) -> None:
+        chain: list[dict] = _build_valid_chain(1, verdicts=["VETO"])
+        chain[0]["oracle"]["constraint_citations"] = [
+            {"constraint_id": "<b>C-9</b>", "disposition": "VIOLATED"},
+        ]
+        chain[0]["entry_hash"] = compute_entry_hash(chain[0])
+        html_out: str = self._render(chain)
+        self.assertIn("<td>&lt;b&gt;C-9&lt;/b&gt;</td>", html_out)
+        self.assertNotIn("<b>C-9</b>", html_out)
+
+    def test_token_table_averages_per_recorded_entry(self) -> None:
+        chain: list[dict] = _build_valid_chain(2)
+        chain[0]["oracle"]["_tokens"] = {"input": 1000, "output": 10}
+        chain[0]["entry_hash"] = compute_entry_hash(chain[0])
+        chain[1]["previous_hash"] = chain[0]["entry_hash"]
+        chain[1]["oracle"]["_tokens"] = {"input": 3000, "output": 20}
+        chain[1]["entry_hash"] = compute_entry_hash(chain[1])
+        html_out: str = self._render(chain)
+        self.assertIn(
+            self._row(["oracle", "2", "4,000", "30", "2,000", "15"]), html_out
+        )
+        self.assertIn(
+            self._row(["challenger", "0", "0", "0", "n/a", "n/a"]), html_out
+        )
+
+    def test_empty_ledger_renders_an_empty_dashboard(self) -> None:
+        html_out: str = generate_viewer_html(self._path())
+        self.assertNotIn("generation failed", html_out)
+        self.assertEqual(html_out.count('class="card" id="dash-'), 4)
+        self.assertEqual(html_out.count("<path d="), 0)
+        self.assertIn("No governed changes yet.", html_out)
+        self.assertIn("No veto has cited a constraint.", html_out)
 
 
 class ViewerStatsParityTests(unittest.TestCase):

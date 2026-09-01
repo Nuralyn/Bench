@@ -234,6 +234,33 @@ class ViewerBrowserTests(unittest.TestCase):
         self.assertEqual(self._visible_verdicts(), ["VETO", "VETO"])
         self.assertFalse(anchor.is_visible())
 
+    def test_dashboard_restates_the_ledger_tallies(self) -> None:
+        self.assertEqual(self.page.locator(".dashboard .card").count(), 4)
+        # The fixture spans one ISO week, so each of the two rate charts
+        # draws one column, and every column carries a hover title.
+        columns: Locator = self.page.locator("#dash-weeks svg path")
+        self.assertEqual(columns.count(), 2)
+        self.assertEqual(
+            columns.first.locator("title").text_content(),
+            "2026-W01: 2 of 4 (50.0%)",
+        )
+        week_cells: list[str] = self.page.locator(
+            "#dash-weeks tbody td"
+        ).all_text_contents()
+        # Five entries: the anchor is not adjudicated; two passed, two
+        # vetoed, one of those a pipeline error.
+        self.assertEqual(
+            week_cells, ["2026-W01", "4", "2", "2", "1", "50.0%", "25.0%"]
+        )
+        self.assertEqual(
+            self.page.locator("#dash-constraints tbody td").all_text_contents(),
+            ["C-001", "1", "1"],
+        )
+        self.assertIn(
+            "n/a",
+            self.page.locator("#dash-tokens tbody td").all_text_contents(),
+        )
+
     def test_summary_row_is_keyboard_operable(self) -> None:
         row: Locator = self._entry(1)
         summary: Locator = row.locator(".summary")
