@@ -6,5 +6,5 @@
 #     --output-file requirements-lint.lock requirements-lint.txt
 # and land it the same way: by deliberate human decision after reading the
 # diff (CLAUDE.md rule 1). Neither tool is needed to run Bench.
-ruff==0.15.14
+ruff==0.16.5
 mypy==2.3.1
