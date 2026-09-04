@@ -287,7 +287,7 @@ Bench always exits with code 0. Flow control uses JSON `permissionDecision` fiel
 Not all tool inputs are simple text edits. Bench handles three edge cases:
 
 - **Binary files** (images, compiled output) are detected via null-byte sniffing and passed through with metadata only. The pipeline does not attempt to reason about binary content.
-- **Large diffs** exceeding 300 lines or 20,000 characters are truncated while preserving governance-critical lines: the first 50 and last 20 lines, function and class signatures, and exception handlers. Imports are kept only when they fall inside the first 50 lines.
+- **Large diffs** exceeding 300 lines or 20,000 characters are truncated. The first 50 and last 20 lines, function and class signatures, and exception handlers are selected first, and that selection is then clamped to the 20,000-character budget, so a character-heavy diff can lose even a preferred line. Imports have no rule of their own: one survives only if it falls inside a region kept for another reason.
 - **New file creation** is typed as `change_type: "create"` so the pipeline knows it is reviewing a creation, not a modification.
 
 ### Project-Scoped Ledger
