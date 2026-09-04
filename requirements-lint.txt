@@ -1,0 +1,10 @@
+# Lint and type-check tools. CI's lint-and-types job installs
+# requirements-lint.lock (every resolved version pinned with sha256 hashes)
+# on top of requirements.lock, so the checkers see the same SDK types the
+# pipeline runs against. Regenerate the lock exactly as for requirements.lock:
+#   python -m piptools compile --generate-hashes --strip-extras \
+#     --output-file requirements-lint.lock requirements-lint.txt
+# and land it the same way: by deliberate human decision after reading the
+# diff (CLAUDE.md rule 1). Neither tool is needed to run Bench.
+ruff==0.15.14
+mypy==2.3.1

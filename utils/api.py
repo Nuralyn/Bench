@@ -30,7 +30,14 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    # Type-only imports. Both SDKs are imported lazily inside their provider
+    # functions at runtime, since openai is a soft dependency and anthropic
+    # is absent on the claude_code provider.
+    from anthropic.types import MessageParam
+    from openai.types.chat import ChatCompletionMessageParam
 
 # Soft dependency, mirroring the openai treatment in requirements.txt. Only the
 # BENCH_PROVIDER=anthropic path (the default) needs the SDK; claude_code and
@@ -290,11 +297,14 @@ def _anthropic_call(
 
     try:
         client = anthropic.Anthropic()
+        # Every message is built in call_model as {"role": "user" | "assistant",
+        # "content": str}, which is the SDK's MessageParam shape. The cast
+        # states that at the boundary; nothing is widened.
         response = client.messages.create(
             model=model,
             max_tokens=max_tokens,
             system=system_prompt,
-            messages=messages,
+            messages=cast("list[MessageParam]", messages),
         )
     except anthropic.AnthropicError as e:
         raise _ProviderError(
@@ -363,10 +373,13 @@ def _openrouter_call(
             base_url=_OPENROUTER_BASE_URL,
             api_key=api_key,
         )
+        # full_messages is the system prompt plus call_model's user and
+        # assistant turns, each {"role": ..., "content": str}: the shape the
+        # SDK's message params describe. The cast states that at the boundary.
         response = client.chat.completions.create(
             model=routed_model,
             max_tokens=max_tokens,
-            messages=full_messages,
+            messages=cast("list[ChatCompletionMessageParam]", full_messages),
         )
     except openai.OpenAIError as e:
         raise _ProviderError(

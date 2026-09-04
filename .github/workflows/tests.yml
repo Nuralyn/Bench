@@ -32,6 +32,26 @@ jobs:
       - name: Run tests
         run: python -m unittest discover -s tests -v
 
+  lint-and-types:
+    # ruff and mypy in strict mode over every source package and the hook.
+    # The runtime lock is installed first so mypy checks against the same
+    # anthropic SDK types the pipeline runs with; the lint lock adds only
+    # the two checkers. Configuration lives in pyproject.toml.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          pip install --only-binary ':all:' --require-hashes -r requirements.lock
+          pip install --only-binary ':all:' --require-hashes -r requirements-lint.lock
+      - name: Lint
+        run: ruff check .
+      - name: Type check
+        run: python -m mypy
+
   browser-tests:
     # tests/test_viewer_browser.py loads the generated ledger viewer in
     # headless Chromium. It skips itself when Playwright is absent, so the

@@ -433,9 +433,9 @@ def _unrecorded_ref_defects(
     GitHub-managed and no push can touch it.
     """
     recorded_names: set[str] = {
-        entry.get("ref")
+        ref
         for entry in refs
-        if isinstance(entry, dict) and isinstance(entry.get("ref"), str)
+        if isinstance(entry, dict) and isinstance(ref := entry.get("ref"), str)
     }
     reachable: set[str] = {
         name
