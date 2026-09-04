@@ -253,12 +253,11 @@ class MainFlowTests(unittest.TestCase):
         self.assertIn("hookSpecificOutput", parsed)
 
     @patch.object(_hook_module, "run_governance_pipeline")
-    def test_bench_subprocess_env_bypasses_pipeline(
+    def test_bare_bench_subprocess_flag_no_longer_bypasses(
         self, mock_pipeline: MagicMock
     ) -> None:
-        # With BENCH_SUBPROCESS=1 the hook must fail open WITHOUT governing,
-        # even for a payload the pipeline would VETO. A bypass returns 'allow'
-        # and never calls the pipeline; the normal path would deny.
+        # BENCH_SUBPROCESS=1 used to skip governance outright. It is now an
+        # ordinary governed run: the pipeline is called and its VETO stands.
         mock_pipeline.return_value = {
             "verdict": "VETO", "reason": "x", "remediation": "y",
         }
@@ -271,18 +270,27 @@ class MainFlowTests(unittest.TestCase):
         self.assertEqual(code, 0)
         resp: dict = json.loads(output)
         self.assertEqual(
-            resp["hookSpecificOutput"]["permissionDecision"], "allow"
+            resp["hookSpecificOutput"]["permissionDecision"], "deny"
         )
-        mock_pipeline.assert_not_called()
+        mock_pipeline.assert_called_once()
 
     @patch.object(_hook_module, "run_governance_pipeline")
-    def test_bench_subprocess_short_circuits_before_parsing_stdin(
+    def test_live_nonce_bypasses_before_parsing_stdin(
         self, mock_pipeline: MagicMock
     ) -> None:
-        # Malformed stdin: the bypass returns allow with its distinctive message
-        # before any parse, proving it short-circuits ahead of pipeline work.
-        with patch.dict("os.environ", {"BENCH_SUBPROCESS": "1"}):
-            code, output = self._run_main_with_stdin("{{{ not json")
+        # A token the provider actually issued, whose file still exists, is
+        # the child. Malformed stdin proves the bypass short-circuits ahead of
+        # any parse or pipeline work.
+        import tempfile
+        from utils import api as _api
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(
+                _api, "_subprocess_nonce_dir", return_value=Path(tmp)
+            ):
+                token, _ = _api.issue_subprocess_nonce()
+                with patch.dict("os.environ", {"BENCH_SUBPROCESS": token}):
+                    code, output = self._run_main_with_stdin("{{{ not json")
         self.assertEqual(code, 0)
         resp: dict = json.loads(output)
         self.assertEqual(
@@ -293,6 +301,55 @@ class MainFlowTests(unittest.TestCase):
             resp["hookSpecificOutput"]["additionalContext"],
         )
         mock_pipeline.assert_not_called()
+
+    @patch.object(_hook_module, "run_governance_pipeline")
+    def test_guessed_revoked_and_expired_nonces_are_governed(
+        self, mock_pipeline: MagicMock
+    ) -> None:
+        # A well-formed token with no file, a token whose file the provider
+        # already revoked, and a token past the freshness window all prove
+        # nothing: the pipeline runs and its verdict stands.
+        import tempfile
+        import time
+        from utils import api as _api
+
+        mock_pipeline.return_value = {
+            "verdict": "VETO", "reason": "x", "remediation": "y",
+        }
+        payload: str = json.dumps({
+            "tool_name": "Write",
+            "tool_input": {"file_path": "test.py", "content": "hello"},
+        })
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(
+                _api, "_subprocess_nonce_dir", return_value=Path(tmp)
+            ):
+                guessed: str = "0" * 32
+                revoked, revoked_path = _api.issue_subprocess_nonce()
+                _api.revoke_subprocess_nonce(revoked_path)
+                expired, expired_path = _api.issue_subprocess_nonce()
+                expired_path.write_text(
+                    json.dumps({"pid": 1, "created": time.time() - 7200}),
+                    encoding="utf-8",
+                )
+                for label, token in (
+                    ("guessed", guessed),
+                    ("revoked", revoked),
+                    ("expired", expired),
+                ):
+                    with self.subTest(token=label):
+                        mock_pipeline.reset_mock()
+                        with patch.dict(
+                            "os.environ", {"BENCH_SUBPROCESS": token}
+                        ):
+                            code, output = self._run_main_with_stdin(payload)
+                        self.assertEqual(code, 0)
+                        resp: dict = json.loads(output)
+                        self.assertEqual(
+                            resp["hookSpecificOutput"]["permissionDecision"],
+                            "deny",
+                        )
+                        mock_pipeline.assert_called_once()
 
 
 class ExtractDiffInfoFallbackTests(unittest.TestCase):

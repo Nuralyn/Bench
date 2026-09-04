@@ -58,6 +58,22 @@ except Exception as _diff_e:  # pragma: no cover: degrades to the inline fallbac
     traceback.print_exc(file=sys.stderr)
     _build_diff_info_hardened = None  # type: ignore[assignment]
 
+# utils.api issues the per-call nonce the claude_code provider hands its judge
+# subprocess, and verification lives beside issuance so the two cannot drift.
+# If the import fails there is no way to recognise a child, so every process
+# is governed: that is the fail-closed direction for a bypass.
+try:
+    from utils.api import verify_subprocess_nonce as _verify_subprocess_nonce
+except Exception as _nonce_e:  # pragma: no cover: degrades to governing everything
+    print(
+        f"[bench hook] utils.api import failed, subprocess nonces cannot be "
+        f"verified and every process is governed: "
+        f"{type(_nonce_e).__name__}: {_nonce_e}",
+        file=sys.stderr,
+    )
+    traceback.print_exc(file=sys.stderr)
+    _verify_subprocess_nonce = None  # type: ignore[assignment]
+
 
 def extract_diff_info(tool_name: str, tool_input: dict[str, Any]) -> dict[str, Any]:
     """Pull the change-relevant fields out of tool_input by tool kind.
@@ -303,17 +319,30 @@ def _build_pass_response(verdict: dict[str, Any]) -> dict[str, Any]:
 
 def main() -> int:
     """Entry point. Always returns 0; flow control is via stdout JSON."""
-    if os.environ.get("BENCH_SUBPROCESS") == "1":
-        # Reentrancy guard: this hook is firing inside a `claude -p` subprocess
-        # that Bench itself spawned (utils/api.py claude_code provider).
-        # Governing the nested agent would recurse, so fail open immediately.
-        bypass: dict[str, Any] = build_allow_response(
-            "Bench governance: nested subprocess (BENCH_SUBPROCESS=1), skipping."
+    presented: str = os.environ.get("BENCH_SUBPROCESS", "")
+    if presented:
+        # Reentrancy guard: this hook may be firing inside a `claude -p`
+        # subprocess that Bench itself spawned (utils/api.py claude_code
+        # provider). Governing the nested agent would recurse, so a child is
+        # let through. A child proves itself with the per-call nonce the
+        # provider issued and recorded on disk; a bare "1", a guessed token,
+        # or a token whose file has been revoked or expired proves nothing,
+        # and the process is governed like any other.
+        if _verify_subprocess_nonce is not None and _verify_subprocess_nonce(
+            presented
+        ):
+            bypass: dict[str, Any] = build_allow_response(
+                "Bench governance: nested subprocess (nonce verified), skipping."
+            )
+            json.dump(bypass, sys.stdout)
+            sys.stdout.write("\n")
+            sys.stdout.flush()
+            return 0
+        print(
+            "[bench hook] BENCH_SUBPROCESS is set but is not a live nonce; "
+            "governing normally.",
+            file=sys.stderr,
         )
-        json.dump(bypass, sys.stdout)
-        sys.stdout.write("\n")
-        sys.stdout.flush()
-        return 0
 
     try:
         # Claude Code pipes the payload as UTF-8, but sys.stdin decodes with the

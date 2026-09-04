@@ -132,7 +132,9 @@ class ClaudeCliCallTests(unittest.TestCase):
         self.assertNotIn("--disallowedTools", cmd)
         self.assertIn("--model", cmd)
         self.assertIn("claude-opus-4-7", cmd)
-        self.assertEqual(kwargs["env"].get("BENCH_SUBPROCESS"), "1")
+        # The child carries a per-call nonce, never the old static "1"; the
+        # lifecycle of that nonce is covered in tests/test_subprocess_nonce.py.
+        self.assertRegex(kwargs["env"].get("BENCH_SUBPROCESS", ""), r"^[0-9a-f]{32}$")
         self.assertFalse(kwargs.get("shell", False))
         self.assertEqual(kwargs.get("encoding"), "utf-8")
         # System prompt goes to --system-prompt-file, never onto the stdin

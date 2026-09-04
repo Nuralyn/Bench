@@ -11,8 +11,12 @@ Provider is selected via the BENCH_PROVIDER env var:
                             "anthropic/"
   * "claude_code"         — local `claude` CLI in headless mode (`claude -p`),
                             riding the logged-in Claude Code subscription; no
-                            API key. Child runs with BENCH_SUBPROCESS=1 so the
-                            Bench hook does not recurse. Per-stage timeout via
+                            API key. Child runs with BENCH_SUBPROCESS set to a
+                            per-call random nonce, recorded in an owner-only
+                            file under the Bench checkout for the duration of
+                            the call, so the Bench hook can recognise its own
+                            child without recursing and a guessed value earns
+                            no bypass. Per-stage timeout via
                             BENCH_CLAUDE_TIMEOUT seconds (default 120).
 
 Invariants:
@@ -26,10 +30,13 @@ Invariants:
 import json
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
@@ -558,6 +565,99 @@ def _parse_cli_result(
     return text, input_tokens, output_tokens
 
 
+# --- claude_code subprocess nonce ---------------------------------------------
+# The child `claude -p` inherits Bench's PreToolUse hook. The hook used to
+# skip governance whenever BENCH_SUBPROCESS was "1", a value anyone could
+# set. Now the provider mints a random token per call, records it in an
+# owner-only file under the Bench checkout, and passes only the token in the
+# child's environment. The hook honours a token only while its file exists
+# and is fresh, and the provider removes the file when the call returns.
+SUBPROCESS_NONCE_DIRNAME: str = "subprocess"
+_SUBPROCESS_NONCE_MAX_AGE_S: float = 3600.0
+_SUBPROCESS_NONCE_RE: re.Pattern[str] = re.compile(r"^[0-9a-f]{32}$")
+_BENCH_ROOT: Path = Path(__file__).resolve().parent.parent
+
+
+def _subprocess_nonce_dir() -> Path:
+    """Directory holding live subprocess nonces, one file per call.
+
+    It sits under Bench's own gitignored ``.bench/`` so the hook can locate
+    it from its install path alone; nothing about the location comes from
+    the environment, so a forged variable cannot point the hook elsewhere.
+    """
+    return _BENCH_ROOT / ".bench" / SUBPROCESS_NONCE_DIRNAME
+
+
+def issue_subprocess_nonce() -> tuple[str, Path]:
+    """Mint a nonce and record it. Returns (token, file path).
+
+    The file is created owner-only and exclusively, so a token can be
+    issued once; a collision on 128 random bits is treated as an error,
+    not retried. Raises OSError on any filesystem failure.
+    """
+    token: str = secrets.token_hex(16)
+    nonce_dir: Path = _subprocess_nonce_dir()
+    nonce_dir.mkdir(parents=True, exist_ok=True)
+    path: Path = nonce_dir / token
+    fd: int = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        json.dump({"pid": os.getpid(), "created": time.time()}, fh)
+    return token, path
+
+
+def revoke_subprocess_nonce(path: Path) -> None:
+    """Remove a nonce file once the call it covered has returned.
+
+    Never raises: the provider call is already finishing, and a leftover
+    file only widens the bypass window until its age check expires it, so
+    the failure is logged rather than escalated.
+    """
+    try:
+        path.unlink()
+    except OSError as e:
+        print(
+            f"[bench api] failed to remove subprocess nonce {path.name[:8]}: "
+            f"{type(e).__name__}: {e}",
+            file=sys.stderr,
+        )
+
+
+def verify_subprocess_nonce(token: str) -> bool:
+    """True only for a token whose nonce file exists and is fresh.
+
+    A malformed token never touches the filesystem. A missing or unreadable
+    file is the expected outcome for a stale, guessed, or forged token and
+    is logged as such; it is never an error that widens the bypass.
+    """
+    if not _SUBPROCESS_NONCE_RE.fullmatch(token):
+        print(
+            "[bench api] BENCH_SUBPROCESS is set but is not a nonce token; "
+            "treating as no bypass",
+            file=sys.stderr,
+        )
+        return False
+    path: Path = _subprocess_nonce_dir() / token
+    try:
+        record: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+        created: float = float(record["created"])
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        print(
+            f"[bench api] subprocess nonce {token[:8]} does not verify: "
+            f"{type(e).__name__}; treating as no bypass",
+            file=sys.stderr,
+        )
+        return False
+    age: float = time.time() - created
+    if age > _SUBPROCESS_NONCE_MAX_AGE_S:
+        print(
+            f"[bench api] subprocess nonce {token[:8]} is {age:.0f}s old, past "
+            f"the {_SUBPROCESS_NONCE_MAX_AGE_S:.0f}s window; treating as no bypass",
+            file=sys.stderr,
+        )
+        return False
+    return True
+
+
 def _claude_cli_call(
     model: str,
     system_prompt: str,
@@ -595,7 +695,6 @@ def _claude_cli_call(
     timeout: float = _resolve_cli_timeout()
 
     child_env: dict[str, str] = dict(os.environ)
-    child_env["BENCH_SUBPROCESS"] = "1"
 
     # Write the system prompt to a temp file loaded via --system-prompt-file so
     # the stage's role/schema instructions keep SYSTEM priority over the
@@ -608,9 +707,10 @@ def _claude_cli_call(
     # Give the judge NO tools at all: --tools "" removes the built-in tools and
     # --strict-mcp-config (with no --mcp-config) removes every MCP server, so an
     # injected diff cannot make the agent run Bash/Edit/MCP/etc. This matters
-    # because the child runs with BENCH_SUBPROCESS=1 (Bench's own hook is
-    # bypassed). Note --tools "" alone drops only built-ins, not MCP tools, and
-    # --bare would isolate further but strips the subscription auth (unusable).
+    # because the child carries a live BENCH_SUBPROCESS nonce (Bench's own hook
+    # is bypassed for it). Note --tools "" alone drops only built-ins, not MCP
+    # tools, and --bare would isolate further but strips the subscription auth
+    # (unusable).
     cmd: list[str] = [
         binary,
         "-p",
@@ -625,7 +725,14 @@ def _claude_cli_call(
     if sys_prompt_path is not None:
         cmd += ["--system-prompt-file", sys_prompt_path]
 
+    # The nonce is issued inside the try so the finally below always revokes
+    # it, including when the spawn itself fails. Until it is assigned, the
+    # child environment carries no BENCH_SUBPROCESS at all, which the hook
+    # treats as an ordinary governed process.
+    nonce_path: Path | None = None
     try:
+        nonce_token, nonce_path = issue_subprocess_nonce()
+        child_env["BENCH_SUBPROCESS"] = nonce_token
         # Run from an isolated, empty directory. Claude Code loads project
         # memory (CLAUDE.md) and project settings from its working directory,
         # and this child would otherwise inherit the governed project's. That
@@ -653,14 +760,17 @@ def _claude_cli_call(
             f"claude_code: `claude` timed out after {timeout}s"
         ) from e
     except (OSError, ValueError) as e:
-        # OSError: spawn failure. ValueError (includes UnicodeError): an encoding
-        # edge the explicit utf-8 setting did not absorb. Both become a
-        # _ProviderError so call_model's never-raises contract holds.
+        # OSError: spawn failure, or a nonce file that could not be created.
+        # ValueError (includes UnicodeError): an encoding edge the explicit
+        # utf-8 setting did not absorb. Both become a _ProviderError so
+        # call_model's never-raises contract holds.
         raise _ProviderError(
             f"claude_code: failed to run `claude`: {type(e).__name__}: "
             f"{_sanitize_error_detail(str(e))}"
         ) from e
     finally:
+        if nonce_path is not None:
+            revoke_subprocess_nonce(nonce_path)
         if sys_prompt_path is not None:
             try:
                 os.unlink(sys_prompt_path)

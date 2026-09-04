@@ -274,7 +274,7 @@ Set `BENCH_PROVIDER=claude_code` to run the pipeline on the subscription that al
 
 - The `claude` CLI must be installed and logged in (it is, if you run Claude Code).
 - Higher per-edit latency: every stage cold-starts a `claude` invocation, so a governed edit is noticeably slower than the direct-API path. Tune the per-stage timeout with `BENCH_CLAUDE_TIMEOUT` (seconds, default 120).
-- This is the sanctioned subprocess route, not raw token reuse. Bench sets `BENCH_SUBPROCESS=1` on the child so its own hook does not recurse.
+- This is the sanctioned subprocess route, not raw token reuse. Bench sets `BENCH_SUBPROCESS` on the child to a per-call random nonce, recorded in an owner-only file under the Bench checkout for the duration of the call, so its own hook recognises the child without recursing. The hook honours a token only while that file exists and is fresh; a bare `1` or a guessed value is governed like any other process.
 
 ## Design Decisions
 
