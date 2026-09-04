@@ -1,0 +1,28 @@
+# Tool configuration only. Packaging metadata is a separate change
+# (roadmap v2.1 item 3.1) and is deliberately not declared here yet.
+
+[tool.ruff]
+target-version = "py311"
+extend-exclude = ["graphify-out"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+# Source files are addressed by path, and the hook's filename is not an
+# importable module name, so tell mypy where package roots are instead of
+# letting it guess from the first file it sees.
+explicit_package_bases = true
+files = ["pipeline", "ledger", "utils", "cli", "hooks/pre-tool-use.py"]
+# 192 annotations across 16 files still name a bare `dict`. Each site needs
+# a C-004 judgment (`dict[str, Any]` for parsed JSON, `object` for values
+# only stored or passed through), so they are tightened file by file under
+# governance rather than mass-replaced. This is the one strictness flag the
+# gate does not yet enforce; removing it is the follow-up.
+disallow_any_generics = false
+
+# openai is a soft dependency (utils/api.py imports it inside the OpenRouter
+# path only) and is absent in CI. Its types resolve to Any there and to the
+# real SDK types locally. Every other import must resolve.
+[[tool.mypy.overrides]]
+module = "openai.*"
+ignore_missing_imports = true
