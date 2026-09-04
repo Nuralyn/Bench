@@ -265,6 +265,11 @@ class DashboardTests(unittest.TestCase):
         self.assertIn(
             self._row(["challenger", "0", "0", "0", "n/a", "n/a"]), html_out
         )
+        # Per-entry totals 1,010 and 3,020: the line the README quotes.
+        self.assertIn(
+            "Per entry: median 2,015, p90 3,020 tokens over 2 entries with usage.",
+            html_out,
+        )
 
     def test_latency_table_restates_seconds_by_stage(self) -> None:
         chain: list[dict] = _build_valid_chain(3)

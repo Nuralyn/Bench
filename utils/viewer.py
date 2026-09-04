@@ -39,6 +39,7 @@ from utils.stats import (
     seconds_by_stage,
     stats_by_week,
     tokens_by_stage,
+    tokens_per_entry,
 )
 
 _HASH_SHORT_LEN: int = 12
@@ -395,6 +396,24 @@ _VERDICT_HEADERS: list[str] = [
 ]
 
 
+def _token_distribution_line(summary: dict[str, float | int]) -> str:
+    """One sentence stating the per-entry token median and p90.
+
+    This is the figure the README quotes as the cost of a governed edit,
+    so it must be readable off the page, not only derivable from the
+    per-stage totals above it.
+    """
+    count: int = int(summary.get("entries", 0))
+    if not count:
+        return '<p class="fine">No entry carries token usage yet.</p>'
+    median: int = int(summary.get("median", 0))
+    p90: int = int(summary.get("p90", 0))
+    return (
+        f'<p class="fine">Per entry: median {median:,}, p90 {p90:,} tokens '
+        f"over {count:,} entries with usage.</p>"
+    )
+
+
 def _build_dashboard(entries: list[dict], project_root: str) -> str:
     """The dashboard section: weekly rates, scope, constraints, tokens.
 
@@ -410,6 +429,7 @@ def _build_dashboard(entries: list[dict], project_root: str) -> str:
     tokens: dict[str, dict[str, int]] = tokens_by_stage(entries)
     seconds: dict[str, dict[str, float | int]] = seconds_by_stage(entries)
     latency_weeks: list[dict] = latency_by_week(entries)
+    per_entry: dict[str, float | int] = tokens_per_entry(entries)
 
     def _latency_cells(row: dict) -> list[str]:
         count: int = int(row.get("entries", 0))
@@ -501,6 +521,8 @@ def _build_dashboard(entries: list[dict], project_root: str) -> str:
             ["Stage", "Entries", "Input", "Output", "Input / entry", "Output / entry"],
             token_rows, "No token figures recorded.",
         )
+        + "\n  "
+        + _token_distribution_line(per_entry)
         + "\n</div>\n"
         '<div class="card" id="dash-latency">\n'
         "  <h2>Seconds by stage</h2>\n  "

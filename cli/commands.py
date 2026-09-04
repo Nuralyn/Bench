@@ -61,6 +61,7 @@ from utils.stats import (
     entry_verdict,
     pct,
     seconds_by_stage,
+    tokens_per_entry,
 )
 from utils.viewer import generate_viewer_html
 
@@ -874,13 +875,29 @@ def cmd_stats() -> int:
     # Wall time per adjudicated edit, over entries that recorded a timing
     # (runner-stamped _seconds, v2.1 onward). Older entries carry none and
     # are left out rather than counted as instant.
-    timing: dict[str, float | int] = seconds_by_stage(entries)["total"]
+    usage: dict[str, float | int] = tokens_per_entry(entries)
+    used: int = int(usage["entries"])
+    if used:
+        print(
+            f"Tokens per edit        : median {int(usage['median']):,}, "
+            f"p90 {int(usage['p90']):,} ({used} with usage)"
+        )
+    else:
+        print("Tokens per edit        : n/a (no entry carries token usage)")
+    seconds: dict[str, dict[str, float | int]] = seconds_by_stage(entries)
+    timing: dict[str, float | int] = seconds["total"]
     timed: int = int(timing["entries"])
     if timed:
         print(
             f"Seconds per edit       : median {float(timing['median']):.1f}, "
             f"p90 {float(timing['p90']):.1f} ({timed} timed)"
         )
+        by_stage: str = ", ".join(
+            f"{stage} {float(seconds[stage]['median']):.1f}/"
+            f"{float(seconds[stage]['p90']):.1f}"
+            for stage in ("challenger", "defender", "oracle")
+        )
+        print(f"Seconds by stage       : {by_stage} (median/p90)")
     else:
         print("Seconds per edit       : n/a (no entry carries a timing yet)")
     print(f"Constitution hash      : {_short_hash(latest_cons_hash, 16)}")

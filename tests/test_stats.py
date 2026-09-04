@@ -28,6 +28,7 @@ from utils.stats import (  # noqa: E402
     stats_by_scope,
     stats_by_week,
     tokens_by_stage,
+    tokens_per_entry,
     week_of,
 )
 
@@ -453,6 +454,48 @@ class TokensByStageTests(unittest.TestCase):
         self.assertEqual(
             totals["total"], {"input": 0, "output": 0, "entries": 0}
         )
+
+
+class TokensPerEntryTests(unittest.TestCase):
+    """The per-edit token distribution the README quotes."""
+
+    def test_sums_input_and_output_across_stages_per_entry(self) -> None:
+        entries: list[dict] = [
+            {
+                "challenger": {"_tokens": {"input": 100, "output": 10}},
+                "defender": {"_tokens": {"input": 200, "output": 20}},
+                "oracle": {"_tokens": {"input": 300, "output": 30}},
+            },
+            {"oracle": {"tokens_used": {"input": 1000, "output": 0}}},
+            {"challenger": {"_tokens": {"input": 5000, "output": 500}}},
+        ]
+        # Totals 660, 1000, 5500.
+        self.assertEqual(
+            tokens_per_entry(entries), {"entries": 3, "median": 1000.0, "p90": 5500.0}
+        )
+
+    def test_entries_without_usable_usage_are_skipped_not_zero(self) -> None:
+        entries: list[dict] = [
+            {"verdict": "PASS"},
+            {"oracle": {"_tokens": {"input": True, "output": "many"}}},
+            {"oracle": {"_tokens": "n/a"}},
+            {"oracle": {"_tokens": {"input": 40, "output": 2}}},
+        ]
+        self.assertEqual(
+            tokens_per_entry(entries), {"entries": 1, "median": 42.0, "p90": 42.0}
+        )
+
+    def test_agrees_with_tokens_by_stage_on_what_counts(self) -> None:
+        entries: list[dict] = [
+            {"oracle": {"_tokens": {"input": 7, "output": 3}}},
+            {"challenger": {"_tokens": {"input": 1.5, "output": 1}}},
+        ]
+        self.assertEqual(
+            tokens_per_entry(entries)["entries"], tokens_by_stage(entries)["total"]["entries"]
+        )
+
+    def test_empty_ledger(self) -> None:
+        self.assertEqual(tokens_per_entry([]), {"entries": 0, "median": 0.0, "p90": 0.0})
 
 
 class SecondsByStageTests(unittest.TestCase):

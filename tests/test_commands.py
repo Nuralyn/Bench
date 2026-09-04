@@ -186,6 +186,30 @@ class CmdStatsTests(unittest.TestCase):
         self.assertIn("Vetoed                 : 1 (50.0%)", text)
         self.assertIn("C-001", text)
         self.assertIn("Ledger integrity       : VALID", text)
+        # The cost lines the README quotes are always printed, as a figure
+        # or as an explicit n/a, so a reader can reproduce or rule out each.
+        self.assertIn("Tokens per edit        : ", text)
+        self.assertIn("Seconds per edit       : ", text)
+
+    def test_stats_prints_token_and_timing_distributions(self) -> None:
+        entries: list[dict] = _entries()
+        entries[0]["challenger"] = {"_tokens": {"input": 100, "output": 20}, "_seconds": 4.0}
+        entries[0]["oracle"] = {"_tokens": {"input": 300, "output": 80}, "_seconds": 6.0}
+        entries[1]["oracle"] = {"_tokens": {"input": 1000, "output": 0}, "_seconds": 30.0}
+        out = io.StringIO()
+        with patch("cli.commands.load_ledger", return_value=entries):
+            with patch("cli.commands.verify_chain", return_value=_valid_verify()):
+                with redirect_stdout(out):
+                    cmd_stats()
+        text: str = out.getvalue()
+        # Per-entry totals 500 and 1,000 tokens; 10.0 and 30.0 seconds.
+        self.assertIn("Tokens per edit        : median 750, p90 1,000 (2 with usage)", text)
+        self.assertIn("Seconds per edit       : median 20.0, p90 30.0 (2 timed)", text)
+        self.assertIn(
+            "Seconds by stage       : challenger 4.0/4.0, defender 0.0/0.0, "
+            "oracle 18.0/30.0 (median/p90)",
+            text,
+        )
 
     def test_exit_one_when_chain_invalid(self) -> None:
         out = io.StringIO()

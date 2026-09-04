@@ -211,7 +211,7 @@ def run_governance_pipeline(
             diff_info,
             constitution,
             constitution_hash,
-            challenger_result,
+            _without_telemetry(challenger_result),
             project_context,
         )
         _stamp_seconds(defender_result, started)
@@ -247,8 +247,8 @@ def run_governance_pipeline(
         diff_info,
         constitution,
         constitution_hash,
-        challenger_result,
-        defender_result,
+        _without_telemetry(challenger_result),
+        _without_telemetry(defender_result),
         project_context,
     )
     _stamp_seconds(oracle_result, started)
@@ -348,6 +348,20 @@ def _finalize(
         )
         traceback.print_exc(file=sys.stderr)
     return result
+
+
+def _without_telemetry(result: dict[str, Any]) -> dict[str, Any]:
+    """A copy of a stage result with its accounting fields removed.
+
+    ``_tokens`` and ``_seconds`` are bookkeeping for the ledger, not
+    findings. The Defender and Oracle serialize the prior stages' dicts
+    into their prompts verbatim, so left in place these fields would make
+    host latency and token counts part of the judge's evidence, and a
+    loaded machine could change what the Oracle reads. Every underscore
+    key is dropped from the copy handed downstream; the original, which
+    the ledger records, keeps them.
+    """
+    return {k: v for k, v in result.items() if not k.startswith("_")}
 
 
 def _stamp_seconds(result: dict[str, Any], started: float) -> None:

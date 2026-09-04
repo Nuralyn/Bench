@@ -298,6 +298,36 @@ def tokens_by_stage(entries: list[dict]) -> dict[str, dict[str, int]]:
     return totals
 
 
+def tokens_per_entry(entries: list[dict]) -> dict[str, float | int]:
+    """Distribution of total tokens (input plus output, all stages) per entry.
+
+    Returns {"entries", "median", "p90"} over entries that recorded any
+    usable token figure, read the same way tokens_by_stage reads them, so
+    the two cannot disagree about what counts. This is the figure the
+    README quotes as the median cost of a governed edit; cli stats and the
+    viewer print it so the quoted number can be reproduced.
+    """
+    totals: list[float] = []
+    for entry in entries:
+        counted: bool = False
+        total: int = 0
+        for stage in _STAGES:
+            result: Any = entry.get(stage)
+            if not isinstance(result, dict):
+                continue
+            tokens: Any = result.get("_tokens", result.get("tokens_used"))
+            if not isinstance(tokens, dict):
+                continue
+            for field in ("input", "output"):
+                value: Any = tokens.get(field)
+                if isinstance(value, int) and not isinstance(value, bool):
+                    total += value
+                    counted = True
+        if counted:
+            totals.append(float(total))
+    return _distribution_summary(totals)
+
+
 def _stage_seconds(entry: dict) -> dict[str, float]:
     """Per-stage wall time recorded on ``entry``, stage name to seconds.
 
@@ -332,7 +362,7 @@ def _percentile(values: list[float], percent: int) -> float:
     return values[min(rank, len(values)) - 1]
 
 
-def _latency_summary(values: list[float]) -> dict[str, float | int]:
+def _distribution_summary(values: list[float]) -> dict[str, float | int]:
     """{"entries", "median", "p90"} over ``values``; zeros when empty."""
     if not values:
         return {"entries": 0, "median": 0.0, "p90": 0.0}
@@ -362,16 +392,16 @@ def seconds_by_stage(entries: list[dict]) -> dict[str, dict[str, float | int]]:
         if seconds:
             totals.append(sum(seconds.values()))
     summary: dict[str, dict[str, float | int]] = {
-        stage: _latency_summary(per_stage[stage]) for stage in _STAGES
+        stage: _distribution_summary(per_stage[stage]) for stage in _STAGES
     }
-    summary["total"] = _latency_summary(totals)
+    summary["total"] = _distribution_summary(totals)
     return summary
 
 
 def latency_by_week(entries: list[dict]) -> list[dict]:
     """Per-entry total wall time per ISO week, oldest first.
 
-    Each row is a _latency_summary dict plus "week". Only entries that
+    Each row is a _distribution_summary dict plus "week". Only entries that
     recorded at least one stage timing contribute, and weeks with none are
     omitted rather than shown as zero, so the table cannot imply a verdict
     was instant when it was merely unmeasured.
@@ -386,7 +416,7 @@ def latency_by_week(entries: list[dict]) -> list[dict]:
         )
     rows: list[dict] = []
     for label in sorted(groups):
-        row: dict = _latency_summary(groups[label])
+        row: dict = _distribution_summary(groups[label])
         row["week"] = label
         rows.append(row)
     return rows

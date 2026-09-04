@@ -278,23 +278,23 @@ Set `BENCH_PROVIDER=claude_code` to run the pipeline on the subscription that al
 
 ## What It Costs
 
-Every governed `Write`, `Edit`, or `MultiEdit` is three sequential model calls, and Claude Code makes many small edits. The figures below come from Bench's own operational ledger, the same numbers `python -m cli stats` prints and the viewer's dashboard charts, so they are what Bench measured on itself rather than an estimate.
+Every governed `Write`, `Edit`, or `MultiEdit` is three sequential model calls, and Claude Code makes many small edits. The figures below come from Bench's own operational ledger. `python -m cli stats` prints each of them (the "Tokens per edit", "Seconds per edit", and "Seconds by stage" lines), and the viewer's dashboard shows the same distributions, so anyone with a chain can reproduce the table for their own ledger rather than take an estimate.
 
-Tokens, over 1,103 entries that recorded usage, as of 2026-09-03:
+Tokens, over 1,148 entries that recorded usage, as of 2026-09-04:
 
 | Figure | Value |
 |---|---|
-| Median tokens per governed edit, all stages | 36,240 |
-| 90th percentile | 47,735 |
+| Median tokens per governed edit, all stages | 36,166 |
+| 90th percentile | 47,590 |
 
-Wall time, recorded per stage from v2.1 onward. The first 34 timed entries, all on the `claude_code` provider, which cold-starts a `claude` process per stage:
+Wall time, recorded per stage from v2.1 onward. The first 78 timed entries, all on the `claude_code` provider, which cold-starts a `claude` process per stage:
 
 | Stage | Median seconds | 90th percentile |
 |---|---|---|
-| Challenger | 18.8 | 29.8 |
-| Defender | 10.4 | 29.0 |
-| Oracle | 22.1 | 28.7 |
-| Whole edit | 45.3 | 81.7 |
+| Challenger | 17.3 | 29.5 |
+| Defender | 10.2 | 30.8 |
+| Oracle | 21.9 | 29.9 |
+| Whole edit | 47.0 | 92.9 |
 
 The Defender median is low because a CLEAR challenge skips it and records zero seconds. The direct API providers avoid the process start but not the sequential three-call shape. Both tables will drift as the ledger grows; run `python -m cli stats` for the current figures on your own chain, and `python -m cli viewer` for the per-week view.
 
