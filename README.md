@@ -287,18 +287,17 @@ Bench always exits with code 0. Flow control uses JSON `permissionDecision` fiel
 Not all tool inputs are simple text edits. Bench handles three edge cases:
 
 - **Binary files** (images, compiled output) are detected via null-byte sniffing and passed through with metadata only. The pipeline does not attempt to reason about binary content.
-- **Large diffs** exceeding 300 lines are truncated while preserving governance-critical lines: imports, function/class signatures, and exception handlers.
+- **Large diffs** exceeding 300 lines or 20,000 characters are truncated. The first 50 and last 20 lines, function and class signatures, and exception handlers are selected first, and that selection is then clamped to the 20,000-character budget, so a character-heavy diff can lose even a preferred line. Imports have no rule of their own: one survives only if it falls inside a region kept for another reason.
 - **New file creation** is typed as `change_type: "create"` so the pipeline knows it is reviewing a creation, not a modification.
 
 ### Project-Scoped Ledger
 
-Bench's hook can be registered globally in `~/.claude/settings.json`, which governs every project on the machine. Each project's verdicts land in that project's own ledger, not in Bench's:
+Bench's hook can be registered globally in `~/.claude/settings.json`, which governs every project on the machine. Each project's verdicts land in that project's own ledger, and Bench governing itself follows the same rule with no exemption:
 
 | Working directory | Ledger |
 |---|---|
-| Inside the Bench repo | `ledger/bench-ledger.json` (Bench governing itself) |
-| Any other project | `<project>/.bench/bench-ledger.json` |
-| `BENCH_LEDGER_PATH` set | That path, overriding both |
+| Any project, Bench included | `<project>/.bench/bench-ledger.json` |
+| `BENCH_LEDGER_PATH` set | That path, overriding the default |
 
 `ledger-meta.json` is written alongside whichever ledger is selected, so every chain carries its own anchor and verifies independently. `python -m cli verify` prints which ledger it read, and validates that chain only: per-project chains under `.bench/` are verified by running the command from that project.
 
