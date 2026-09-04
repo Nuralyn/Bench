@@ -283,9 +283,12 @@ client = openai.OpenAI(
 # (`claude -p --output-format json --model ...`, with the system prompt and
 # user content folded into the stdin payload) so calls ride the user's Claude
 # Code subscription.
-# The child is spawned with BENCH_SUBPROCESS=1 so Bench's own PreToolUse hook
-# fails open instead of recursing. subprocess/shutil are stdlib, so this path
-# adds no dependency. Per-stage timeout is BENCH_CLAUDE_TIMEOUT seconds
+# The child is spawned with BENCH_SUBPROCESS set to a per-call random nonce,
+# recorded in an owner-only file under Bench's own .bench/subprocess/ for the
+# duration of the call, so Bench's PreToolUse hook recognises its child and
+# skips it instead of recursing. The hook honours a token only while its file
+# exists and is fresh; a bare "1" or a guessed value is governed normally.
+# subprocess/shutil/secrets are stdlib, so this path adds no dependency. Per-stage timeout is BENCH_CLAUDE_TIMEOUT seconds
 # (library default 120). This repo sets 300 in .claude/settings.json: at 120
 # the Oracle timed out on constitutionally heavy diffs, and because a timeout
 # fails closed it surfaced as a VETO carrying pipeline_error, which reads like
