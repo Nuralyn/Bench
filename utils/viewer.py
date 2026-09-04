@@ -35,6 +35,8 @@ from utils.stats import (
     compute_ledger_stats,
     pct,
     stats_by_scope,
+    latency_by_week,
+    seconds_by_stage,
     stats_by_week,
     tokens_by_stage,
 )
@@ -406,6 +408,26 @@ def _build_dashboard(entries: list[dict], project_root: str) -> str:
     scopes: list[dict] = stats_by_scope(entries, project_root)
     citations: list[dict] = citations_by_constraint(entries)
     tokens: dict[str, dict[str, int]] = tokens_by_stage(entries)
+    seconds: dict[str, dict[str, float | int]] = seconds_by_stage(entries)
+    latency_weeks: list[dict] = latency_by_week(entries)
+
+    def _latency_cells(row: dict) -> list[str]:
+        count: int = int(row.get("entries", 0))
+        if not count:
+            return ["0", "n/a", "n/a"]
+        return [
+            f"{count:,}",
+            f"{float(row.get('median', 0.0)):.1f}",
+            f"{float(row.get('p90', 0.0)):.1f}",
+        ]
+
+    latency_rows: list[list[str]] = [
+        [stage] + _latency_cells(seconds.get(stage, {}))
+        for stage in ("challenger", "defender", "oracle", "total")
+    ]
+    latency_week_rows: list[list[str]] = [
+        [str(row.get("week", ""))] + _latency_cells(row) for row in latency_weeks
+    ]
 
     week_rows: list[list[str]] = [
         [str(row.get("week", ""))] + _verdict_cells(row) for row in weeks
@@ -480,6 +502,23 @@ def _build_dashboard(entries: list[dict], project_root: str) -> str:
             token_rows, "No token figures recorded.",
         )
         + "\n</div>\n"
+        '<div class="card" id="dash-latency">\n'
+        "  <h2>Seconds by stage</h2>\n  "
+        + _table(
+            ["Stage", "Entries", "Median s", "p90 s"],
+            latency_rows, "No timings recorded yet.",
+        )
+        + "\n  "
+        + _table(
+            ["Week", "Entries", "Median s", "p90 s"],
+            latency_week_rows, "No timings recorded yet.",
+        )
+        + '\n  <p class="fine">Wall time per stage as the runner measured it, '
+        "recorded from v2.1 onward. Medians are over entries that carry a "
+        "timing, never the whole ledger. A Defender skipped after a CLEAR "
+        "challenge counts as zero seconds, and total is the sum of the stages "
+        "an entry recorded.</p>\n"
+        "</div>\n"
         "</section>\n"
     )
 

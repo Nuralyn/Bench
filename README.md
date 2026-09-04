@@ -276,6 +276,30 @@ Set `BENCH_PROVIDER=claude_code` to run the pipeline on the subscription that al
 - Higher per-edit latency: every stage cold-starts a `claude` invocation, so a governed edit is noticeably slower than the direct-API path. Tune the per-stage timeout with `BENCH_CLAUDE_TIMEOUT` (seconds, default 120).
 - This is the sanctioned subprocess route, not raw token reuse. Bench sets `BENCH_SUBPROCESS` on the child to a per-call random nonce, recorded in an owner-only file under the Bench checkout for the duration of the call, so its own hook recognises the child without recursing. The hook honours a token only while that file exists and is fresh; a bare `1` or a guessed value is governed like any other process.
 
+## What It Costs
+
+Every governed `Write`, `Edit`, or `MultiEdit` is three sequential model calls, and Claude Code makes many small edits. The figures below come from Bench's own operational ledger, the same numbers `python -m cli stats` prints and the viewer's dashboard charts, so they are what Bench measured on itself rather than an estimate.
+
+Tokens, over 1,103 entries that recorded usage, as of 2026-09-03:
+
+| Figure | Value |
+|---|---|
+| Median tokens per governed edit, all stages | 36,240 |
+| 90th percentile | 47,735 |
+
+Wall time, recorded per stage from v2.1 onward. The first 34 timed entries, all on the `claude_code` provider, which cold-starts a `claude` process per stage:
+
+| Stage | Median seconds | 90th percentile |
+|---|---|---|
+| Challenger | 18.8 | 29.8 |
+| Defender | 10.4 | 29.0 |
+| Oracle | 22.1 | 28.7 |
+| Whole edit | 45.3 | 81.7 |
+
+The Defender median is low because a CLEAR challenge skips it and records zero seconds. The direct API providers avoid the process start but not the sequential three-call shape. Both tables will drift as the ledger grows; run `python -m cli stats` for the current figures on your own chain, and `python -m cli viewer` for the per-week view.
+
+Roadmap v2.1 targets a median under 20,000 tokens by sending each constraint's rule without its commentary and caching the prompt prefix on the API path. Until then, this is the price.
+
 ## Design Decisions
 
 ### Fail-Closed by Design

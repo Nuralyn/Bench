@@ -7,6 +7,7 @@ callers own all presentation.
 """
 
 import datetime
+import statistics
 import sys
 from pathlib import PurePosixPath
 from typing import Any
@@ -295,6 +296,100 @@ def tokens_by_stage(entries: list[dict]) -> dict[str, dict[str, int]]:
         "entries": entries_with_tokens,
     }
     return totals
+
+
+def _stage_seconds(entry: dict) -> dict[str, float]:
+    """Per-stage wall time recorded on ``entry``, stage name to seconds.
+
+    Reads each stage's ``_seconds`` (written by pipeline/runner.py beside
+    ``_tokens``). Only a non-negative int or float counts; a missing,
+    negative, boolean, or non-numeric figure is left out rather than
+    treated as zero, so entries older than the timing field do not drag a
+    median toward nothing. A skipped Defender records an explicit 0.0 and
+    is counted, since zero really is what it cost.
+    """
+    seconds: dict[str, float] = {}
+    for stage in _STAGES:
+        result: Any = entry.get(stage)
+        if not isinstance(result, dict):
+            continue
+        value: Any = result.get("_seconds")
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        if value < 0:
+            continue
+        seconds[stage] = float(value)
+    return seconds
+
+
+def _percentile(values: list[float], percent: int) -> float:
+    """Nearest-rank percentile of ``values`` (already sorted, non-empty).
+
+    ``percent`` is an integer such as 90. The rank is ceil(n * percent / 100)
+    in integer arithmetic, so no float rounding can move it by one.
+    """
+    rank: int = max(1, -(-len(values) * percent // 100))
+    return values[min(rank, len(values)) - 1]
+
+
+def _latency_summary(values: list[float]) -> dict[str, float | int]:
+    """{"entries", "median", "p90"} over ``values``; zeros when empty."""
+    if not values:
+        return {"entries": 0, "median": 0.0, "p90": 0.0}
+    ordered: list[float] = sorted(values)
+    return {
+        "entries": len(ordered),
+        "median": round(statistics.median(ordered), 3),
+        "p90": round(_percentile(ordered, 90), 3),
+    }
+
+
+def seconds_by_stage(entries: list[dict]) -> dict[str, dict[str, float | int]]:
+    """Wall-time distribution per stage and per entry.
+
+    Returns {stage: {"entries", "median", "p90"}} for each of _STAGES plus
+    "total", where an entry's total is the sum of every stage figure it
+    recorded. "entries" is how many entries carried a usable figure for
+    that row, so the medians are over recorded timings only, never over
+    the whole ledger.
+    """
+    per_stage: dict[str, list[float]] = {stage: [] for stage in _STAGES}
+    totals: list[float] = []
+    for entry in entries:
+        seconds: dict[str, float] = _stage_seconds(entry)
+        for stage, value in seconds.items():
+            per_stage[stage].append(value)
+        if seconds:
+            totals.append(sum(seconds.values()))
+    summary: dict[str, dict[str, float | int]] = {
+        stage: _latency_summary(per_stage[stage]) for stage in _STAGES
+    }
+    summary["total"] = _latency_summary(totals)
+    return summary
+
+
+def latency_by_week(entries: list[dict]) -> list[dict]:
+    """Per-entry total wall time per ISO week, oldest first.
+
+    Each row is a _latency_summary dict plus "week". Only entries that
+    recorded at least one stage timing contribute, and weeks with none are
+    omitted rather than shown as zero, so the table cannot imply a verdict
+    was instant when it was merely unmeasured.
+    """
+    groups: dict[str, list[float]] = {}
+    for entry in entries:
+        seconds: dict[str, float] = _stage_seconds(entry)
+        if not seconds:
+            continue
+        groups.setdefault(week_of(entry.get("timestamp")), []).append(
+            sum(seconds.values())
+        )
+    rows: list[dict] = []
+    for label in sorted(groups):
+        row: dict = _latency_summary(groups[label])
+        row["week"] = label
+        rows.append(row)
+    return rows
 
 
 def compute_ledger_stats(entries: list[dict]) -> dict:

@@ -266,13 +266,32 @@ class DashboardTests(unittest.TestCase):
             self._row(["challenger", "0", "0", "0", "n/a", "n/a"]), html_out
         )
 
+    def test_latency_table_restates_seconds_by_stage(self) -> None:
+        chain: list[dict] = _build_valid_chain(3)
+        chain[0]["oracle"]["_seconds"] = 10.0
+        chain[0]["entry_hash"] = compute_entry_hash(chain[0])
+        chain[1]["previous_hash"] = chain[0]["entry_hash"]
+        chain[1]["oracle"]["_seconds"] = 30.0
+        chain[1]["challenger"] = {"status": "CLEAR", "_seconds": 5.0}
+        chain[1]["entry_hash"] = compute_entry_hash(chain[1])
+        chain[2]["previous_hash"] = chain[1]["entry_hash"]
+        chain[2]["entry_hash"] = compute_entry_hash(chain[2])
+        html_out: str = self._render(chain)
+        self.assertIn(self._row(["oracle", "2", "20.0", "30.0"]), html_out)
+        self.assertIn(self._row(["challenger", "1", "5.0", "5.0"]), html_out)
+        self.assertIn(self._row(["defender", "0", "n/a", "n/a"]), html_out)
+        # Entry totals 10 and 35: the untimed third entry is not counted.
+        self.assertIn(self._row(["total", "2", "22.5", "35.0"]), html_out)
+        self.assertNotIn("No timings recorded yet.", html_out)
+
     def test_empty_ledger_renders_an_empty_dashboard(self) -> None:
         html_out: str = generate_viewer_html(self._path())
         self.assertNotIn("generation failed", html_out)
-        self.assertEqual(html_out.count('class="card" id="dash-'), 4)
+        self.assertEqual(html_out.count('class="card" id="dash-'), 5)
         self.assertEqual(html_out.count("<path d="), 0)
         self.assertIn("No governed changes yet.", html_out)
         self.assertIn("No veto has cited a constraint.", html_out)
+        self.assertIn("No timings recorded yet.", html_out)
 
 
 class ViewerStatsParityTests(unittest.TestCase):

@@ -60,6 +60,7 @@ from utils.stats import (
     entry_has_pipeline_error,
     entry_verdict,
     pct,
+    seconds_by_stage,
 )
 from utils.viewer import generate_viewer_html
 
@@ -870,6 +871,18 @@ def cmd_stats() -> int:
         )
     else:
         print("Most violated          : n/a")
+    # Wall time per adjudicated edit, over entries that recorded a timing
+    # (runner-stamped _seconds, v2.1 onward). Older entries carry none and
+    # are left out rather than counted as instant.
+    timing: dict[str, float | int] = seconds_by_stage(entries)["total"]
+    timed: int = int(timing["entries"])
+    if timed:
+        print(
+            f"Seconds per edit       : median {float(timing['median']):.1f}, "
+            f"p90 {float(timing['p90']):.1f} ({timed} timed)"
+        )
+    else:
+        print("Seconds per edit       : n/a (no entry carries a timing yet)")
     print(f"Constitution hash      : {_short_hash(latest_cons_hash, 16)}")
     print(f"Ledger integrity       : {integrity}")
 

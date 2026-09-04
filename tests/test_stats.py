@@ -21,8 +21,10 @@ from utils.stats import (  # noqa: E402
     compute_ledger_stats,
     entry_has_pipeline_error,
     entry_verdict,
+    latency_by_week,
     pct,
     scope_of_file,
+    seconds_by_stage,
     stats_by_scope,
     stats_by_week,
     tokens_by_stage,
@@ -451,6 +453,99 @@ class TokensByStageTests(unittest.TestCase):
         self.assertEqual(
             totals["total"], {"input": 0, "output": 0, "entries": 0}
         )
+
+
+class SecondsByStageTests(unittest.TestCase):
+    """Latency figures come only from entries that recorded a timing."""
+
+    def test_medians_and_p90_over_recorded_stages_only(self) -> None:
+        entries: list[dict] = [
+            {
+                "challenger": {"_seconds": 10.0},
+                "defender": {"_seconds": 0.0},
+                "oracle": {"_seconds": 20.0},
+            },
+            {
+                "challenger": {"_seconds": 30.0},
+                "oracle": {"_seconds": 40.0},
+            },
+            {"challenger": {"_seconds": 50}},
+            {"verdict": "VETO", "pipeline_error": True},
+        ]
+        summary: dict = seconds_by_stage(entries)
+        self.assertEqual(
+            summary["challenger"], {"entries": 3, "median": 30.0, "p90": 50.0}
+        )
+        self.assertEqual(
+            summary["defender"], {"entries": 1, "median": 0.0, "p90": 0.0}
+        )
+        self.assertEqual(
+            summary["oracle"], {"entries": 2, "median": 30.0, "p90": 40.0}
+        )
+        # Totals: 30, 70, 50 -> sorted 30, 50, 70.
+        self.assertEqual(
+            summary["total"], {"entries": 3, "median": 50.0, "p90": 70.0}
+        )
+
+    def test_untimed_and_malformed_figures_are_left_out(self) -> None:
+        entries: list[dict] = [
+            {"oracle": {"_tokens": {"input": 1, "output": 1}}},
+            {"oracle": {"_seconds": "fast"}},
+            {"oracle": {"_seconds": True}},
+            {"oracle": {"_seconds": -1.0}},
+            {"oracle": {"_seconds": None}},
+            {"oracle": "n/a"},
+        ]
+        summary: dict = seconds_by_stage(entries)
+        self.assertEqual(summary["oracle"], {"entries": 0, "median": 0.0, "p90": 0.0})
+        self.assertEqual(summary["total"], {"entries": 0, "median": 0.0, "p90": 0.0})
+
+    def test_p90_is_nearest_rank(self) -> None:
+        entries: list[dict] = [{"oracle": {"_seconds": float(i)}} for i in range(1, 11)]
+        summary: dict = seconds_by_stage(entries)
+        self.assertEqual(summary["oracle"]["p90"], 9.0)
+        self.assertEqual(summary["oracle"]["median"], 5.5)
+
+    def test_p90_rank_at_sample_size_boundaries(self) -> None:
+        # Nearest rank is ceil(n * 90 / 100), in integer arithmetic so no
+        # float product can move it. n=1 -> 1st, n=3 -> 3rd, n=9 -> 9th,
+        # n=11 -> 10th, n=20 -> 18th.
+        for n, expected_rank in ((1, 1), (3, 3), (9, 9), (11, 10), (20, 18)):
+            with self.subTest(n=n):
+                entries: list[dict] = [
+                    {"oracle": {"_seconds": float(i)}} for i in range(1, n + 1)
+                ]
+                self.assertEqual(
+                    seconds_by_stage(entries)["oracle"]["p90"], float(expected_rank)
+                )
+
+    def test_empty_ledger(self) -> None:
+        summary: dict = seconds_by_stage([])
+        for stage in ("challenger", "defender", "oracle", "total"):
+            self.assertEqual(summary[stage], {"entries": 0, "median": 0.0, "p90": 0.0})
+
+
+class LatencyByWeekTests(unittest.TestCase):
+    def test_weeks_without_a_timing_are_omitted(self) -> None:
+        entries: list[dict] = [
+            {"timestamp": "2026-01-05T00:00:00+00:00", "oracle": {"_seconds": 4.0}},
+            {"timestamp": "2026-01-06T00:00:00+00:00", "challenger": {"_seconds": 1.0}, "oracle": {"_seconds": 1.0}},
+            {"timestamp": "2026-01-12T00:00:00+00:00", "verdict": "PASS"},
+            {"timestamp": "2026-01-19T00:00:00+00:00", "oracle": {"_seconds": 8.0}},
+            {"timestamp": "not a date", "oracle": {"_seconds": 3.0}},
+        ]
+        rows: list[dict] = latency_by_week(entries)
+        self.assertEqual(
+            rows,
+            [
+                {"week": "2026-W02", "entries": 2, "median": 3.0, "p90": 4.0},
+                {"week": "2026-W04", "entries": 1, "median": 8.0, "p90": 8.0},
+                {"week": week_of("not a date"), "entries": 1, "median": 3.0, "p90": 3.0},
+            ],
+        )
+
+    def test_empty_ledger(self) -> None:
+        self.assertEqual(latency_by_week([]), [])
 
 
 if __name__ == "__main__":

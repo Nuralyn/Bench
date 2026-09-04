@@ -235,7 +235,7 @@ class ViewerBrowserTests(unittest.TestCase):
         self.assertFalse(anchor.is_visible())
 
     def test_dashboard_restates_the_ledger_tallies(self) -> None:
-        self.assertEqual(self.page.locator(".dashboard .card").count(), 4)
+        self.assertEqual(self.page.locator(".dashboard .card").count(), 5)
         # The fixture spans one ISO week, so each of the two rate charts
         # draws one column, and every column carries a hover title.
         columns: Locator = self.page.locator("#dash-weeks svg path")
@@ -259,6 +259,16 @@ class ViewerBrowserTests(unittest.TestCase):
         self.assertIn(
             "n/a",
             self.page.locator("#dash-tokens tbody td").all_text_contents(),
+        )
+        # The fixture predates stage timing, so every stage row reads as
+        # unmeasured and the weekly table shows its empty state.
+        latency_cells: list[str] = self.page.locator(
+            "#dash-latency tbody td"
+        ).all_text_contents()
+        self.assertEqual(latency_cells[:4], ["challenger", "0", "n/a", "n/a"])
+        self.assertIn(
+            "No timings recorded yet.",
+            self.page.locator("#dash-latency").text_content() or "",
         )
 
     def test_dashboard_tables_stay_inside_their_cards(self) -> None:

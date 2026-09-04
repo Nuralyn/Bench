@@ -96,6 +96,37 @@ class HappyPathTests(unittest.TestCase):
         self.assertEqual(result["verdict"], "PASS")
         mock_def.assert_called_once()
 
+    def test_every_stage_result_carries_seconds(
+        self, mock_const: MagicMock, mock_chall: MagicMock,
+        mock_def: MagicMock, mock_oracle: MagicMock, mock_ledger: MagicMock,
+    ) -> None:
+        # Each stage the runner actually called is stamped with a non-negative
+        # float beside its tokens, and the tokens themselves are untouched.
+        mock_const.return_value = _MOCK_CONSTITUTION
+        mock_chall.return_value = _findings_challenger()
+        mock_def.return_value = _rebuttal_defender()
+        mock_oracle.return_value = _pass_oracle()
+        result: dict = run_governance_pipeline("Write", _TOOL_INPUT, _DIFF)
+        for stage in ("challenger", "defender", "oracle"):
+            with self.subTest(stage=stage):
+                seconds = result[stage]["_seconds"]
+                self.assertIsInstance(seconds, float)
+                self.assertGreaterEqual(seconds, 0.0)
+        self.assertEqual(result["oracle"]["_tokens"], {"input": 50, "output": 60})
+
+    def test_skipped_defender_records_zero_seconds(
+        self, mock_const: MagicMock, mock_chall: MagicMock,
+        mock_def: MagicMock, mock_oracle: MagicMock, mock_ledger: MagicMock,
+    ) -> None:
+        # A CLEAR challenge skips the Defender: no call, so exactly 0.0, not a
+        # missing field that stats would read as "unmeasured".
+        mock_const.return_value = _MOCK_CONSTITUTION
+        mock_chall.return_value = _clear_challenger()
+        mock_oracle.return_value = _pass_oracle()
+        result: dict = run_governance_pipeline("Write", _TOOL_INPUT, _DIFF)
+        self.assertEqual(result["defender"]["_seconds"], 0.0)
+        self.assertIsInstance(result["challenger"]["_seconds"], float)
+
     def test_veto_verdict_propagated(
         self, mock_const: MagicMock, mock_chall: MagicMock,
         mock_def: MagicMock, mock_oracle: MagicMock, mock_ledger: MagicMock,
