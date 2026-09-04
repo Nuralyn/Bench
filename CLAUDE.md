@@ -333,7 +333,9 @@ on, and recorded. The ledger is the proof. `python -m cli verify` confirms
 the chain is intact. `python -m cli stats` shows the full governance history.
 `python -m cli viewer` renders the same figures as a local page: a dashboard
 of weekly veto and pipeline-error rates, verdicts by C-007 scope, constraint
-citations, and token cost, above every entry's full record. Every number on
+citations, token cost, and seconds per stage (the runner stamps each stage
+result with `_seconds` beside `_tokens`), above every entry's full record.
+Every number on
 it comes from `utils/stats.py`, the helpers `cli stats` uses, so the two
 surfaces cannot disagree.
 

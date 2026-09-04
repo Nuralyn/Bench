@@ -31,6 +31,7 @@ Optimization:
 """
 
 import sys
+import time
 import traceback
 from pathlib import Path
 from typing import Any
@@ -164,9 +165,11 @@ def run_governance_pipeline(
     # the ground between Challenger and Oracle.
     project_context: str = _load_project_context()
 
+    started: float = time.perf_counter()
     challenger_result: dict[str, Any] = run_challenger(
         diff_info, constitution, constitution_hash, project_context
     )
+    _stamp_seconds(challenger_result, started)
     _accumulate_tokens(accumulated, challenger_result.get("_tokens"))
     if challenger_result.get("status") == "PIPELINE_ERROR":
         return _finalize(
@@ -193,20 +196,25 @@ def run_governance_pipeline(
         )
 
     if challenger_result.get("status") == "CLEAR":
+        # No model call was made, so the stage cost no time either; the
+        # explicit zero keeps latency figures honest about skipped stages.
         defender_result: dict[str, Any] = {
             "status": "CONFIRM_CLEAR",
             "rebuttals": [],
             "summary": "Challenger found no issues.",
             "_tokens": {"input": 0, "output": 0},
+            "_seconds": 0.0,
         }
     else:
+        started = time.perf_counter()
         defender_result = run_defender(
             diff_info,
             constitution,
             constitution_hash,
-            challenger_result,
+            _without_telemetry(challenger_result),
             project_context,
         )
+        _stamp_seconds(defender_result, started)
     _accumulate_tokens(accumulated, defender_result.get("_tokens"))
     if challenger_result.get("status") != "CLEAR":
         if defender_result.get("status") == "PIPELINE_ERROR":
@@ -234,14 +242,16 @@ def run_governance_pipeline(
                 diff_info,
             )
 
+    started = time.perf_counter()
     oracle_result: dict[str, Any] = run_oracle(
         diff_info,
         constitution,
         constitution_hash,
-        challenger_result,
-        defender_result,
+        _without_telemetry(challenger_result),
+        _without_telemetry(defender_result),
         project_context,
     )
+    _stamp_seconds(oracle_result, started)
     _accumulate_tokens(accumulated, oracle_result.get("_tokens"))
     if oracle_result.get("status") == "PIPELINE_ERROR":
         return _finalize(
@@ -338,6 +348,33 @@ def _finalize(
         )
         traceback.print_exc(file=sys.stderr)
     return result
+
+
+def _without_telemetry(result: dict[str, Any]) -> dict[str, Any]:
+    """A copy of a stage result with its accounting fields removed.
+
+    ``_tokens`` and ``_seconds`` are bookkeeping for the ledger, not
+    findings. The Defender and Oracle serialize the prior stages' dicts
+    into their prompts verbatim, so left in place these fields would make
+    host latency and token counts part of the judge's evidence, and a
+    loaded machine could change what the Oracle reads. Every underscore
+    key is dropped from the copy handed downstream; the original, which
+    the ledger records, keeps them.
+    """
+    return {k: v for k, v in result.items() if not k.startswith("_")}
+
+
+def _stamp_seconds(result: dict[str, Any], started: float) -> None:
+    """Record a stage's wall-clock duration on its result as ``_seconds``.
+
+    ``started`` is a ``time.perf_counter()`` reading taken before the stage
+    call. The figure is stored beside ``_tokens`` so an entry carries the
+    time a verdict cost as well as the tokens, and utils.stats can report
+    latency the way it reports token cost. Rounded to milliseconds; a
+    stage result is always a dict by the stage functions' contract, so no
+    other shape is handled here.
+    """
+    result["_seconds"] = round(time.perf_counter() - started, 3)
 
 
 def _accumulate_tokens(
