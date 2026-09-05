@@ -16,6 +16,7 @@ the real ``sys.stdin.isatty`` and ``input``, and renders the result.
 
 import json
 import os
+import re
 import subprocess
 import sys
 import webbrowser
@@ -360,6 +361,9 @@ def cmd_record_sanitation(
 # subprocess in this tree carries a timeout (tests/test_subprocess_timeouts.py
 # scans for it). Generous, because a slow ref listing is still an answer.
 _SUBPROCESS_TIMEOUT_SECONDS: float = 60.0
+# A GitHub API path as the purge manifest records it: segments of letters,
+# digits, dots, underscores and dashes, never starting with a dash.
+_ENDPOINT_PATTERN: re.Pattern[str] = re.compile(r"[A-Za-z0-9][A-Za-z0-9_./-]*")
 
 
 def _git_refs(args: list[str]) -> dict[str, str] | None:
@@ -408,6 +412,15 @@ def _gh_status(endpoint: str) -> int:
     inconclusive, so an unanswered probe can never be read as a removal
     (C-001: the failure is surfaced, not swallowed into a pass).
     """
+    if not _ENDPOINT_PATTERN.fullmatch(endpoint):
+        # The endpoint comes from a manifest on disk, not from this code.
+        # One that is not a plain API path is not asked at all (a leading
+        # dash would reach gh as a flag), and unasked is inconclusive.
+        print(
+            f"[bench cli] refusing to probe a malformed endpoint: {endpoint!r}",
+            file=sys.stderr,
+        )
+        return 0
     try:
         # run_isolated detaches stdin, so an auth prompt fails at once
         # instead of waiting on a terminal nobody is watching, and ends gh

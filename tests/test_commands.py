@@ -267,6 +267,17 @@ class ProbeTimeoutTests(unittest.TestCase):
         self.assertEqual(status, 0)
         self.assertIn("did not answer within", err.getvalue())
 
+    def test_a_malformed_endpoint_is_not_probed_and_is_inconclusive(self) -> None:
+        # The endpoint comes from a manifest on disk; one that is not a plain
+        # API path never reaches gh (a leading dash would be read as a flag).
+        err = io.StringIO()
+        with patch("cli.commands.run_isolated") as run:
+            with redirect_stderr(err):
+                for endpoint in ("-x", "repos/x y", "", "repos/x/y?ref=../z"):
+                    self.assertEqual(_gh_status(endpoint), 0, endpoint)
+        run.assert_not_called()
+        self.assertIn("malformed endpoint", err.getvalue())
+
     def test_probes_go_through_run_isolated_with_a_timeout(self) -> None:
         # run_isolated detaches stdin (a credential or auth prompt fails at
         # once) and ends the process group on timeout; tests/test_procs.py

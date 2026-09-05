@@ -70,6 +70,8 @@ _STAGING_OWNER_MARKER: str = ".bench-restore"
 # publish was interrupted and could not be rolled back, and the target
 # must not be taken for a complete chain.
 _INCOMPLETE_MARKER: str = "restore-incomplete"
+# The result's `source` field when the chain came from the on-disk ledger/.
+_WORKING_TREE: str = "working tree"
 
 
 # Ceiling on each git call. Migration reads local history, which is fast,
@@ -848,18 +850,18 @@ def _migrate_locked(root: Path, target: Path, legacy_dir: Path) -> dict[str, Any
             copied: tuple[int, int] | None = _restore_from_disk(legacy_dir, target)
         except RestoreIncomplete as exc:
             print(f"[bench migrate] {exc}", file=sys.stderr)
-            return _incomplete(target, "working tree")
+            return _incomplete(target, _WORKING_TREE)
         if copied is None:
             return _failed(
                 target,
-                "working tree",
+                _WORKING_TREE,
                 "COPY_FAILED",
                 f"Could not copy the chain from {legacy_dir} into place, so "
                 "nothing was restored. The working-tree chain is untouched; "
                 "check that the target is writable and has room, then retry.",
             )
         written, expected = copied
-        return _finish(target, "working tree", written, expected)
+        return _finish(target, _WORKING_TREE, written, expected)
 
     # A git call that times out is an unanswered question, not a negative
     # answer. It is reported as a failed migration so the caller retries or

@@ -62,16 +62,35 @@ def run_isolated(
 
 
 def _end_group(proc: subprocess.Popen[str]) -> None:
-    """End the child's process group and reap the child; log what fails."""
+    """End the child's process group and reap the child; log what fails.
+
+    A descendant killed with the group is reaped by whatever adopts it,
+    normally PID 1. Where PID 1 does not reap adopted children (some
+    minimal containers) it stays listed as a zombie, an entry with no
+    running code, until that init does. Bench does not make itself a
+    subreaper to cover that case: it would reparent every orphan of the
+    process to it, and a waitpid(-1) sweep would swallow unrelated
+    children's exit statuses.
+    """
     try:
         if sys.platform == "win32":
-            subprocess.run(
+            killed = subprocess.run(
                 ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
                 stdin=subprocess.DEVNULL,
                 capture_output=True,
+                text=True,
                 timeout=_REAP_SECONDS,
                 check=False,
             )
+            if killed.returncode != 0:
+                # /T ends the tree; a nonzero status means some of it may
+                # still be running, and that must be said, not assumed away.
+                print(
+                    f"[bench procs] taskkill /T on pid {proc.pid} returned "
+                    f"{killed.returncode}: {(killed.stderr or killed.stdout).strip()}; "
+                    "a descendant may still be running",
+                    file=sys.stderr,
+                )
         else:
             # The child leads its own session, so its pid is the group id.
             os.killpg(proc.pid, signal.SIGKILL)

@@ -48,6 +48,12 @@ def _alive(pid: int) -> bool:
         return False
     except PermissionError:
         return True
+    stat: Path = Path(f"/proc/{pid}/stat")
+    if stat.exists():
+        # A zombie runs nothing. Where PID 1 does not reap adopted children
+        # (some minimal containers) a killed grandchild stays listed as one.
+        state: str = stat.read_text(encoding="utf-8").rsplit(")", 1)[-1].split()[0]
+        return state != "Z"
     return True
 
 
