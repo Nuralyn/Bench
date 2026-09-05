@@ -165,7 +165,7 @@ class NormalizeDefenderResponseTests(unittest.TestCase):
         self.assertTrue(_validate_defender_response(resp))
 
     def test_concede_aliases_become_concede_with_a_note(self) -> None:
-        for alias in ("CONFIRM", "CONFIRM_CLEAR", "AGREE", "confirm_clear"):
+        for alias in ("CONFIRM", "AGREE", "confirm", "Agree"):
             rebuttal: dict = _valid_rebuttal()
             rebuttal["position"] = alias
             resp: dict = self._resp(rebuttal)
@@ -180,9 +180,11 @@ class NormalizeDefenderResponseTests(unittest.TestCase):
         self.assertEqual(resp["rebuttals"][0], _valid_rebuttal())
 
     def test_unknown_position_still_fails_closed(self) -> None:
-        # Only agreement synonyms are aliased. A position that could mean
-        # disagreement is not guessed at.
-        for position in ("REFUTE", "REJECT", "DISPUTE", "PARTIAL"):
+        # Only plain agreement words are aliased. A position that could mean
+        # disagreement is not guessed at, and that includes CONFIRM_CLEAR:
+        # the schema's top-level status for a clear assessment, which inside
+        # a rebuttal can mean the code is clear of the finding.
+        for position in ("CONFIRM_CLEAR", "REFUTE", "REJECT", "DISPUTE", "PARTIAL"):
             rebuttal: dict = _valid_rebuttal()
             rebuttal["position"] = position
             resp: dict = self._resp(rebuttal)
@@ -217,7 +219,7 @@ class NormalizeDefenderResponseTests(unittest.TestCase):
     ) -> None:
         rebuttal: dict = _valid_rebuttal()
         rebuttal["finding_index"] = "0"
-        rebuttal["position"] = "CONFIRM_CLEAR"
+        rebuttal["position"] = "CONFIRM"
         mock_call.return_value = {
             "status": "REBUTTAL",
             "summary": "Sound.",

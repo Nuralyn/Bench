@@ -151,8 +151,8 @@ def run_defender(
     # on the result, so the ledger entry shows it. _normalize_defender_
     # response (below) makes two repairs and no others: a digit-string
     # finding_index becomes the integer, and a position that is an alias of
-    # CONCEDE (CONFIRM, CONFIRM_CLEAR, AGREE) becomes CONCEDE. Every other
-    # position, index, or missing field still fails closed in the validator.
+    # CONCEDE (CONFIRM, AGREE) becomes CONCEDE. Every other position, index,
+    # or missing field still fails closed in the validator.
     # "_normalized" is reserved for this stage's own record. The validator
     # tolerates unknown keys, so a model-authored one is dropped first;
     # otherwise it would reach the ledger and count as a repair.
@@ -198,13 +198,15 @@ def _build_user_content(diff_info: dict, challenger_result: dict) -> str:
 # Cosmetic drift the operational ledger has recorded in otherwise sound
 # Defender responses (INVALID_DEFENDER_RESPONSE on 2026-07-31, twice, and
 # 2026-08-04, twice), each a fail-closed VETO recorded as a pipeline error,
-# not a ruling. The positions here are the ones the system prompt above
-# already warns against, and every one of them is a way of agreeing with a
-# finding, which is what CONCEDE means. No alias maps to REBUT or MITIGATE:
-# a word that could mean disagreement is never guessed at.
+# not a ruling. The positions here are the two the system prompt above
+# names as the mistakes to avoid, and each is a plain word for agreeing
+# with a finding, which is what CONCEDE means. No alias maps to REBUT or
+# MITIGATE, and a word that could mean disagreement is never guessed at:
+# CONFIRM_CLEAR, which the ledger also recorded, is the schema's top-level
+# status for a clear assessment and inside a rebuttal can mean the code is
+# clear of the finding, so it stays fail-closed.
 _POSITION_ALIASES: dict[str, str] = {
     "CONFIRM": "CONCEDE",
-    "CONFIRM_CLEAR": "CONCEDE",
     "AGREE": "CONCEDE",
 }
 
@@ -230,9 +232,9 @@ def _normalize_defender_response(response: dict[str, Any]) -> list[str]:
     ``_normalized`` (the same pattern run_challenger and run_oracle use) so
     the ledger entry shows what was repaired. tests/test_defender.py
     NormalizeDefenderResponseTests covers each repair, the untouched clean
-    response, and the fail-closed cases (REFUTE, REJECT, DISPUTE, PARTIAL,
-    a non-numeric index, a missing argument) end to end through
-    run_defender.
+    response, and the fail-closed cases (CONFIRM_CLEAR, REFUTE, REJECT,
+    DISPUTE, PARTIAL, a non-numeric index, a missing argument) end to end
+    through run_defender.
     """
     notes: list[str] = []
     rebuttals: Any = response.get("rebuttals")
