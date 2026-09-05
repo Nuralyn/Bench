@@ -259,15 +259,40 @@ class DashboardTests(unittest.TestCase):
         chain[1]["oracle"]["_tokens"] = {"input": 3000, "output": 20}
         chain[1]["entry_hash"] = compute_entry_hash(chain[1])
         html_out: str = self._render(chain)
+        # Stage, entries, input, of which cache reads, output, input per
+        # entry, billed input per entry. No cache fields, so billed equals
+        # input.
         self.assertIn(
-            self._row(["oracle", "2", "4,000", "30", "2,000", "15"]), html_out
+            self._row(["oracle", "2", "4,000", "0", "30", "2,000", "2,000"]),
+            html_out,
         )
         self.assertIn(
-            self._row(["challenger", "0", "0", "0", "n/a", "n/a"]), html_out
+            self._row(["challenger", "0", "0", "0", "0", "n/a", "n/a"]), html_out
         )
         # Per-entry totals 1,010 and 3,020: the line the README quotes.
         self.assertIn(
-            "Per entry: median 2,015, p90 3,020 tokens over 2 entries with usage.",
+            "Per entry: median 2,015, p90 3,020 tokens over 2 entries with usage. "
+            "At cached rates (reads 0.1x, writes 1.25x): median 2,015, p90 3,020.",
+            html_out,
+        )
+
+    def test_token_table_prices_cache_reads_at_the_cached_rate(self) -> None:
+        chain: list[dict] = _build_valid_chain(1)
+        chain[0]["oracle"]["_tokens"] = {
+            "input": 1000,
+            "output": 10,
+            "cache_read": 900,
+            "cache_creation": 0,
+        }
+        chain[0]["entry_hash"] = compute_entry_hash(chain[0])
+        html_out: str = self._render(chain)
+        # 100 uncached + 900 * 0.1 = 190 billed input for the one entry.
+        self.assertIn(
+            self._row(["oracle", "1", "1,000", "900", "10", "1,000", "190"]),
+            html_out,
+        )
+        self.assertIn(
+            "At cached rates (reads 0.1x, writes 1.25x): median 200, p90 200.",
             html_out,
         )
 

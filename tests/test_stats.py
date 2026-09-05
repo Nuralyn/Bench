@@ -29,6 +29,10 @@ from utils.stats import (  # noqa: E402
     stats_by_week,
     tokens_by_stage,
     tokens_per_entry,
+    billed_input,
+    billed_tokens_per_entry,
+    CACHE_READ_RATE,
+    CACHE_WRITE_RATE,
     week_of,
 )
 
@@ -39,6 +43,23 @@ def _pass_entry() -> dict:
 
 def _veto_entry(citations: list) -> dict:
     return {"oracle": {"verdict": "VETO", "constraint_citations": citations}}
+
+
+def _figures(
+    input_tokens: int, output_tokens: int, entries: int
+) -> dict[str, int]:
+    """A tokens_by_stage stage record with no cache fields.
+
+    Without cache reads or writes the billed input equals the input.
+    """
+    return {
+        "input": input_tokens,
+        "output": output_tokens,
+        "cache_read": 0,
+        "cache_creation": 0,
+        "entries": entries,
+        "billed_input": input_tokens,
+    }
 
 
 class EntryHasPipelineErrorTests(unittest.TestCase):
@@ -428,18 +449,10 @@ class TokensByStageTests(unittest.TestCase):
             {"verdict": "VETO", "pipeline_error": True},
         ]
         totals: dict = tokens_by_stage(entries)
-        self.assertEqual(
-            totals["challenger"], {"input": 11, "output": 3, "entries": 2}
-        )
-        self.assertEqual(
-            totals["defender"], {"input": 5, "output": 1, "entries": 1}
-        )
-        self.assertEqual(
-            totals["oracle"], {"input": 7, "output": 3, "entries": 1}
-        )
-        self.assertEqual(
-            totals["total"], {"input": 23, "output": 7, "entries": 2}
-        )
+        self.assertEqual(totals["challenger"], _figures(11, 3, 2))
+        self.assertEqual(totals["defender"], _figures(5, 1, 1))
+        self.assertEqual(totals["oracle"], _figures(7, 3, 1))
+        self.assertEqual(totals["total"], _figures(23, 7, 2))
 
     def test_non_numeric_figures_are_ignored(self) -> None:
         entries: list[dict] = [
@@ -448,12 +461,82 @@ class TokensByStageTests(unittest.TestCase):
             {"oracle": {"_tokens": "n/a"}},
         ]
         totals: dict = tokens_by_stage(entries)
+        self.assertEqual(totals["oracle"], _figures(0, 0, 0))
+        self.assertEqual(totals["total"], _figures(0, 0, 0))
+
+    def test_cache_fields_are_summed_and_priced(self) -> None:
+        """Cache reads and writes are kept apart from input and priced.
+
+        input 1000 of which 800 read from cache and 100 written to it:
+        100 uncached + 100 * 1.25 + 800 * 0.1 = 305 billed-equivalent.
+        """
+        entries: list[dict] = [
+            {
+                "oracle": {
+                    "_tokens": {
+                        "input": 1000,
+                        "output": 50,
+                        "cache_read": 800,
+                        "cache_creation": 100,
+                    }
+                }
+            },
+            {"oracle": {"_tokens": {"input": 10, "output": 1}}},
+        ]
+        totals: dict = tokens_by_stage(entries)
         self.assertEqual(
-            totals["oracle"], {"input": 0, "output": 0, "entries": 0}
+            totals["oracle"],
+            {
+                "input": 1010,
+                "output": 51,
+                "cache_read": 800,
+                "cache_creation": 100,
+                "entries": 2,
+                "billed_input": 315,
+            },
         )
-        self.assertEqual(
-            totals["total"], {"input": 0, "output": 0, "entries": 0}
-        )
+        self.assertEqual(totals["total"]["billed_input"], 315)
+
+    def test_malformed_cache_field_does_not_zero_its_siblings(self) -> None:
+        entries: list[dict] = [
+            {"oracle": {"_tokens": {"input": 10, "output": 1, "cache_read": "lots"}}}
+        ]
+        self.assertEqual(tokens_by_stage(entries)["oracle"], _figures(10, 1, 1))
+
+
+class BilledInputTests(unittest.TestCase):
+    def test_legacy_record_prices_as_fully_uncached(self) -> None:
+        self.assertEqual(billed_input({"input": 500, "output": 9}), 500)
+
+    def test_rates_apply_to_the_cached_parts_only(self) -> None:
+        figures: dict = {"input": 1000, "cache_read": 800, "cache_creation": 100}
+        self.assertEqual(billed_input(figures), 305)
+        self.assertEqual(CACHE_READ_RATE, 0.1)
+        self.assertEqual(CACHE_WRITE_RATE, 1.25)
+
+    def test_cache_counts_exceeding_input_clamp_uncached_at_zero(self) -> None:
+        self.assertEqual(billed_input({"input": 100, "cache_read": 200}), 20)
+
+
+class BilledTokensPerEntryTests(unittest.TestCase):
+    def test_equals_tokens_per_entry_without_cache_fields(self) -> None:
+        entries: list[dict] = [
+            {"oracle": {"_tokens": {"input": 400, "output": 20}}},
+            {"challenger": {"_tokens": {"input": 60, "output": 4}}},
+        ]
+        self.assertEqual(billed_tokens_per_entry(entries), tokens_per_entry(entries))
+
+    def test_counts_cache_reads_at_the_cached_rate(self) -> None:
+        entries: list[dict] = [
+            {
+                "oracle": {
+                    "_tokens": {"input": 1000, "output": 50, "cache_read": 900}
+                }
+            }
+        ]
+        # 100 uncached + 900 * 0.1 + 50 output = 240; raw is 1,050.
+        self.assertEqual(billed_tokens_per_entry(entries)["median"], 240.0)
+        self.assertEqual(tokens_per_entry(entries)["median"], 1050.0)
 
 
 class TokensPerEntryTests(unittest.TestCase):

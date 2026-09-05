@@ -17,7 +17,7 @@ import json
 import sys
 from typing import Any
 
-from pipeline.constitution import prompt_view
+from pipeline.constitution import build_cached_prefix, build_context_section
 from utils.api import DEFENDER_MODEL, call_model
 
 
@@ -120,12 +120,21 @@ def run_defender(
             "_tokens": {"input": 0, "output": 0},
         }
 
-    user_content: str = _build_user_content(
-        diff_info, constitution, challenger_result, file_context
-    )
+    # The prompt is the constitution (cached prefix), the repository context
+    # (cached where a provider can do so at user priority), then this
+    # edit's content. All built fresh from this run's snapshot; the cache
+    # holds bytes, not a stale snapshot, and a changed constitution renders
+    # different bytes and misses it.
+    cached_prefix: str = build_cached_prefix(constitution)
+    cached_context: str = build_context_section(file_context)
+    user_content: str = _build_user_content(diff_info, challenger_result)
 
     response: dict[str, Any] = call_model(
-        DEFENDER_MODEL, _SYSTEM_PROMPT, user_content
+        DEFENDER_MODEL,
+        _SYSTEM_PROMPT,
+        user_content,
+        cached_prefix=cached_prefix,
+        cached_context=cached_context,
     )
 
     tokens: Any = response.get("_tokens", {"input": 0, "output": 0})
@@ -148,32 +157,24 @@ def run_defender(
     return response
 
 
-def _build_user_content(
-    diff_info: dict,
-    constitution: dict,
-    challenger_result: dict,
-    file_context: str,
-) -> str:
-    """Assemble the labeled user-content payload sent to the Defender.
+def _build_user_content(diff_info: dict, challenger_result: dict) -> str:
+    """Assemble the per-edit part of the Defender's prompt.
 
-    The constitution goes in as its prompt view, the same rendering the
-    Challenger and Oracle receive: every constraint's id, name, scope, rule,
-    and severity, without the rationale and commentary written for a human
-    reader. All three stages argue from identical constitutional text.
+    The change and the Challenger's findings. The constitution and the
+    repository context come first as the cached prefix
+    (pipeline.constitution.build_cached_prefix), the same rendering the
+    Challenger and Oracle receive, so all three stages argue from identical
+    constitutional text.
     """
-    sections: list[str] = [
-        "PROPOSED CHANGE:",
-        json.dumps(diff_info, indent=2),
-        "",
-        "CONSTITUTION:",
-        json.dumps(prompt_view(constitution), indent=2),
-        "",
-        "CHALLENGER FINDINGS:",
-        json.dumps(challenger_result, indent=2),
-    ]
-    if file_context:
-        sections.extend(["", "FILE CONTEXT:", file_context])
-    return "\n".join(sections)
+    return "\n".join(
+        [
+            "PROPOSED CHANGE:",
+            json.dumps(diff_info, indent=2),
+            "",
+            "CHALLENGER FINDINGS:",
+            json.dumps(challenger_result, indent=2),
+        ]
+    )
 
 
 def _validate_defender_response(response: dict[str, Any]) -> bool:

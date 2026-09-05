@@ -126,7 +126,15 @@ def run_governance_pipeline(
     """
     del tool_input  # accepted for signature uniformity; not recorded
 
-    accumulated: dict[str, int] = {"input": 0, "output": 0}
+    # Entry-level usage. "input" is the whole prompt across stages; the two
+    # cache fields break out the part served from or written to the prompt
+    # cache so the ledger can price it (see utils.stats.billed_input).
+    accumulated: dict[str, int] = {
+        "input": 0,
+        "output": 0,
+        "cache_read": 0,
+        "cache_creation": 0,
+    }
 
     try:
         # Single snapshot per run (Rule 4): loaded once here before any stage
@@ -381,16 +389,15 @@ def _accumulate_tokens(
     accumulated: dict[str, int],
     stage_tokens: Any,
 ) -> None:
-    """Fold a stage's {input, output} token counts into the accumulator.
+    """Fold a stage's token counts into the accumulator, field by field.
 
-    A malformed or missing _tokens field is treated as zero rather than
-    raising: token accounting is observational, never a reason to block
-    the verdict path."""
+    Sums input, output, cache_read, and cache_creation. A malformed or
+    missing _tokens field, or a malformed value in it, is treated as zero
+    rather than raising: token accounting is observational, never a reason
+    to block the verdict path."""
     if not isinstance(stage_tokens, dict):
         return
-    inp: Any = stage_tokens.get("input", 0)
-    out: Any = stage_tokens.get("output", 0)
-    if isinstance(inp, int) and not isinstance(inp, bool):
-        accumulated["input"] += inp
-    if isinstance(out, int) and not isinstance(out, bool):
-        accumulated["output"] += out
+    for field in ("input", "output", "cache_read", "cache_creation"):
+        value: Any = stage_tokens.get(field, 0)
+        if isinstance(value, int) and not isinstance(value, bool):
+            accumulated[field] = accumulated.get(field, 0) + value

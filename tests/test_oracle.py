@@ -17,6 +17,10 @@ _REPO_ROOT: Path = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from pipeline.constitution import (  # noqa: E402
+    build_cached_prefix,
+    build_context_section,
+)
 from pipeline.oracle import (  # noqa: E402
     _build_user_content,
     _validate_oracle_response,
@@ -157,38 +161,30 @@ class ValidateOracleResponseTests(unittest.TestCase):
 
 
 class BuildUserContentTests(unittest.TestCase):
-    def test_contains_all_sections(self) -> None:
+    """The per-edit body carries the change and both arguments; the prefix the rest."""
+
+    def test_body_contains_change_findings_rebuttals_and_nothing_cached(
+        self,
+    ) -> None:
         content: str = _build_user_content(
-            _valid_diff(),
-            _valid_constitution(),
-            _valid_challenger(),
-            _valid_defender(),
-            "",
+            _valid_diff(), _valid_challenger(), _valid_defender()
         )
         self.assertIn("PROPOSED CHANGE:", content)
-        self.assertIn("CONSTITUTION:", content)
         self.assertIn("CHALLENGER FINDINGS:", content)
         self.assertIn("DEFENDER REBUTTALS:", content)
-
-    def test_file_context_appended_when_present(self) -> None:
-        content: str = _build_user_content(
-            _valid_diff(),
-            _valid_constitution(),
-            _valid_challenger(),
-            _valid_defender(),
-            "source code here",
-        )
-        self.assertIn("FILE CONTEXT:", content)
-
-    def test_file_context_omitted_when_empty(self) -> None:
-        content: str = _build_user_content(
-            _valid_diff(),
-            _valid_constitution(),
-            _valid_challenger(),
-            _valid_defender(),
-            "",
-        )
+        self.assertNotIn("CONSTITUTION:", content)
         self.assertNotIn("FILE CONTEXT:", content)
+
+    def test_prefix_carries_the_constitution_only(self) -> None:
+        prefix: str = build_cached_prefix(_valid_constitution())
+        self.assertIn("CONSTITUTION:", prefix)
+        self.assertNotIn("FILE CONTEXT:", prefix)
+
+    def test_context_section_carries_file_context(self) -> None:
+        section: str = build_context_section("source code here")
+        self.assertIn("FILE CONTEXT:", section)
+        self.assertIn("source code here", section)
+        self.assertEqual(build_context_section(""), "")
 
 
 class RunOracleTests(unittest.TestCase):

@@ -17,6 +17,10 @@ _REPO_ROOT: Path = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from pipeline.constitution import (  # noqa: E402
+    build_cached_prefix,
+    build_context_section,
+)
 from pipeline.challenger import (  # noqa: E402
     _build_user_content,
     _validate_challenger_response,
@@ -102,21 +106,26 @@ class ValidateChallengerResponseTests(unittest.TestCase):
 
 
 class BuildUserContentTests(unittest.TestCase):
-    def test_contains_diff_and_constitution_sections(self) -> None:
-        content: str = _build_user_content(_valid_diff(), _valid_constitution(), "")
+    """The per-edit body carries the change; the prefix carries the rest."""
+
+    def test_body_contains_the_change_and_nothing_cached(self) -> None:
+        content: str = _build_user_content(_valid_diff())
         self.assertIn("PROPOSED CHANGE:", content)
-        self.assertIn("CONSTITUTION:", content)
-
-    def test_file_context_appended_when_present(self) -> None:
-        content: str = _build_user_content(
-            _valid_diff(), _valid_constitution(), "def foo(): pass"
-        )
-        self.assertIn("FILE CONTEXT:", content)
-        self.assertIn("def foo(): pass", content)
-
-    def test_file_context_omitted_when_empty(self) -> None:
-        content: str = _build_user_content(_valid_diff(), _valid_constitution(), "")
+        self.assertNotIn("CONSTITUTION:", content)
         self.assertNotIn("FILE CONTEXT:", content)
+
+    def test_prefix_carries_the_constitution_only(self) -> None:
+        prefix: str = build_cached_prefix(_valid_constitution())
+        self.assertIn("CONSTITUTION:", prefix)
+        self.assertNotIn("FILE CONTEXT:", prefix)
+
+    def test_context_section_carries_file_context(self) -> None:
+        section: str = build_context_section("def foo(): pass")
+        self.assertIn("FILE CONTEXT:", section)
+        self.assertIn("def foo(): pass", section)
+
+    def test_context_section_empty_when_no_file_context(self) -> None:
+        self.assertEqual(build_context_section(""), "")
 
 
 class RunChallengerTests(unittest.TestCase):

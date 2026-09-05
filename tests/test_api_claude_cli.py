@@ -16,6 +16,8 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from utils.api import (  # noqa: E402
+    _first_user_turn,
+    _lift_cached_prefix,
     _ProviderError,
     _claude_cli_call,
     call_model,
@@ -50,12 +52,14 @@ class ClaudeCliCallTests(unittest.TestCase):
     @mock.patch("utils.api.shutil.which", return_value="/usr/bin/claude")
     def test_success_returns_text_and_tokens(self, _which, run) -> None:
         run.return_value = _completed(stdout=_OK_ENVELOPE)
-        text, in_tok, out_tok = _claude_cli_call(
+        text, usage = _claude_cli_call(
             "claude-sonnet-4-6", "sys", _msgs(), 4096
         )
         self.assertEqual(text, '{"verdict": "PASS"}')
-        self.assertEqual(in_tok, 12)
-        self.assertEqual(out_tok, 5)
+        self.assertEqual(
+            usage,
+            {"input": 12, "output": 5, "cache_read": 0, "cache_creation": 0},
+        )
 
     @mock.patch("utils.api.shutil.which", return_value=None)
     def test_binary_missing_raises(self, _which) -> None:
@@ -284,11 +288,14 @@ class ClaudeCliCallTests(unittest.TestCase):
                 }
             )
         )
-        _text, in_tok, out_tok = _claude_cli_call(
+        _text, usage = _claude_cli_call(
             "claude-sonnet-4-6", "sys", _msgs(), 4096
         )
-        self.assertEqual(in_tok, 152)
-        self.assertEqual(out_tok, 7)
+        # "input" is the whole prompt; the cache fields keep the split.
+        self.assertEqual(
+            usage,
+            {"input": 152, "output": 7, "cache_read": 50, "cache_creation": 100},
+        )
 
     @mock.patch("utils.api.subprocess.run")
     @mock.patch("utils.api.shutil.which", return_value="/usr/bin/claude")
@@ -303,11 +310,59 @@ class ClaudeCliCallTests(unittest.TestCase):
                 }
             )
         )
-        text, in_tok, out_tok = _claude_cli_call(
+        text, usage = _claude_cli_call(
             "claude-sonnet-4-6", "sys", _msgs(), 4096
         )
-        self.assertEqual((in_tok, out_tok), (0, 0))
+        self.assertEqual(
+            usage, {"input": 0, "output": 0, "cache_read": 0, "cache_creation": 0}
+        )
         self.assertEqual(text, "{}")
+
+
+class LiftCachedPrefixTests(unittest.TestCase):
+    """The cached prefix rides in the system prompt file on the CLI path."""
+
+    def test_string_content_passes_through_unchanged(self) -> None:
+        msgs: list[dict] = _msgs()
+        system, out = _lift_cached_prefix("SYS", msgs)
+        self.assertEqual(system, "SYS")
+        self.assertEqual(out, msgs)
+
+    def test_prefix_block_moves_into_the_system_prompt(self) -> None:
+        turn: dict = _first_user_turn("claude_code", "PREFIX", "BODY")
+        system, out = _lift_cached_prefix("SYS", [turn])
+        self.assertEqual(system, "SYS\n\nPREFIX")
+        self.assertEqual(out, [{"role": "user", "content": "BODY"}])
+
+    def test_later_turns_are_kept_in_order(self) -> None:
+        turn: dict = _first_user_turn("claude_code", "PREFIX", "BODY")
+        retry: list[dict] = [
+            turn,
+            {"role": "assistant", "content": "not json"},
+            {"role": "user", "content": "JSON only"},
+        ]
+        _system, out = _lift_cached_prefix("SYS", retry)
+        self.assertEqual([m["content"] for m in out], ["BODY", "not json", "JSON only"])
+
+    @mock.patch("utils.api.subprocess.run")
+    @mock.patch("utils.api.shutil.which", return_value="/usr/bin/claude")
+    def test_cli_receives_prefix_in_system_file_and_body_on_stdin(
+        self, _which, run
+    ) -> None:
+        captured: dict = {}
+
+        def fake_run(cmd, **kwargs):  # type: ignore[no-untyped-def]
+            path: str = cmd[cmd.index("--system-prompt-file") + 1]
+            with open(path, encoding="utf-8") as handle:
+                captured["system"] = handle.read()
+            captured["stdin"] = kwargs["input"]
+            return _completed(stdout=_OK_ENVELOPE)
+
+        run.side_effect = fake_run
+        turn: dict = _first_user_turn("claude_code", "PREFIX", "BODY")
+        _claude_cli_call("claude-sonnet-5", "SYS", [turn], 4096)
+        self.assertEqual(captured["system"], "SYS\n\nPREFIX")
+        self.assertEqual(captured["stdin"], "BODY")
 
 
 class CallModelClaudeCliIntegrationTests(unittest.TestCase):
@@ -320,7 +375,10 @@ class CallModelClaudeCliIntegrationTests(unittest.TestCase):
         with mock.patch.dict("os.environ", {"BENCH_PROVIDER": "claude_code"}):
             result = call_model("claude-sonnet-4-6", "sys", "content")
         self.assertEqual(result.get("verdict"), "PASS")
-        self.assertEqual(result["_tokens"], {"input": 12, "output": 5})
+        self.assertEqual(
+            result["_tokens"],
+            {"input": 12, "output": 5, "cache_read": 0, "cache_creation": 0},
+        )
 
 
 if __name__ == "__main__":

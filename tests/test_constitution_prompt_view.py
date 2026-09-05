@@ -15,6 +15,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 _REPO_ROOT: Path = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
@@ -23,6 +24,8 @@ if str(_REPO_ROOT) not in sys.path:
 from pipeline import challenger, defender, oracle  # noqa: E402
 from pipeline.constitution import (  # noqa: E402
     ConstitutionSchemaError,
+    build_cached_prefix,
+    build_context_section,
     load_constitution_snapshot,
     prompt_view,
 )
@@ -155,7 +158,12 @@ class CommentarySchemaTests(unittest.TestCase):
 
 
 class StagePromptTests(unittest.TestCase):
-    """Each stage sends the view, not the file, and the rule survives whole."""
+    """Each stage sends the view, not the file, and the rule survives whole.
+
+    Since prompt caching, the constitution travels in the cached prefix
+    every stage hands to call_model, so the assertions run against what
+    each stage actually passes as ``cached_prefix``.
+    """
 
     def _diff(self) -> dict:
         return {"file_path": "x.py", "diff": "+pass", "tool_name": "Edit"}
@@ -168,38 +176,58 @@ class StagePromptTests(unittest.TestCase):
         self.assertNotIn(_COMMENTARY, content)
         self.assertNotIn("not for the models", content)
 
-    def test_challenger_sends_prompt_view(self) -> None:
-        self._assert_view_sent(
-            challenger._build_user_content(self._diff(), _constitution(), "")
-        )
+    def test_cached_prefix_is_the_prompt_view(self) -> None:
+        self._assert_view_sent(build_cached_prefix(_constitution()))
 
-    def test_defender_sends_prompt_view(self) -> None:
-        self._assert_view_sent(
-            defender._build_user_content(
-                self._diff(), _constitution(), {"status": "CLEAR"}, ""
-            )
-        )
-
-    def test_oracle_sends_prompt_view(self) -> None:
-        self._assert_view_sent(
-            oracle._build_user_content(
-                self._diff(),
-                _constitution(),
-                {"status": "CLEAR"},
-                {"status": "SKIPPED"},
-                "",
-            )
-        )
-
-    def test_all_three_stages_see_identical_constitution_text(self) -> None:
+    def test_prefix_is_the_constitution_and_context_is_separate(self) -> None:
         source: dict = _constitution()
         rendered: str = json.dumps(prompt_view(source), indent=2)
-        for content in (
-            challenger._build_user_content(self._diff(), source, ""),
-            defender._build_user_content(self._diff(), source, {}, ""),
-            oracle._build_user_content(self._diff(), source, {}, {}, ""),
-        ):
-            self.assertIn(rendered, content)
+        prefix: str = build_cached_prefix(source)
+        self.assertEqual(prefix, f"CONSTITUTION:\n{rendered}")
+        self.assertEqual(build_context_section("CTX"), "FILE CONTEXT:\nCTX")
+        self.assertEqual(build_context_section(""), "")
+
+    def _stage_prefixes(self) -> list[str]:
+        """The cached_prefix and cached_context each stage passes, joined."""
+        source: dict = _constitution()
+        prefixes: list[str] = []
+
+        def capture(*_args: object, **kwargs: object) -> dict:
+            prefixes.append(
+                f"{kwargs.get('cached_prefix', '')}\n\n"
+                f"{kwargs.get('cached_context', '')}"
+            )
+            return {"error": "API_ERROR", "detail": "captured", "_tokens": {}}
+
+        with patch("pipeline.challenger.call_model", side_effect=capture):
+            challenger.run_challenger(self._diff(), source, "h", "CTX")
+        with patch("pipeline.defender.call_model", side_effect=capture):
+            defender.run_defender(
+                self._diff(), source, "h", {"status": "FINDINGS", "findings": []}, "CTX"
+            )
+        with patch("pipeline.oracle.call_model", side_effect=capture):
+            oracle.run_oracle(
+                self._diff(),
+                source,
+                "h",
+                {"status": "FINDINGS", "findings": []},
+                {"status": "REBUTTAL", "rebuttals": []},
+                "CTX",
+            )
+        return prefixes
+
+    def test_all_three_stages_pass_the_same_cached_prefix(self) -> None:
+        prefixes: list[str] = self._stage_prefixes()
+        self.assertEqual(len(prefixes), 3)
+        self.assertEqual(len(set(prefixes)), 1)
+        self._assert_view_sent(prefixes[0])
+        self.assertIn("FILE CONTEXT:\nCTX", prefixes[0])
+
+    def test_changed_constitution_changes_the_prefix_bytes(self) -> None:
+        source: dict = _constitution()
+        before: str = build_cached_prefix(source)
+        source["constraints"][0]["rule"] += " Also log the traceback."
+        self.assertNotEqual(build_cached_prefix(source), before)
 
 
 class BenchConstitutionBudgetTests(unittest.TestCase):

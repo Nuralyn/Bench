@@ -40,6 +40,9 @@ from utils.stats import (
     stats_by_week,
     tokens_by_stage,
     tokens_per_entry,
+    billed_tokens_per_entry,
+    CACHE_READ_RATE,
+    CACHE_WRITE_RATE,
 )
 
 _HASH_SHORT_LEN: int = 12
@@ -396,21 +399,29 @@ _VERDICT_HEADERS: list[str] = [
 ]
 
 
-def _token_distribution_line(summary: dict[str, float | int]) -> str:
-    """One sentence stating the per-entry token median and p90.
+def _token_distribution_line(
+    summary: dict[str, float | int], billed: dict[str, float | int]
+) -> str:
+    """Two sentences: the per-entry token median and p90, raw and priced.
 
-    This is the figure the README quotes as the cost of a governed edit,
-    so it must be readable off the page, not only derivable from the
-    per-stage totals above it.
+    The raw figure is the one the README quotes as the cost of a governed
+    edit, so it must be readable off the page, not only derivable from the
+    per-stage totals above it. The priced figure counts cache reads and
+    writes at the cached rates (utils.stats.billed_tokens_per_entry), which
+    is what a cached edit actually costs.
     """
     count: int = int(summary.get("entries", 0))
     if not count:
         return '<p class="fine">No entry carries token usage yet.</p>'
     median: int = int(summary.get("median", 0))
     p90: int = int(summary.get("p90", 0))
+    billed_median: int = int(billed.get("median", 0))
+    billed_p90: int = int(billed.get("p90", 0))
     return (
         f'<p class="fine">Per entry: median {median:,}, p90 {p90:,} tokens '
-        f"over {count:,} entries with usage.</p>"
+        f"over {count:,} entries with usage. At cached rates (reads "
+        f"{CACHE_READ_RATE:g}x, writes {CACHE_WRITE_RATE:g}x): median "
+        f"{billed_median:,}, p90 {billed_p90:,}.</p>"
     )
 
 
@@ -430,6 +441,7 @@ def _build_dashboard(entries: list[dict], project_root: str) -> str:
     seconds: dict[str, dict[str, float | int]] = seconds_by_stage(entries)
     latency_weeks: list[dict] = latency_by_week(entries)
     per_entry: dict[str, float | int] = tokens_per_entry(entries)
+    billed_per_entry: dict[str, float | int] = billed_tokens_per_entry(entries)
 
     def _latency_cells(row: dict) -> list[str]:
         count: int = int(row.get("entries", 0))
@@ -468,14 +480,17 @@ def _build_dashboard(entries: list[dict], project_root: str) -> str:
         figures: dict[str, int] = tokens.get(stage, {})
         count: int = int(figures.get("entries", 0))
         inp: int = int(figures.get("input", 0))
+        cached: int = int(figures.get("cache_read", 0))
+        billed: int = int(figures.get("billed_input", inp))
         out: int = int(figures.get("output", 0))
         token_rows.append([
             stage,
             f"{count:,}",
             f"{inp:,}",
+            f"{cached:,}",
             f"{out:,}",
             f"{inp // count:,}" if count else "n/a",
-            f"{out // count:,}" if count else "n/a",
+            f"{billed // count:,}" if count else "n/a",
         ])
 
     governance_paths: str = ", ".join(
@@ -518,11 +533,19 @@ def _build_dashboard(entries: list[dict], project_root: str) -> str:
         '<div class="card" id="dash-tokens">\n'
         "  <h2>Tokens by stage</h2>\n  "
         + _table(
-            ["Stage", "Entries", "Input", "Output", "Input / entry", "Output / entry"],
+            [
+                "Stage",
+                "Entries",
+                "Input",
+                "of which cached",
+                "Output",
+                "Input / entry",
+                "Billed input / entry",
+            ],
             token_rows, "No token figures recorded.",
         )
         + "\n  "
-        + _token_distribution_line(per_entry)
+        + _token_distribution_line(per_entry, billed_per_entry)
         + "\n</div>\n"
         '<div class="card" id="dash-latency">\n'
         "  <h2>Seconds by stage</h2>\n  "
