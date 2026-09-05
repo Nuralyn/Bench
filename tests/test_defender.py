@@ -319,9 +319,11 @@ class NormalizeDefenderResponseTests(unittest.TestCase):
         self.assertNotIn("_normalized", raw)
 
     @patch("pipeline.defender.call_model")
-    def test_response_nested_too_deep_fails_closed_without_raising(
+    def test_deeply_nested_unknown_field_is_tolerated(
         self, mock_call: MagicMock
     ) -> None:
+        # The validator ignores unknown fields, so a valid response with one
+        # nested far beyond what a deep copy could walk must still pass.
         nested: dict = {}
         for _ in range(5000):
             nested = {"n": nested}
@@ -334,9 +336,8 @@ class NormalizeDefenderResponseTests(unittest.TestCase):
         result: dict = run_defender(
             _valid_diff(), _valid_constitution(), "hash", _valid_challenger()
         )
-        self.assertEqual(result["status"], "PIPELINE_ERROR")
-        self.assertEqual(result["error"], "INVALID_DEFENDER_RESPONSE")
-        self.assertIsInstance(result["raw_response"], str)
+        self.assertEqual(result["status"], "CONCEDE_ALL")
+        self.assertIs(result["extra"], nested)
 
     @patch("pipeline.defender.call_model")
     def test_model_authored_normalized_key_does_not_survive(
