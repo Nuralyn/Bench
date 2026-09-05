@@ -149,6 +149,16 @@ class NormalizeChallengerResponseTests(unittest.TestCase):
         self.assertEqual(_normalize_challenger_response(resp), [])
         self.assertEqual(resp["findings"][0], _valid_finding())
 
+    def test_stray_findings_on_a_clear_response_are_not_a_repair(self) -> None:
+        # The validator accepts CLEAR on its status alone and never reads
+        # the list, so rewriting it would only inflate the repair count.
+        finding: dict = _valid_finding()
+        finding["severity"] = "WARNING"
+        resp: dict = {"status": "CLEAR", "findings": [finding]}
+        self.assertEqual(_normalize_challenger_response(resp), [])
+        self.assertEqual(resp["findings"][0]["severity"], "WARNING")
+        self.assertTrue(_validate_challenger_response(resp))
+
     def test_unknown_severity_still_fails_closed(self) -> None:
         finding: dict = _valid_finding()
         finding["severity"] = "CRITICAL"

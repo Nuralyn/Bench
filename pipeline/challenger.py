@@ -215,6 +215,10 @@ def _normalize_challenger_response(response: dict[str, Any]) -> list[str]:
     end through run_challenger.
     """
     notes: list[str] = []
+    # Only a FINDINGS response has its findings validated; a stray list on
+    # a CLEAR response is ignored downstream and is not counted as a repair.
+    if response.get("status") != "FINDINGS":
+        return notes
     findings: Any = response.get("findings")
     if not isinstance(findings, list):
         return notes

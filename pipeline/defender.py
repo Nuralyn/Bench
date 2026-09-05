@@ -237,6 +237,11 @@ def _normalize_defender_response(response: dict[str, Any]) -> list[str]:
     through run_defender.
     """
     notes: list[str] = []
+    # Only a REBUTTAL response has its rebuttals validated; a stray list on
+    # CONCEDE_ALL or CONFIRM_CLEAR is ignored downstream and is not counted
+    # as a repair.
+    if response.get("status") != "REBUTTAL":
+        return notes
     rebuttals: Any = response.get("rebuttals")
     if not isinstance(rebuttals, list):
         return notes

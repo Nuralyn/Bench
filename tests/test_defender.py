@@ -179,6 +179,21 @@ class NormalizeDefenderResponseTests(unittest.TestCase):
         self.assertEqual(_normalize_defender_response(resp), [])
         self.assertEqual(resp["rebuttals"][0], _valid_rebuttal())
 
+    def test_stray_rebuttals_on_a_non_rebuttal_status_are_not_a_repair(
+        self,
+    ) -> None:
+        # The validator reads rebuttals only on REBUTTAL; a stray list on
+        # CONCEDE_ALL or CONFIRM_CLEAR is ignored, so rewriting it would
+        # only inflate the repair count.
+        for status in ("CONCEDE_ALL", "CONFIRM_CLEAR"):
+            rebuttal: dict = _valid_rebuttal()
+            rebuttal["finding_index"] = "0"
+            rebuttal["position"] = "CONFIRM"
+            resp: dict = {"status": status, "summary": "Sound.", "rebuttals": [rebuttal]}
+            self.assertEqual(_normalize_defender_response(resp), [], status)
+            self.assertEqual(resp["rebuttals"][0]["position"], "CONFIRM", status)
+            self.assertTrue(_validate_defender_response(resp), status)
+
     def test_unknown_position_still_fails_closed(self) -> None:
         # Only plain agreement words are aliased. A position that could mean
         # disagreement is not guessed at, and that includes CONFIRM_CLEAR:
