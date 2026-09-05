@@ -248,6 +248,23 @@ class NormalizeDefenderResponseTests(unittest.TestCase):
         self.assertNotIn("_normalized", result)
 
     @patch("pipeline.defender.call_model")
+    def test_model_authored_normalized_key_does_not_survive(
+        self, mock_call: MagicMock
+    ) -> None:
+        mock_call.return_value = {
+            "status": "REBUTTAL",
+            "summary": "Sound.",
+            "rebuttals": [_valid_rebuttal()],
+            "_normalized": ["fake"],
+            "_tokens": {"input": 10, "output": 20},
+        }
+        result: dict = run_defender(
+            _valid_diff(), _valid_constitution(), "hash", _valid_challenger()
+        )
+        self.assertEqual(result["status"], "REBUTTAL")
+        self.assertNotIn("_normalized", result)
+
+    @patch("pipeline.defender.call_model")
     def test_run_defender_still_fails_closed_on_unknown_position(
         self, mock_call: MagicMock
     ) -> None:

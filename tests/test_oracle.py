@@ -301,6 +301,21 @@ class NormalizeOracleResponseTests(unittest.TestCase):
         self.assertNotIn("_normalized", result)
 
     @patch("pipeline.oracle.call_model")
+    def test_model_authored_normalized_key_does_not_survive(
+        self, mock_call: MagicMock
+    ) -> None:
+        resp: dict = _valid_pass()
+        resp["_normalized"] = ["fake"]
+        resp["_tokens"] = {"input": 10, "output": 20}
+        mock_call.return_value = resp
+        result: dict = run_oracle(
+            _valid_diff(), _valid_constitution(), "hash",
+            _valid_challenger(), _valid_defender(),
+        )
+        self.assertEqual(result["verdict"], "PASS")
+        self.assertNotIn("_normalized", result)
+
+    @patch("pipeline.oracle.call_model")
     def test_run_oracle_still_fails_closed_on_unknown_verdict(
         self, mock_call: MagicMock
     ) -> None:

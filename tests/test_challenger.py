@@ -203,6 +203,22 @@ class NormalizeChallengerResponseTests(unittest.TestCase):
         self.assertNotIn("_normalized", result)
 
     @patch("pipeline.challenger.call_model")
+    def test_model_authored_normalized_key_does_not_survive(
+        self, mock_call: MagicMock
+    ) -> None:
+        # The key is reserved for the stage's own record; a model cannot
+        # inflate the repair count by writing it.
+        mock_call.return_value = {
+            "status": "FINDINGS",
+            "findings": [_valid_finding()],
+            "_normalized": ["fake"],
+            "_tokens": {"input": 10, "output": 20},
+        }
+        result: dict = run_challenger(_valid_diff(), _valid_constitution(), "hash")
+        self.assertEqual(result["status"], "FINDINGS")
+        self.assertNotIn("_normalized", result)
+
+    @patch("pipeline.challenger.call_model")
     def test_run_challenger_still_fails_closed_on_unknown_severity(
         self, mock_call: MagicMock
     ) -> None:

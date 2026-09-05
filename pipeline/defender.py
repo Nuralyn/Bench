@@ -152,6 +152,10 @@ def run_defender(
     # finding_index becomes the integer, and a position that is an alias of
     # CONCEDE (CONFIRM, CONFIRM_CLEAR, AGREE) becomes CONCEDE. Every other
     # position, index, or missing field still fails closed in the validator.
+    # "_normalized" is reserved for this stage's own record. The validator
+    # tolerates unknown keys, so a model-authored one is dropped first;
+    # otherwise it would reach the ledger and count as a repair.
+    response.pop("_normalized", None)
     notes: list[str] = _normalize_defender_response(response)
     if notes:
         response["_normalized"] = notes

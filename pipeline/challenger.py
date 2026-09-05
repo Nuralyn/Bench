@@ -152,6 +152,10 @@ def run_challenger(
     # (below) maps a finding severity of "WARNING" to "CONCERN" and nothing
     # else, so every response that fails on substance still fails closed
     # in the validator.
+    # "_normalized" is reserved for this stage's own record. The validator
+    # tolerates unknown keys, so a model-authored one is dropped first;
+    # otherwise it would reach the ledger and count as a repair.
+    response.pop("_normalized", None)
     notes: list[str] = _normalize_challenger_response(response)
     if notes:
         response["_normalized"] = notes
