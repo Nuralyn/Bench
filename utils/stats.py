@@ -258,43 +258,97 @@ def citations_by_constraint(entries: list[dict]) -> list[dict]:
     ]
 
 
+# Prompt-cache pricing on the Anthropic API relative to the base input rate: a
+# cache read bills at a tenth, a cache write (5-minute TTL) at 1.25x. A stage's
+# usage record carries both counts; billed_input turns them into the number
+# of uncached input tokens they cost the same as, so a cached edit and an
+# uncached one are compared on price rather than on raw prompt size.
+CACHE_READ_RATE: float = 0.1
+CACHE_WRITE_RATE: float = 1.25
+
+# Fields of a stage's usage record. "input" is the whole prompt, cache reads
+# and writes included; the two cache fields break that out. Older entries
+# carry only the first two.
+_TOKEN_FIELDS: tuple[str, ...] = ("input", "output", "cache_read", "cache_creation")
+
+
+def _usable_usage(tokens: Any) -> dict[str, int] | None:
+    """The integer fields of a stage's usage record, or None if unusable.
+
+    A record counts when it carries an integer "input" or "output"; bools,
+    floats, strings, and None are ignored field by field, so a malformed
+    value never inflates a total and never zeroes a good one beside it.
+    """
+    if not isinstance(tokens, dict):
+        return None
+    usable: dict[str, int] = {}
+    for field in _TOKEN_FIELDS:
+        value: Any = tokens.get(field)
+        if isinstance(value, int) and not isinstance(value, bool):
+            usable[field] = value
+    if "input" not in usable and "output" not in usable:
+        return None
+    return usable
+
+
+def _stage_usage(entry: dict) -> dict[str, dict[str, int]]:
+    """Usable usage records for each stage of an entry, keyed by stage."""
+    found: dict[str, dict[str, int]] = {}
+    for stage in _STAGES:
+        result: Any = entry.get(stage)
+        if not isinstance(result, dict):
+            continue
+        usage: dict[str, int] | None = _usable_usage(
+            result.get("_tokens", result.get("tokens_used"))
+        )
+        if usage is not None:
+            found[stage] = usage
+    return found
+
+
+def billed_input(figures: dict[str, int]) -> int:
+    """Input tokens priced at cached rates, as an uncached-token equivalent.
+
+    The uncached part costs 1 each, a cache write CACHE_WRITE_RATE, a cache
+    read CACHE_READ_RATE. An older record with no cache fields prices as
+    fully uncached, which is what it was.
+    """
+    total: int = int(figures.get("input", 0))
+    read: int = int(figures.get("cache_read", 0))
+    written: int = int(figures.get("cache_creation", 0))
+    uncached: int = max(total - read - written, 0)
+    return round(uncached + written * CACHE_WRITE_RATE + read * CACHE_READ_RATE)
+
+
 def tokens_by_stage(entries: list[dict]) -> dict[str, dict[str, int]]:
     """Token totals per stage and overall.
 
-    Returns {stage: {"input", "output", "entries"}} for each of _STAGES plus
-    "total". A stage's ``_tokens`` (or the older ``tokens_used``) record is
-    read and only integer fields are counted; "entries" is how many entries
-    recorded a usable figure, so an average is total / entries.
+    Returns {stage: {"input", "output", "cache_read", "cache_creation",
+    "billed_input", "entries"}} for each of _STAGES plus "total". A stage's
+    ``_tokens`` (or the older ``tokens_used``) record is read and only
+    integer fields are counted; "entries" is how many entries recorded a
+    usable figure, so an average is total / entries. "billed_input" is the
+    stage's input priced at cached rates (see billed_input).
     """
     totals: dict[str, dict[str, int]] = {
-        stage: {"input": 0, "output": 0, "entries": 0} for stage in _STAGES
+        stage: {field: 0 for field in _TOKEN_FIELDS} | {"entries": 0}
+        for stage in _STAGES
     }
     entries_with_tokens: int = 0
     for entry in entries:
-        counted_entry: bool = False
-        for stage in _STAGES:
-            result: Any = entry.get(stage)
-            if not isinstance(result, dict):
-                continue
-            tokens: Any = result.get("_tokens", result.get("tokens_used"))
-            if not isinstance(tokens, dict):
-                continue
-            counted_stage: bool = False
-            for field in ("input", "output"):
-                value: Any = tokens.get(field)
-                if isinstance(value, int) and not isinstance(value, bool):
-                    totals[stage][field] += value
-                    counted_stage = True
-            if counted_stage:
-                totals[stage]["entries"] += 1
-                counted_entry = True
-        if counted_entry:
+        usage_by_stage: dict[str, dict[str, int]] = _stage_usage(entry)
+        for stage, usage in usage_by_stage.items():
+            for field, value in usage.items():
+                totals[stage][field] += value
+            totals[stage]["entries"] += 1
+        if usage_by_stage:
             entries_with_tokens += 1
     totals["total"] = {
-        "input": sum(totals[stage]["input"] for stage in _STAGES),
-        "output": sum(totals[stage]["output"] for stage in _STAGES),
-        "entries": entries_with_tokens,
-    }
+        field: sum(totals[stage][field] for stage in _STAGES)
+        for field in _TOKEN_FIELDS
+    } | {"entries": entries_with_tokens}
+    for figures in totals.values():
+        figures["billed_input"] = billed_input(figures)
     return totals
 
 
@@ -309,22 +363,38 @@ def tokens_per_entry(entries: list[dict]) -> dict[str, float | int]:
     """
     totals: list[float] = []
     for entry in entries:
-        counted: bool = False
-        total: int = 0
-        for stage in _STAGES:
-            result: Any = entry.get(stage)
-            if not isinstance(result, dict):
-                continue
-            tokens: Any = result.get("_tokens", result.get("tokens_used"))
-            if not isinstance(tokens, dict):
-                continue
-            for field in ("input", "output"):
-                value: Any = tokens.get(field)
-                if isinstance(value, int) and not isinstance(value, bool):
-                    total += value
-                    counted = True
-        if counted:
-            totals.append(float(total))
+        usage_by_stage: dict[str, dict[str, int]] = _stage_usage(entry)
+        if usage_by_stage:
+            totals.append(
+                float(
+                    sum(
+                        usage.get("input", 0) + usage.get("output", 0)
+                        for usage in usage_by_stage.values()
+                    )
+                )
+            )
+    return _distribution_summary(totals)
+
+
+def billed_tokens_per_entry(entries: list[dict]) -> dict[str, float | int]:
+    """tokens_per_entry with each stage's input priced at cached rates.
+
+    Same entries, same shape; the only difference is that cache reads and
+    writes count at CACHE_READ_RATE and CACHE_WRITE_RATE instead of 1. On a
+    ledger with no cache fields it equals tokens_per_entry exactly.
+    """
+    totals: list[float] = []
+    for entry in entries:
+        usage_by_stage: dict[str, dict[str, int]] = _stage_usage(entry)
+        if usage_by_stage:
+            totals.append(
+                float(
+                    sum(
+                        billed_input(usage) + usage.get("output", 0)
+                        for usage in usage_by_stage.values()
+                    )
+                )
+            )
     return _distribution_summary(totals)
 
 

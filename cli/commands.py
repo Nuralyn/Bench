@@ -56,6 +56,9 @@ from pipeline.constitution import (
     load_governing_constitution,
 )
 from utils.stats import (
+    CACHE_READ_RATE,
+    CACHE_WRITE_RATE,
+    billed_tokens_per_entry,
     compute_ledger_stats,
     entry_has_pipeline_error,
     entry_verdict,
@@ -912,6 +915,14 @@ def cmd_stats() -> int:
         print(
             f"Tokens per edit        : median {int(usage['median']):,}, "
             f"p90 {int(usage['p90']):,} ({used} with usage)"
+        )
+        # The same entries with cache reads and writes priced at the cached
+        # rates, so a cached edit is compared with an uncached one on cost.
+        billed: dict[str, float | int] = billed_tokens_per_entry(entries)
+        print(
+            f"  at cached rates      : median {int(billed['median']):,}, "
+            f"p90 {int(billed['p90']):,} "
+            f"(reads {CACHE_READ_RATE:g}x, writes {CACHE_WRITE_RATE:g}x)"
         )
     else:
         print("Tokens per edit        : n/a (no entry carries token usage)")

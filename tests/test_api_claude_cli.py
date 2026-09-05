@@ -50,12 +50,14 @@ class ClaudeCliCallTests(unittest.TestCase):
     @mock.patch("utils.api.shutil.which", return_value="/usr/bin/claude")
     def test_success_returns_text_and_tokens(self, _which, run) -> None:
         run.return_value = _completed(stdout=_OK_ENVELOPE)
-        text, in_tok, out_tok = _claude_cli_call(
+        text, usage = _claude_cli_call(
             "claude-sonnet-4-6", "sys", _msgs(), 4096
         )
         self.assertEqual(text, '{"verdict": "PASS"}')
-        self.assertEqual(in_tok, 12)
-        self.assertEqual(out_tok, 5)
+        self.assertEqual(
+            usage,
+            {"input": 12, "output": 5, "cache_read": 0, "cache_creation": 0},
+        )
 
     @mock.patch("utils.api.shutil.which", return_value=None)
     def test_binary_missing_raises(self, _which) -> None:
@@ -284,11 +286,14 @@ class ClaudeCliCallTests(unittest.TestCase):
                 }
             )
         )
-        _text, in_tok, out_tok = _claude_cli_call(
+        _text, usage = _claude_cli_call(
             "claude-sonnet-4-6", "sys", _msgs(), 4096
         )
-        self.assertEqual(in_tok, 152)
-        self.assertEqual(out_tok, 7)
+        # "input" is the whole prompt; the cache fields keep the split.
+        self.assertEqual(
+            usage,
+            {"input": 152, "output": 7, "cache_read": 50, "cache_creation": 100},
+        )
 
     @mock.patch("utils.api.subprocess.run")
     @mock.patch("utils.api.shutil.which", return_value="/usr/bin/claude")
@@ -303,10 +308,12 @@ class ClaudeCliCallTests(unittest.TestCase):
                 }
             )
         )
-        text, in_tok, out_tok = _claude_cli_call(
+        text, usage = _claude_cli_call(
             "claude-sonnet-4-6", "sys", _msgs(), 4096
         )
-        self.assertEqual((in_tok, out_tok), (0, 0))
+        self.assertEqual(
+            usage, {"input": 0, "output": 0, "cache_read": 0, "cache_creation": 0}
+        )
         self.assertEqual(text, "{}")
 
 
@@ -320,7 +327,10 @@ class CallModelClaudeCliIntegrationTests(unittest.TestCase):
         with mock.patch.dict("os.environ", {"BENCH_PROVIDER": "claude_code"}):
             result = call_model("claude-sonnet-4-6", "sys", "content")
         self.assertEqual(result.get("verdict"), "PASS")
-        self.assertEqual(result["_tokens"], {"input": 12, "output": 5})
+        self.assertEqual(
+            result["_tokens"],
+            {"input": 12, "output": 5, "cache_read": 0, "cache_creation": 0},
+        )
 
 
 if __name__ == "__main__":

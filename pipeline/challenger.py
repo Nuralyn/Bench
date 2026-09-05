@@ -18,7 +18,7 @@ import json
 import sys
 from typing import Any
 
-from pipeline.constitution import prompt_view
+from pipeline.constitution import build_cached_prefix
 from utils.api import CHALLENGER_MODEL, call_model
 
 
@@ -121,10 +121,15 @@ def run_challenger(
             "_tokens": {"input": 0, "output": 0},
         }
 
-    user_content: str = _build_user_content(diff_info, constitution, file_context)
+    # The prompt is the cached prefix (constitution, repository context) and
+    # then this edit's content. Both are built fresh from this run's
+    # constitution snapshot; the cache holds bytes, not a stale snapshot,
+    # and a changed constitution renders different bytes and misses it.
+    cached_prefix: str = build_cached_prefix(constitution, file_context)
+    user_content: str = _build_user_content(diff_info)
 
     response: dict[str, Any] = call_model(
-        CHALLENGER_MODEL, _SYSTEM_PROMPT, user_content
+        CHALLENGER_MODEL, _SYSTEM_PROMPT, user_content, cached_prefix=cached_prefix
     )
 
     tokens: Any = response.get("_tokens", {"input": 0, "output": 0})
@@ -147,28 +152,16 @@ def run_challenger(
     return response
 
 
-def _build_user_content(
-    diff_info: dict,
-    constitution: dict,
-    file_context: str,
-) -> str:
-    """Assemble the labeled user-content payload sent to the Challenger.
+def _build_user_content(diff_info: dict) -> str:
+    """Assemble the per-edit part of the Challenger's prompt: the change.
 
-    The constitution goes in as its prompt view: every constraint, with its
-    id, name, scope, rule, and severity, but without the rationale and
-    commentary written for a human reader. The rule is the binding text and
-    is sent whole; nothing a constraint forbids is dropped.
+    The constitution and the repository context come first as the cached
+    prefix (pipeline.constitution.build_cached_prefix), the rendering every
+    stage receives: each constraint's id, name, scope, rule, and severity,
+    without the rationale and commentary written for a human reader. The
+    rule is sent whole; nothing a constraint forbids is dropped.
     """
-    sections: list[str] = [
-        "PROPOSED CHANGE:",
-        json.dumps(diff_info, indent=2),
-        "",
-        "CONSTITUTION:",
-        json.dumps(prompt_view(constitution), indent=2),
-    ]
-    if file_context:
-        sections.extend(["", "FILE CONTEXT:", file_context])
-    return "\n".join(sections)
+    return "\n".join(["PROPOSED CHANGE:", json.dumps(diff_info, indent=2)])
 
 
 def _validate_challenger_response(response: dict[str, Any]) -> bool:

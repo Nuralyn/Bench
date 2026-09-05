@@ -21,10 +21,16 @@ Provider is selected via the BENCH_PROVIDER env var:
 
 Invariants:
   * call_model NEVER raises. Every code path returns a dict.
-  * Every returned dict carries an "_tokens" field for accounting.
+  * Every returned dict carries an "_tokens" field for accounting: the
+    usage record {"input", "output", "cache_read", "cache_creation"}, where
+    "input" is the whole prompt and the cache fields break out the part
+    served from or written to the prompt cache.
   * JSON parse failure triggers exactly one retry, then returns PARSE_FAILURE.
   * API errors return API_ERROR; the pipeline decides how to react.
-  * The call_model signature is identical regardless of provider.
+  * The call_model signature is identical regardless of provider. Its
+    cached_prefix is text every provider sends ahead of the content; only
+    the anthropic provider marks it as a prompt-cache breakpoint.
+  * Every provider returns (text, usage) with that same usage record.
 """
 
 import json
@@ -121,16 +127,96 @@ class _ProviderError(Exception):
     """
 
 
+# The per-call usage record every provider reports and every "_tokens" field
+# carries. "input" is the whole prompt (uncached tokens plus cache writes plus
+# cache reads) so a reader that knows only "input" and "output" still sees the
+# full figure; "cache_read" and "cache_creation" break out the cached part so
+# the ledger can price it at the cached rate.
+_USAGE_FIELDS: tuple[str, ...] = ("input", "output", "cache_read", "cache_creation")
+
+
+def _zero_usage() -> dict[str, int]:
+    """A usage record with every field at zero."""
+    return {field: 0 for field in _USAGE_FIELDS}
+
+
+def _add_usage(totals: dict[str, int], usage: dict[str, int]) -> None:
+    """Fold one call's usage into a running total, field by field."""
+    for field in _USAGE_FIELDS:
+        totals[field] += _coerce_int(usage.get(field, 0))
+
+
+def _provider_result(
+    result: tuple[str, dict[str, int]],
+) -> tuple[str, dict[str, int]]:
+    """Normalise a provider's (text, usage) to exactly the _USAGE_FIELDS.
+
+    Every field is coerced to an int and a missing one reads as zero, so a
+    provider that reports less than the full record cannot break the
+    accounting; a usage that is not a dict at all is logged and counted as
+    zero rather than raising into the verdict path.
+    """
+    text: str = str(result[0])
+    raw: Any = result[1]
+    if not isinstance(raw, dict):
+        print(
+            f"[bench api] provider returned usage of type "
+            f"{type(raw).__name__}, not a dict; counting zero tokens",
+            file=sys.stderr,
+        )
+        return text, _zero_usage()
+    return text, {field: _coerce_int(raw.get(field, 0)) for field in _USAGE_FIELDS}
+
+
+def _first_user_turn(
+    provider: str, cached_prefix: str, user_content: str
+) -> dict[str, Any]:
+    """Build the opening user message, with a cache breakpoint where supported.
+
+    On the anthropic provider the prefix is its own text block marked
+    ``cache_control: ephemeral``. Render order is system, then messages, so
+    the breakpoint caches the system prompt and the prefix together; the
+    content after it (the diff, the earlier stages' findings) is never
+    cached. Every other provider receives the same text as one string, in
+    the same order, so no provider's judge reads a different prompt.
+    """
+    if not cached_prefix:
+        return {"role": "user", "content": user_content}
+    if provider == _PROVIDER_ANTHROPIC:
+        # The second block opens with the same separator the single-string
+        # form uses, so the two renderings are byte-identical text.
+        return {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": cached_prefix,
+                    "cache_control": {"type": "ephemeral"},
+                },
+                {"type": "text", "text": f"\n\n{user_content}"},
+            ],
+        }
+    return {"role": "user", "content": f"{cached_prefix}\n\n{user_content}"}
+
+
 def call_model(
     model: str,
     system_prompt: str,
     user_content: str,
     max_tokens: int = 8192,  # Sonnet 5 stages spend part of this on adaptive thinking
+    cached_prefix: str = "",
 ) -> dict[str, Any]:
     """Call the configured LLM provider expecting a JSON-object response.
 
+    ``cached_prefix`` is text that opens the user turn ahead of
+    ``user_content`` and is the same from one governed edit to the next: the
+    constitution and the repository context. See _first_user_turn for how
+    each provider carries it. It is part of the prompt on every provider;
+    only the anthropic provider caches it.
+
     Returns a dict on every code path. Successful calls return the parsed
-    JSON object with an "_tokens" key appended. Failure modes:
+    JSON object with an "_tokens" key appended, a usage record with the
+    fields in _USAGE_FIELDS. Failure modes:
       * {"error": "API_ERROR",      "detail": ..., "_tokens": {...}}
       * {"error": "PARSE_FAILURE",  "raw_response": ..., "_tokens": {...}}
 
@@ -148,66 +234,65 @@ def call_model(
         return {
             "error": "API_ERROR",
             "detail": f"Unknown BENCH_PROVIDER: {provider!r}",
-            "_tokens": {"input": 0, "output": 0},
+            "_tokens": _zero_usage(),
         }
 
-    messages: list[dict[str, str]] = [
-        {"role": "user", "content": user_content},
-    ]
-
-    total_input: int = 0
-    total_output: int = 0
+    first_turn: dict[str, Any] = _first_user_turn(
+        provider, cached_prefix, user_content
+    )
+    messages: list[dict[str, Any]] = [first_turn]
+    totals: dict[str, int] = _zero_usage()
 
     try:
-        first_text, in_tok, out_tok = provider_call(
-            model, system_prompt, messages, max_tokens
+        first_text, usage = _provider_result(
+            provider_call(model, system_prompt, messages, max_tokens)
         )
     except _ProviderError as e:
         print(f"[bench api] {_sanitize_error_detail(str(e))}", file=sys.stderr)
         return {
             "error": "API_ERROR",
             "detail": _sanitize_error_detail(str(e)),
-            "_tokens": {"input": total_input, "output": total_output},
+            "_tokens": totals,
         }
 
-    total_input += in_tok
-    total_output += out_tok
+    _add_usage(totals, usage)
 
     parsed = _try_parse_dict(first_text)
     if parsed is not None:
-        parsed["_tokens"] = {"input": total_input, "output": total_output}
+        parsed["_tokens"] = totals
         return parsed
 
-    retry_messages: list[dict[str, str]] = [
-        {"role": "user", "content": user_content},
+    # The retry repeats the opening turn byte for byte, so on the anthropic
+    # provider its prefix is a cache read rather than a second write.
+    retry_messages: list[dict[str, Any]] = [
+        first_turn,
         {"role": "assistant", "content": first_text},
         {"role": "user", "content": _RETRY_NUDGE},
     ]
 
     try:
-        retry_text, in_tok, out_tok = provider_call(
-            model, system_prompt, retry_messages, max_tokens
+        retry_text, usage = _provider_result(
+            provider_call(model, system_prompt, retry_messages, max_tokens)
         )
     except _ProviderError as e:
         print(f"[bench api] {_sanitize_error_detail(str(e))}", file=sys.stderr)
         return {
             "error": "API_ERROR",
             "detail": _sanitize_error_detail(str(e)),
-            "_tokens": {"input": total_input, "output": total_output},
+            "_tokens": totals,
         }
 
-    total_input += in_tok
-    total_output += out_tok
+    _add_usage(totals, usage)
 
     parsed = _try_parse_dict(retry_text)
     if parsed is not None:
-        parsed["_tokens"] = {"input": total_input, "output": total_output}
+        parsed["_tokens"] = totals
         return parsed
 
     return {
         "error": "PARSE_FAILURE",
         "raw_response": retry_text,
-        "_tokens": {"input": total_input, "output": total_output},
+        "_tokens": totals,
     }
 
 
@@ -277,13 +362,33 @@ def _anthropic_text_blocks(content: Any) -> str:
     return "".join(texts)
 
 
+def _usage_int(usage: Any, name: str) -> int:
+    """An integer usage field from an SDK usage object, or 0 if absent.
+
+    The SDK reports a missing cache field as None; anything that is not a
+    plain int (a bool, a mock, a string) also counts as 0 rather than
+    raising, so a surprising usage object cannot break a verdict.
+    """
+    value: Any = getattr(usage, name, 0) if usage is not None else 0
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    return 0
+
+
 def _anthropic_call(
     model: str,
     system_prompt: str,
-    messages: list[dict[str, str]],
+    messages: list[dict[str, Any]],
     max_tokens: int,
-) -> tuple[str, int, int]:
-    """One Anthropic call. Returns (text, input_tokens, output_tokens).
+) -> tuple[str, dict[str, int]]:
+    """One Anthropic call. Returns (text, usage).
+
+    ``usage`` has the fields in _USAGE_FIELDS. The SDK reports the uncached
+    prompt as input_tokens and the cached part separately; "input" here is
+    their sum, the whole prompt, with "cache_read" and "cache_creation"
+    carrying the cached part. A message whose content is a list of text
+    blocks (see _first_user_turn) passes through unchanged; the SDK renders
+    the blocks in order and honours the cache_control marker on the first.
 
     Raises _ProviderError on any anthropic.AnthropicError (covers SDK
     construction failures and all API-call exceptions) and on any
@@ -329,29 +434,33 @@ def _anthropic_call(
             text = _anthropic_text_blocks(content)
 
         usage = getattr(response, "usage", None)
-        input_tokens: int = (
-            getattr(usage, "input_tokens", 0) if usage is not None else 0
-        )
-        output_tokens: int = (
-            getattr(usage, "output_tokens", 0) if usage is not None else 0
-        )
+        uncached: int = _usage_int(usage, "input_tokens")
+        cache_read: int = _usage_int(usage, "cache_read_input_tokens")
+        cache_creation: int = _usage_int(usage, "cache_creation_input_tokens")
+        output_tokens: int = _usage_int(usage, "output_tokens")
     except Exception as e:
         raise _ProviderError(
             f"anthropic response: {type(e).__name__}: "
             f"{_sanitize_error_detail(str(e))}"
         ) from e
 
-    return text, input_tokens, output_tokens
+    return text, {
+        "input": uncached + cache_read + cache_creation,
+        "output": output_tokens,
+        "cache_read": cache_read,
+        "cache_creation": cache_creation,
+    }
 
 
 def _openrouter_call(
     model: str,
     system_prompt: str,
-    messages: list[dict[str, str]],
+    messages: list[dict[str, Any]],
     max_tokens: int,
-) -> tuple[str, int, int]:
+) -> tuple[str, dict[str, int]]:
     """One OpenRouter call via the openai SDK. Model is auto-prefixed
-    with "anthropic/". Returns (text, input_tokens, output_tokens).
+    with "anthropic/". Returns (text, usage) with the _USAGE_FIELDS record;
+    this path sends no cache breakpoint, so its cache fields are zero.
 
     Raises _ProviderError if the openai SDK is not installed (it is a
     soft dependency — not in requirements.txt) or on any openai.OpenAIError.
@@ -406,19 +515,22 @@ def _openrouter_call(
                 text = getattr(message, "content", "") or ""
 
         usage = getattr(response, "usage", None)
-        input_tokens: int = (
-            getattr(usage, "prompt_tokens", 0) if usage is not None else 0
-        )
-        output_tokens: int = (
-            getattr(usage, "completion_tokens", 0) if usage is not None else 0
-        )
+        input_tokens: int = _usage_int(usage, "prompt_tokens")
+        output_tokens: int = _usage_int(usage, "completion_tokens")
     except Exception as e:
         raise _ProviderError(
             f"openrouter response: {type(e).__name__}: "
             f"{_sanitize_error_detail(str(e))}"
         ) from e
 
-    return text, input_tokens, output_tokens
+    # This path sends no cache breakpoint (see _first_user_turn), so the
+    # cache fields are zero by construction rather than unreported.
+    return text, {
+        "input": input_tokens,
+        "output": output_tokens,
+        "cache_read": 0,
+        "cache_creation": 0,
+    }
 
 
 def _coerce_int(value: Any) -> int:
@@ -429,7 +541,7 @@ def _coerce_int(value: Any) -> int:
         return 0
 
 
-def _flatten_cli_messages(messages: list[dict[str, str]]) -> str:
+def _flatten_cli_messages(messages: list[dict[str, Any]]) -> str:
     """Flatten messages into a single text body for stdin.
 
     Single-turn calls pass the user content as-is; the parse-retry path
@@ -439,7 +551,10 @@ def _flatten_cli_messages(messages: list[dict[str, str]]) -> str:
     (untrusted) payload.
     """
     if len(messages) == 1:
-        return messages[0].get("content", "")
+        # This provider only ever receives string content (call_model builds
+        # block lists for the anthropic provider alone), so str() is a
+        # no-op that states the type at the boundary.
+        return str(messages[0].get("content", ""))
     return "\n\n".join(
         f"{m.get('role', 'user').upper()}: {m.get('content', '')}"
         for m in messages
@@ -513,11 +628,12 @@ def _write_system_prompt_file(system_prompt: str) -> str | None:
 
 def _parse_cli_result(
     completed: subprocess.CompletedProcess,
-) -> tuple[str, int, int]:
-    """Extract (text, input_tokens, output_tokens) from a finished `claude` run.
+) -> tuple[str, dict[str, int]]:
+    """Extract (text, usage) from a finished `claude` run.
 
-    Raises _ProviderError when the call exited non-zero or the JSON envelope
-    is malformed or reports an error.
+    ``usage`` has the fields in _USAGE_FIELDS. Raises _ProviderError when
+    the call exited non-zero or the JSON envelope is malformed or reports
+    an error.
     """
     if completed.returncode != 0:
         detail: str = _sanitize_error_detail(
@@ -547,22 +663,22 @@ def _parse_cli_result(
     text: str = envelope.get("result", "") or ""
 
     usage = envelope.get("usage")
-    if isinstance(usage, dict):
-        # Claude Code applies prompt caching automatically, so most real input
-        # lands in the cache fields; sum all three so the ledger reflects true
-        # input consumption. Coercion is defensive: a malformed token value must
-        # not break call_model's never-raises contract.
-        input_tokens: int = (
-            _coerce_int(usage.get("input_tokens"))
-            + _coerce_int(usage.get("cache_creation_input_tokens"))
-            + _coerce_int(usage.get("cache_read_input_tokens"))
-        )
-        output_tokens: int = _coerce_int(usage.get("output_tokens"))
-    else:
-        input_tokens = 0
-        output_tokens = 0
+    if not isinstance(usage, dict):
+        return text, _zero_usage()
 
-    return text, input_tokens, output_tokens
+    # Claude Code applies prompt caching automatically, so most real input
+    # lands in the cache fields. "input" sums all three so the ledger reflects
+    # true input consumption; the two cache fields are kept apart so it can
+    # be priced. Coercion is defensive: a malformed token value must not break
+    # call_model's never-raises contract.
+    cache_read: int = _coerce_int(usage.get("cache_read_input_tokens"))
+    cache_creation: int = _coerce_int(usage.get("cache_creation_input_tokens"))
+    return text, {
+        "input": _coerce_int(usage.get("input_tokens")) + cache_read + cache_creation,
+        "output": _coerce_int(usage.get("output_tokens")),
+        "cache_read": cache_read,
+        "cache_creation": cache_creation,
+    }
 
 
 # --- claude_code subprocess nonce ---------------------------------------------
@@ -661,9 +777,9 @@ def verify_subprocess_nonce(token: str) -> bool:
 def _claude_cli_call(
     model: str,
     system_prompt: str,
-    messages: list[dict[str, str]],
+    messages: list[dict[str, Any]],
     max_tokens: int,
-) -> tuple[str, int, int]:
+) -> tuple[str, dict[str, int]]:
     """One call via the local `claude` CLI in headless print mode.
 
     Routes the stage through `claude -p` so it rides the user's Claude Code

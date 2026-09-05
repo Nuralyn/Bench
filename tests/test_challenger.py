@@ -17,6 +17,7 @@ _REPO_ROOT: Path = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from pipeline.constitution import build_cached_prefix  # noqa: E402
 from pipeline.challenger import (  # noqa: E402
     _build_user_content,
     _validate_challenger_response,
@@ -102,21 +103,24 @@ class ValidateChallengerResponseTests(unittest.TestCase):
 
 
 class BuildUserContentTests(unittest.TestCase):
-    def test_contains_diff_and_constitution_sections(self) -> None:
-        content: str = _build_user_content(_valid_diff(), _valid_constitution(), "")
-        self.assertIn("PROPOSED CHANGE:", content)
-        self.assertIn("CONSTITUTION:", content)
+    """The per-edit body carries the change; the prefix carries the rest."""
 
-    def test_file_context_appended_when_present(self) -> None:
-        content: str = _build_user_content(
-            _valid_diff(), _valid_constitution(), "def foo(): pass"
-        )
-        self.assertIn("FILE CONTEXT:", content)
-        self.assertIn("def foo(): pass", content)
+    def test_body_contains_the_change_and_nothing_cached(self) -> None:
+        content: str = _build_user_content(_valid_diff())
+        self.assertIn("PROPOSED CHANGE:", content)
+        self.assertNotIn("CONSTITUTION:", content)
+        self.assertNotIn("FILE CONTEXT:", content)
+
+    def test_prefix_carries_constitution_and_file_context(self) -> None:
+        prefix: str = build_cached_prefix(_valid_constitution(), "def foo(): pass")
+        self.assertIn("CONSTITUTION:", prefix)
+        self.assertIn("FILE CONTEXT:", prefix)
+        self.assertIn("def foo(): pass", prefix)
 
     def test_file_context_omitted_when_empty(self) -> None:
-        content: str = _build_user_content(_valid_diff(), _valid_constitution(), "")
-        self.assertNotIn("FILE CONTEXT:", content)
+        prefix: str = build_cached_prefix(_valid_constitution(), "")
+        self.assertIn("CONSTITUTION:", prefix)
+        self.assertNotIn("FILE CONTEXT:", prefix)
 
 
 class RunChallengerTests(unittest.TestCase):

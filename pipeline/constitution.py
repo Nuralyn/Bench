@@ -228,6 +228,27 @@ def prompt_view(constitution: dict) -> dict:
     return view
 
 
+def build_cached_prefix(constitution: dict, file_context: str) -> str:
+    """Render the part of a stage prompt that is the same on every edit.
+
+    The constitution's prompt view and the governed project's repository
+    context open the user turn of all three stages, ahead of the diff and
+    the earlier stages' findings. They change only when bench.json or the
+    project's CLAUDE.md does, so utils.api.call_model can place a
+    prompt-cache breakpoint after them and pay for them once per session
+    instead of three times per edit. The framing that marks the repository
+    context as untrusted is part of file_context itself (pipeline.runner
+    prepends it), so it is cached together with the content it governs.
+    """
+    sections: list[str] = [
+        "CONSTITUTION:",
+        json.dumps(prompt_view(constitution), indent=2),
+    ]
+    if file_context:
+        sections.extend(["", "FILE CONTEXT:", file_context])
+    return "\n".join(sections)
+
+
 def merge_constitutions(core: dict, project: dict) -> dict:
     """Stack a project layer on Bench's core constitution: floor plus extend.
 

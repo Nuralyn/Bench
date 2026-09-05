@@ -20,7 +20,7 @@ import json
 import sys
 from typing import Any
 
-from pipeline.constitution import prompt_view
+from pipeline.constitution import build_cached_prefix
 from utils.api import ORACLE_MODEL, call_model
 
 
@@ -146,16 +146,17 @@ def run_oracle(
             "_tokens": {"input": 0, "output": 0},
         }
 
+    # The prompt is the cached prefix (constitution, repository context) and
+    # then this edit's content. Both are built fresh from this run's
+    # constitution snapshot; the cache holds bytes, not a stale snapshot,
+    # and a changed constitution renders different bytes and misses it.
+    cached_prefix: str = build_cached_prefix(constitution, file_context)
     user_content: str = _build_user_content(
-        diff_info,
-        constitution,
-        challenger_result,
-        defender_result,
-        file_context,
+        diff_info, challenger_result, defender_result
     )
 
     response: dict[str, Any] = call_model(
-        ORACLE_MODEL, _SYSTEM_PROMPT, user_content
+        ORACLE_MODEL, _SYSTEM_PROMPT, user_content, cached_prefix=cached_prefix
     )
 
     tokens: Any = response.get("_tokens", {"input": 0, "output": 0})
@@ -180,36 +181,30 @@ def run_oracle(
 
 def _build_user_content(
     diff_info: dict,
-    constitution: dict,
     challenger_result: dict,
     defender_result: dict,
-    file_context: str,
 ) -> str:
-    """Assemble the labeled user-content payload sent to the Oracle.
+    """Assemble the per-edit part of the Oracle's prompt.
 
-    The constitution goes in as its prompt view, the same rendering the
-    Challenger and Defender received: every constraint's id, name, scope,
-    rule, and severity, without the rationale and commentary written for a
-    human reader. The rule is sent whole, so the Oracle rules on the full
-    binding text of every constraint, and the entry's constitution_hash still
-    covers the authored file in its entirety.
+    The change, the Challenger's findings, and the Defender's rebuttals. The
+    constitution and the repository context come first as the cached prefix
+    (pipeline.constitution.build_cached_prefix), the same rendering the
+    Challenger and Defender received. The rule is sent whole, so the Oracle
+    rules on the full binding text of every constraint, and the entry's
+    constitution_hash still covers the authored file in its entirety.
     """
-    sections: list[str] = [
-        "PROPOSED CHANGE:",
-        json.dumps(diff_info, indent=2),
-        "",
-        "CONSTITUTION:",
-        json.dumps(prompt_view(constitution), indent=2),
-        "",
-        "CHALLENGER FINDINGS:",
-        json.dumps(challenger_result, indent=2),
-        "",
-        "DEFENDER REBUTTALS:",
-        json.dumps(defender_result, indent=2),
-    ]
-    if file_context:
-        sections.extend(["", "FILE CONTEXT:", file_context])
-    return "\n".join(sections)
+    return "\n".join(
+        [
+            "PROPOSED CHANGE:",
+            json.dumps(diff_info, indent=2),
+            "",
+            "CHALLENGER FINDINGS:",
+            json.dumps(challenger_result, indent=2),
+            "",
+            "DEFENDER REBUTTALS:",
+            json.dumps(defender_result, indent=2),
+        ]
+    )
 
 
 def _validate_oracle_response(response: dict[str, Any]) -> bool:
