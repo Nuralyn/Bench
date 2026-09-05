@@ -266,19 +266,24 @@ def _normalize_defender_response(
     rebuttals: Any = response.get("rebuttals")
     if not isinstance(rebuttals, list):
         return notes
+    findings: Any = challenger_result.get("findings")
+    finding_count: int = len(findings) if isinstance(findings, list) else 0
     for index, rebuttal in enumerate(rebuttals):
         if not isinstance(rebuttal, dict):
             continue
         finding_index: Any = rebuttal.get("finding_index")
-        # ASCII decimal digits only, and short: str.isdigit() is also true
-        # of superscripts and circled digits that int() rejects, and int()
-        # refuses very long digit strings, and an exception here would skip
-        # the PIPELINE_ERROR receipt the validator writes.
+        # ASCII decimal digits only, short, and naming a finding the
+        # Challenger actually reported: str.isdigit() is also true of
+        # superscripts and circled digits that int() rejects, int() refuses
+        # very long digit strings, and an exception here would skip the
+        # PIPELINE_ERROR receipt the validator writes. An index past the
+        # findings list stays a string and fails closed as it always has.
         if (
             isinstance(finding_index, str)
             and finding_index.strip().isascii()
             and finding_index.strip().isdecimal()
             and len(finding_index.strip()) <= 9
+            and int(finding_index.strip()) < finding_count
         ):
             rebuttal["finding_index"] = int(finding_index.strip())
             notes.append(
