@@ -28,6 +28,7 @@ clone has already started.
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +37,23 @@ from ledger.verify import verify_chain
 
 _LEGACY_DIRNAME: str = "ledger"
 _LEDGER_FILENAME: str = "bench-ledger.json"
+_JSON_GLOB: str = "*.json"
+
+# A restore from git is fetched into a staging directory and published into
+# the target only once every fetch has finished. Staging lives INSIDE the
+# target directory: that is the one location the configured ledger path
+# proves writable, and it is the gitignored one, so debris from a failed
+# attempt can never be committed. Each attempt gets its own mkdtemp
+# directory carrying an ownership marker, and only a directory that carries
+# the marker is ever removed, so a stale attempt is cleared and anything
+# else with a similar name is left alone.
+_STAGING_PREFIX: str = ".restoring-"
+_STAGING_OWNER_MARKER: str = ".bench-restore"
+# Written into the target before the first staged file is published and
+# removed after the last. If it is found on a later run, a publish was
+# interrupted and could not be rolled back, and the target must not be
+# taken for a complete chain.
+_INCOMPLETE_MARKER: str = "restore-incomplete"
 
 
 # Ceiling on each git call. Migration reads local history, which is fast,
@@ -153,23 +171,70 @@ def _restore_from_git(
 
     wanted: list[str] = _wanted_paths(listing)
 
-    # Fetch into a staging directory beside the target and move into place
-    # only once every fetch has finished. Nothing reaches the target while
-    # git can still time out, so a timed-out attempt cannot leave a
-    # half-restored chain that the already_started guard would accept on
-    # the next run; the worst a failed cleanup can do is leave debris in
-    # the staging directory, which the next attempt clears first.
-    staging: Path = target_dir.parent / f"{target_dir.name}.restoring"
-    if not _clear_staging(staging):
+    # Fetch into a staging directory inside the target and publish only
+    # once every fetch has finished (see _STAGING_PREFIX). Nothing reaches
+    # the target's chain files while git can still time out, so a timed-out
+    # attempt cannot leave a half-restored chain for the already_started
+    # guard to accept; the worst a failed cleanup can do is leave debris in
+    # a staging directory Bench owns, inside the gitignored target.
+    target_dir.mkdir(parents=True, exist_ok=True)
+    _clear_stale_staging(target_dir)
+    try:
+        staging: Path = _new_staging(target_dir)
+    except OSError as exc:
+        print(
+            f"[bench migrate] could not create a staging directory under "
+            f"{target_dir}: {exc}; nothing was restored",
+            file=sys.stderr,
+        )
         return None
-    staging.mkdir(parents=True)
-    (staging / ENTRIES_DIRNAME).mkdir()
     try:
         written: int = _fetch_into(repo_root, ref, wanted, staging)
     except GitTimeout:
-        _clear_staging(staging)
+        _remove_staging(staging)
         raise
-    return _move_into_place(staging, target_dir, written), len(wanted)
+    return _publish(staging, target_dir, written, len(wanted)), len(wanted)
+
+
+def _new_staging(target_dir: Path) -> Path:
+    """A fresh staging directory inside the target, marked as Bench's own."""
+    staging: Path = Path(tempfile.mkdtemp(prefix=_STAGING_PREFIX, dir=target_dir))
+    (staging / _STAGING_OWNER_MARKER).write_text("", encoding="utf-8")
+    (staging / ENTRIES_DIRNAME).mkdir()
+    return staging
+
+
+def _clear_stale_staging(target_dir: Path) -> None:
+    """Remove staging directories left by earlier attempts, and only those.
+
+    A directory with the staging prefix but no ownership marker was not
+    created by Bench and is left alone, with a note. A removal that fails
+    is logged and skipped: this attempt uses its own fresh directory, so a
+    stale one it cannot clear is debris, not a blocker.
+    """
+    for candidate in sorted(target_dir.glob(f"{_STAGING_PREFIX}*")):
+        if not (candidate / _STAGING_OWNER_MARKER).is_file():
+            print(
+                f"[bench migrate] {candidate} has no ownership marker and was "
+                f"not created by Bench; left alone",
+                file=sys.stderr,
+            )
+            continue
+        _remove_staging(candidate)
+
+
+def _remove_staging(staging: Path) -> bool:
+    """Remove a staging directory Bench created. False, and a log, on failure."""
+    try:
+        shutil.rmtree(staging)
+    except OSError as exc:
+        print(
+            f"[bench migrate] could not remove the staging directory "
+            f"{staging}: {exc}",
+            file=sys.stderr,
+        )
+        return False
+    return True
 
 
 def _wanted_paths(listing: str) -> list[str]:
@@ -238,33 +303,93 @@ def _fetch_into(repo_root: Path, ref: str, wanted: list[str], staging: Path) -> 
     return written
 
 
-def _move_into_place(staging: Path, target_dir: Path, written: int) -> int:
-    """Move every staged file into the target; return how many arrived.
+def _publish(staging: Path, target_dir: Path, written: int, expected: int) -> int:
+    """Move every staged file into the target; return how many are in place.
 
-    Each move is a rename, so a file is either wholly in place or not there
-    at all. A move that fails is logged and stops the loop (C-001); what
-    arrived is counted, the caller verifies it and reports the shortfall as
-    partial, and the staging directory is left for inspection.
+    The incomplete marker is written before the first move and removed
+    after the last. Each move is a rename, so a file is either wholly in
+    place or absent. If a move fails, every file already moved is moved
+    back (C-001: logged, and reported as zero published); if any move-back
+    fails, the marker stays, and migrate_ledger then refuses to treat the
+    target as a chain rather than reporting already_migrated over a
+    partial one. The marker also stays when fewer files were staged than
+    the commit held, for the same reason. Staging is removed after a
+    complete publish and left for inspection otherwise.
     """
-    target_dir.mkdir(parents=True, exist_ok=True)
     (target_dir / ENTRIES_DIRNAME).mkdir(exist_ok=True)
-    moved: int = 0
+    marker: Path = target_dir / _INCOMPLETE_MARKER
     try:
-        for source in sorted(staging.glob("*.json")):
-            source.replace(target_dir / source.name)
-            moved += 1
-        for source in sorted((staging / ENTRIES_DIRNAME).glob("*.json")):
-            source.replace(target_dir / ENTRIES_DIRNAME / source.name)
-            moved += 1
+        marker.write_text("", encoding="utf-8")
     except OSError as exc:
         print(
-            f"[bench migrate] could not move a restored file into place: "
-            f"{exc}; {moved} of {written} arrived",
+            f"[bench migrate] could not write {marker}: {exc}; nothing was "
+            f"published, since an interrupted publish could not be flagged",
             file=sys.stderr,
         )
-        return moved
-    _clear_staging(staging)
-    return moved
+        return 0
+
+    pending: list[tuple[Path, Path]] = [
+        (source, target_dir / source.name)
+        for source in sorted(staging.glob(_JSON_GLOB))
+    ] + [
+        (source, target_dir / ENTRIES_DIRNAME / source.name)
+        for source in sorted((staging / ENTRIES_DIRNAME).glob(_JSON_GLOB))
+    ]
+    moved: list[tuple[Path, Path]] = []
+    try:
+        for source, destination in pending:
+            source.replace(destination)
+            moved.append((source, destination))
+    except OSError as exc:
+        print(
+            f"[bench migrate] publish failed after {len(moved)} of {written} "
+            f"files: {exc}; moving them back",
+            file=sys.stderr,
+        )
+        if _move_back(moved):
+            _remove_marker(marker)
+        return 0
+
+    if len(moved) < expected:
+        print(
+            f"[bench migrate] {len(moved)} of {expected} files published; the "
+            f"incomplete marker stays so the next run does not take this for "
+            f"a complete chain",
+            file=sys.stderr,
+        )
+    else:
+        _remove_marker(marker)
+        _remove_staging(staging)
+    return len(moved)
+
+
+def _move_back(moved: list[tuple[Path, Path]]) -> bool:
+    """Return published files to staging, newest first. False if any stays."""
+    all_back: bool = True
+    for source, destination in reversed(moved):
+        try:
+            destination.replace(source)
+        except OSError as exc:
+            print(
+                f"[bench migrate] could not move {destination} back to staging: "
+                f"{exc}",
+                file=sys.stderr,
+            )
+            all_back = False
+    return all_back
+
+
+def _remove_marker(marker: Path) -> None:
+    """Remove the incomplete marker; a failure is logged and leaves it."""
+    try:
+        marker.unlink()
+    except OSError as exc:
+        print(
+            f"[bench migrate] could not remove {marker}: {exc}; the next "
+            f"migration will refuse until it is removed by hand after "
+            f"`python -m cli verify` passes",
+            file=sys.stderr,
+        )
 
 
 def _copy_from_disk(legacy_dir: Path, target_dir: Path) -> tuple[int, int]:
@@ -284,7 +409,7 @@ def _copy_from_disk(legacy_dir: Path, target_dir: Path) -> tuple[int, int]:
     if entries_src.is_dir():
         entries_dst: Path = target_dir / ENTRIES_DIRNAME
         entries_dst.mkdir(exist_ok=True)
-        for entry in sorted(entries_src.glob("*.json")):
+        for entry in sorted(entries_src.glob(_JSON_GLOB)):
             expected += 1
             shutil.copy2(entry, entries_dst / entry.name)
             written += 1
@@ -351,9 +476,34 @@ def migrate_ledger(repo_root: Path | None = None) -> dict[str, Any]:
     # entries live only in entries/. Checking for bench-ledger.json alone
     # would miss it and splice a restored history into a running chain, so
     # a non-empty entries/ counts as started too.
+    # A marker left by an interrupted publish (see _publish) means the
+    # target may hold part of a chain. That is checked before the
+    # already_started guard, which would otherwise take the part for the
+    # whole and report already_migrated.
+    if (target / _INCOMPLETE_MARKER).exists():
+        return {
+            "status": "failed",
+            "source": "git history",
+            "target": str(target),
+            "files": 0,
+            "expected": 0,
+            "verified": False,
+            "entries": 0,
+            "genesis_hash": "",
+            "failure_type": "INCOMPLETE_RESTORE",
+            "detail": (
+                f"{target / _INCOMPLETE_MARKER} exists: an earlier restore was "
+                "interrupted while publishing, or published fewer files than "
+                "the commit held, and the target must not be taken for a "
+                "complete chain. Inspect the target, remove what the "
+                "interrupted restore left, and retry; or, if `python -m cli "
+                "verify` passes on it, remove the marker by hand."
+            ),
+        }
+
     entries_dir: Path = target / ENTRIES_DIRNAME
     already_started: bool = (target / _LEDGER_FILENAME).exists() or (
-        entries_dir.is_dir() and any(entries_dir.glob("*.json"))
+        entries_dir.is_dir() and any(entries_dir.glob(_JSON_GLOB))
     )
     if already_started:
         return {

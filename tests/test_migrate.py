@@ -253,23 +253,17 @@ class GitHistorySourceTests(_MigrateTestCase):
         self.assertEqual(first["status"], "failed")
         self.assertEqual(first["failure_type"], "GIT_TIMEOUT")
         # Nothing reached the target, and the staging directory is gone.
-        self.assertFalse((self.target / "bench-ledger.json").exists())
-        self.assertEqual(list((self.target / "entries").glob("*.json")), [])
-        self.assertFalse((self.target.parent / ".bench.restoring").exists())
+        self._assert_no_chain_in_target()
+        self.assertEqual(self._staging_dirs(), [])
 
         # git is answering again: the retry restores the whole chain.
         with redirect_stderr(io.StringIO()):
             second = migrate_ledger(self.repo)
         self.assertEqual(second["status"], "migrated")
         self.assertTrue((self.target / "bench-ledger.json").exists())
-        self.assertFalse((self.target.parent / ".bench.restoring").exists())
+        self.assertEqual(self._staging_dirs(), [])
 
-    def test_failed_cleanup_after_timeout_still_leaves_the_target_empty(self) -> None:
-        """Debris from a cleanup that fails lands in staging, never in target.
-
-        So the next attempt still sees no chain, clears the stale staging
-        directory, and restores in full.
-        """
+    def _commit_valid_chain_then_untrack(self) -> None:
         legacy: Path = self.repo / "ledger"
         _write_chain(legacy, count=3, dag_entries=2)
         self._git("add", "-A")
@@ -277,6 +271,23 @@ class GitHistorySourceTests(_MigrateTestCase):
         self._git("rm", "-r", "-q", "--cached", "ledger")
         shutil.rmtree(legacy)
         self._git("commit", "-q", "-m", "untrack")
+
+    def _staging_dirs(self) -> list[Path]:
+        return sorted(self.target.glob(".restoring-*"))
+
+    def _assert_no_chain_in_target(self) -> None:
+        self.assertFalse((self.target / "bench-ledger.json").exists())
+        self.assertEqual(list((self.target / "entries").glob("*.json")), [])
+        self.assertFalse((self.target / "restore-incomplete").exists())
+
+    def test_failed_cleanup_after_timeout_still_leaves_the_target_empty(self) -> None:
+        """Debris from a cleanup that fails stays in staging, inside the
+        gitignored target, never in the target's chain files.
+
+        The next attempt still sees no chain, clears the stale staging
+        directory it owns, and restores in full.
+        """
+        self._commit_valid_chain_then_untrack()
         real = subprocess.run
         shows: list[int] = [0]
 
@@ -296,15 +307,70 @@ class GitHistorySourceTests(_MigrateTestCase):
                     first = migrate_ledger(self.repo)
         self.assertEqual(first["status"], "failed")
         self.assertEqual(first["failure_type"], "GIT_TIMEOUT")
-        self.assertFalse((self.target / "bench-ledger.json").exists())
-        self.assertEqual(list((self.target / "entries").glob("*.json")), [])
-        self.assertTrue((self.target.parent / ".bench.restoring").exists())
+        self._assert_no_chain_in_target()
+        stale: list[Path] = self._staging_dirs()
+        self.assertEqual(len(stale), 1)
+        self.assertTrue((stale[0] / ".bench-restore").is_file())
 
         with redirect_stderr(io.StringIO()):
             second = migrate_ledger(self.repo)
         self.assertEqual(second["status"], "migrated")
         self.assertTrue(second["verified"])
-        self.assertFalse((self.target.parent / ".bench.restoring").exists())
+        self.assertEqual(self._staging_dirs(), [])
+
+    def test_a_directory_bench_did_not_create_is_never_removed(self) -> None:
+        """Only a staging directory carrying the ownership marker is cleared."""
+        self._commit_valid_chain_then_untrack()
+        foreign: Path = self.target / ".restoring-user-data"
+        foreign.mkdir(parents=True)
+        (foreign / "keep.txt").write_text("mine", encoding="utf-8")
+
+        with redirect_stderr(io.StringIO()):
+            result = migrate_ledger(self.repo)
+        self.assertEqual(result["status"], "migrated")
+        self.assertEqual((foreign / "keep.txt").read_text(encoding="utf-8"), "mine")
+
+    def test_failed_publish_is_rolled_back_and_the_retry_completes(self) -> None:
+        """A rename that fails after others succeeded moves them back.
+
+        Nothing stays in the target, so the retry sees no chain, and the
+        staged files are still there for it to publish.
+        """
+        self._commit_valid_chain_then_untrack()
+        real_replace = Path.replace
+        moves: list[int] = [0]
+
+        def fail_second_move(self_path, target):  # type: ignore[no-untyped-def]
+            if ".restoring-" in str(self_path):
+                moves[0] += 1
+                if moves[0] == 2:
+                    raise OSError("disk full")
+            return real_replace(self_path, target)
+
+        with patch("ledger.migrate.Path.replace", new=fail_second_move):
+            with redirect_stderr(io.StringIO()):
+                first = migrate_ledger(self.repo)
+        self.assertEqual(first["status"], "partial")
+        self.assertEqual(first["files"], 0)
+        self._assert_no_chain_in_target()
+
+        with redirect_stderr(io.StringIO()):
+            second = migrate_ledger(self.repo)
+        self.assertEqual(second["status"], "migrated")
+        self.assertTrue(second["verified"])
+        self.assertEqual(self._staging_dirs(), [])
+
+    def test_incomplete_marker_blocks_already_migrated(self) -> None:
+        """A publish that could not be rolled back is a failure, not a chain."""
+        self._commit_valid_chain_then_untrack()
+        self.target.mkdir(parents=True, exist_ok=True)
+        (self.target / "restore-incomplete").write_text("", encoding="utf-8")
+        (self.target / "bench-ledger.json").write_text("[]", encoding="utf-8")
+
+        with redirect_stderr(io.StringIO()):
+            result = migrate_ledger(self.repo)
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["failure_type"], "INCOMPLETE_RESTORE")
 
     def test_git_calls_carry_a_timeout_and_detach_stdin(self) -> None:
         with patch("ledger.migrate.subprocess.run") as run:
