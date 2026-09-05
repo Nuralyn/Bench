@@ -27,6 +27,7 @@ clone has already started.
 
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -617,6 +618,20 @@ def _timed_out(target: Path, exc: GitTimeout) -> dict[str, Any]:
 # itself as well: git still reads an ignored .gitignore, and without that
 # entry the file Bench wrote would be the one untracked path left behind
 # (tests.test_migrate.GitHistorySourceTests).
+def _is_link(path: Path) -> bool:
+    """A symbolic link on any platform, or a junction on Windows.
+
+    Path.is_symlink does not report a Windows directory junction, which
+    mkdir follows just the same, so the reparse-point attribute is read
+    there as well.
+    """
+    if path.is_symlink():
+        return True
+    if sys.platform != "win32" or not path.exists():
+        return False
+    return bool(os.lstat(path).st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+
+
 def _runtime_dir(target: Path) -> Path:
     """The target's runtime directory, created and self-ignored if needed.
 
@@ -633,7 +648,7 @@ def _runtime_dir(target: Path) -> Path:
     failures the same way (tests.test_migrate.GitHistorySourceTests).
     """
     runtime: Path = target / _RUNTIME_DIRNAME
-    if runtime.is_symlink():
+    if _is_link(runtime):
         # mkdir would follow it and the lock, marker and staged entries
         # would land wherever it points, outside the configured target.
         raise OSError(f"{runtime} is a symbolic link, not a directory Bench created; left alone")

@@ -79,8 +79,9 @@ def _ended_on_sigterm(proc: subprocess.Popen[str]) -> Iterator[None]:
     clause above. POSIX only, and only on the main thread, where Python
     lets a handler be installed; elsewhere the timeout stays the bound.
     The previous handler is restored afterwards and, if it was a
-    callable, invoked; the default disposition becomes SystemExit(143),
-    which runs the finally clauses a plain termination would skip.
+    callable, invoked; an ignored SIGTERM stays ignored once the group is
+    ended; the default disposition becomes SystemExit(143), which runs
+    the finally clauses a plain termination would skip.
     """
     if sys.platform == "win32" or threading.current_thread() is not threading.main_thread():
         yield
@@ -92,6 +93,8 @@ def _ended_on_sigterm(proc: subprocess.Popen[str]) -> Iterator[None]:
         signal.signal(signal.SIGTERM, previous)
         if callable(previous):
             previous(signum, frame)
+            return
+        if previous == signal.SIG_IGN:
             return
         raise SystemExit(128 + signum)
 

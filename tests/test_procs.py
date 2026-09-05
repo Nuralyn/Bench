@@ -138,6 +138,27 @@ class RunIsolatedTests(unittest.TestCase):
             time.sleep(0.2)
         self.assertFalse(_alive(pid), f"grandchild {pid} outlived the termination")
 
+    @unittest.skipIf(sys.platform == "win32", "SIGTERM delivery is a POSIX matter")
+    def test_an_ignored_sigterm_stays_ignored_after_the_group_is_ended(self) -> None:
+        import signal
+
+        previous = signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        try:
+            result = run_isolated(
+                [
+                    sys.executable,
+                    "-c",
+                    "import os, signal, time; os.kill(os.getppid(), signal.SIGTERM); "
+                    "time.sleep(0.5); print('still here')",
+                ],
+                timeout=60,
+            )
+            self.assertEqual(signal.getsignal(signal.SIGTERM), signal.SIG_IGN)
+        finally:
+            signal.signal(signal.SIGTERM, previous)
+        # The child was ended by the handler, so it never printed.
+        self.assertNotIn("still here", result.stdout)
+
     def test_a_finished_child_returns_a_completed_process(self) -> None:
         result = run_isolated(
             [
