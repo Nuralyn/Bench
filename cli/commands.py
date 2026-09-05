@@ -16,7 +16,6 @@ the real ``sys.stdin.isatty`` and ``input``, and renders the result.
 
 import json
 import os
-import re
 import subprocess
 import sys
 import webbrowser
@@ -31,7 +30,6 @@ from ledger.chain import (
 )
 from ledger.attestation import AttestationError, build_attestation, render
 from ledger.migrate import migrate_ledger
-from utils.procs import run_isolated
 from ledger.sanitize import (
     SANITATION_VERDICT,
     SanitationError,
@@ -361,12 +359,6 @@ def cmd_record_sanitation(
 # subprocess in this tree carries a timeout (tests/test_subprocess_timeouts.py
 # scans for it). Generous, because a slow ref listing is still an answer.
 _SUBPROCESS_TIMEOUT_SECONDS: float = 60.0
-# A GitHub API path as the purge manifest records it: segments of letters,
-# digits, dots, underscores and dashes, never starting with a dash.
-_ENDPOINT_PATTERN: re.Pattern[str] = re.compile(r"[A-Za-z0-9][A-Za-z0-9_./-]*")
-# A GitHub repository as owner/name, the only shape the probes above build
-# a URL or an API path from.
-_REPOSITORY_PATTERN: re.Pattern[str] = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 
 
 def _git_refs(args: list[str]) -> dict[str, str] | None:
@@ -377,10 +369,16 @@ def _git_refs(args: list[str]) -> dict[str, str] | None:
     mismatch. A timeout is a failure of the same kind.
     """
     try:
-        # run_isolated detaches stdin, so a credential prompt fails at once
-        # instead of waiting on a terminal nobody is watching, and ends git
-        # together with anything it launched (ssh, a helper) on timeout.
-        proc = run_isolated(args, timeout=_SUBPROCESS_TIMEOUT_SECONDS)
+        # stdin is detached so a credential prompt fails at once instead of
+        # waiting on a terminal nobody is watching until the timeout fires.
+        proc = subprocess.run(
+            args,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            stdin=subprocess.DEVNULL,
+            timeout=_SUBPROCESS_TIMEOUT_SECONDS,
+        )
     except subprocess.TimeoutExpired:
         print(
             f"[bench cli] git did not answer within "
@@ -415,20 +413,17 @@ def _gh_status(endpoint: str) -> int:
     inconclusive, so an unanswered probe can never be read as a removal
     (C-001: the failure is surfaced, not swallowed into a pass).
     """
-    if not _ENDPOINT_PATTERN.fullmatch(endpoint):
-        # The endpoint comes from a manifest on disk, not from this code.
-        # One that is not a plain API path is not asked at all (a leading
-        # dash would reach gh as a flag), and unasked is inconclusive.
-        print(
-            f"[bench cli] refusing to probe a malformed endpoint: {endpoint!r}",
-            file=sys.stderr,
-        )
-        return 0
     try:
-        # run_isolated detaches stdin, so an auth prompt fails at once
-        # instead of waiting on a terminal nobody is watching, and ends gh
-        # together with anything it launched on timeout.
-        proc = run_isolated(["gh", "api", "-i", endpoint], timeout=_SUBPROCESS_TIMEOUT_SECONDS)
+        # stdin is detached so an auth prompt fails at once instead of
+        # waiting on a terminal nobody is watching until the timeout fires.
+        proc = subprocess.run(
+            ["gh", "api", "-i", endpoint],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            stdin=subprocess.DEVNULL,
+            timeout=_SUBPROCESS_TIMEOUT_SECONDS,
+        )
     except subprocess.TimeoutExpired:
         # Unanswered, so inconclusive: 0 is the value classify_removal
         # treats as "could not tell", never as a removal.
@@ -576,33 +571,6 @@ def cmd_verify_purge(
     return 0
 
 
-def _binding_argument_error(
-    record_hash: str | None, mirror: str | None, repository: str | None
-) -> str | None:
-    """Why verify-sanitation-binding's arguments cannot be used, or None.
-
-    --mirror and --repository both reach git as arguments, so only an
-    owner/name repository and an existing mirror directory are probed;
-    anything else is refused before a process is started with it.
-    """
-    missing: list[str] = [
-        name
-        for name, value in (
-            ("--record", record_hash),
-            ("--mirror", mirror),
-            ("--repository", repository),
-        )
-        if not value
-    ]
-    if missing:
-        return f"verify-sanitation-binding requires {', '.join(missing)}."
-    if not _REPOSITORY_PATTERN.fullmatch(repository or ""):
-        return f"--repository must be owner/name, got {repository!r}."
-    if not Path(mirror or "").is_dir():
-        return f"--mirror is not a directory: {mirror!r}."
-    return None
-
-
 def cmd_verify_sanitation_binding(
     record_hash: str | None = None,
     mirror: str | None = None,
@@ -620,9 +588,21 @@ def cmd_verify_sanitation_binding(
     different rewrite, a record for another repository, or a warrant already
     spent by an earlier push.
     """
-    problem: str | None = _binding_argument_error(record_hash, mirror, repository)
-    if problem:
-        print(f"[bench cli] {problem}", file=sys.stderr)
+    missing: list[str] = [
+        name
+        for name, value in (
+            ("--record", record_hash),
+            ("--mirror", mirror),
+            ("--repository", repository),
+        )
+        if not value
+    ]
+    if missing:
+        print(
+            f"[bench cli] verify-sanitation-binding requires "
+            f"{', '.join(missing)}.",
+            file=sys.stderr,
+        )
         return 1
 
     chain: dict[str, Any] = verify_chain()

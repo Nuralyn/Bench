@@ -36,7 +36,6 @@ from typing import Any
 
 from ledger.chain import ENTRIES_DIRNAME, META_FILENAME, resolve_ledger_path
 from ledger.verify import verify_chain
-from utils.procs import run_isolated
 
 _LEGACY_DIRNAME: str = "ledger"
 _LEDGER_FILENAME: str = "bench-ledger.json"
@@ -128,13 +127,16 @@ def _run_git(args: list[str], cwd: Path) -> tuple[int, str]:
     must not be mistaken for one (see the class).
     """
     try:
-        # run_isolated detaches stdin, so a prompt of any kind fails at once
-        # instead of waiting on a terminal, and on timeout ends git together
-        # with anything it launched (ssh, a credential helper).
-        result = run_isolated(
+        # stdin is detached so a prompt of any kind fails at once instead
+        # of waiting on a terminal until the timeout fires.
+        result = subprocess.run(
             ["git", *args],
             cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
             errors="replace",
+            stdin=subprocess.DEVNULL,
             timeout=_GIT_TIMEOUT_SECONDS,
         )
     except subprocess.TimeoutExpired as exc:

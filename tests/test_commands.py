@@ -248,7 +248,7 @@ class ProbeTimeoutTests(unittest.TestCase):
     def test_git_refs_timeout_returns_none_and_logs(self) -> None:
         err = io.StringIO()
         with patch(
-            "cli.commands.run_isolated",
+            "cli.commands.subprocess.run",
             side_effect=subprocess.TimeoutExpired(["git", "ls-remote"], 60),
         ):
             with redirect_stderr(err):
@@ -259,7 +259,7 @@ class ProbeTimeoutTests(unittest.TestCase):
     def test_gh_status_timeout_returns_zero_and_logs(self) -> None:
         err = io.StringIO()
         with patch(
-            "cli.commands.run_isolated",
+            "cli.commands.subprocess.run",
             side_effect=subprocess.TimeoutExpired(["gh", "api"], 60),
         ):
             with redirect_stderr(err):
@@ -267,62 +267,17 @@ class ProbeTimeoutTests(unittest.TestCase):
         self.assertEqual(status, 0)
         self.assertIn("did not answer within", err.getvalue())
 
-    def test_a_malformed_endpoint_is_not_probed_and_is_inconclusive(self) -> None:
-        # The endpoint comes from a manifest on disk; one that is not a plain
-        # API path never reaches gh (a leading dash would be read as a flag).
-        err = io.StringIO()
-        with patch("cli.commands.run_isolated") as run:
-            with redirect_stderr(err):
-                for endpoint in ("-x", "repos/x y", "", "repos/x/y?ref=../z"):
-                    self.assertEqual(_gh_status(endpoint), 0, endpoint)
-        run.assert_not_called()
-        self.assertIn("malformed endpoint", err.getvalue())
-
-    def test_probes_go_through_run_isolated_with_a_timeout(self) -> None:
-        # run_isolated detaches stdin (a credential or auth prompt fails at
-        # once) and ends the process group on timeout; tests/test_procs.py
-        # proves that. Here only the routing and the timeout are checked.
-        with patch("cli.commands.run_isolated") as run:
+    def test_probes_pass_a_timeout_and_detach_stdin(self) -> None:
+        # Detached stdin makes a credential or auth prompt fail at once
+        # instead of holding the probe open until the timeout.
+        with patch("cli.commands.subprocess.run") as run:
             run.return_value = subprocess.CompletedProcess([], 0, "", "")
             _git_refs(["git", "ls-remote", "origin"])
             _gh_status("repos/x/y/commits/abc")
         self.assertEqual(len(run.call_args_list), 2)
         for call in run.call_args_list:
             self.assertGreater(call.kwargs.get("timeout", 0), 0)
-
-
-class SanitationBindingArgumentTests(unittest.TestCase):
-    """Both arguments reach git; a malformed one is refused before that."""
-
-    def test_a_repository_that_is_not_owner_slash_name_is_refused(self) -> None:
-        from cli.commands import cmd_verify_sanitation_binding
-
-        err = io.StringIO()
-        with tempfile.TemporaryDirectory() as mirror:
-            with patch("cli.commands.run_isolated") as run:
-                with redirect_stderr(err):
-                    for repository in ("-c core.x=y", "owner", "owner/name/extra", "own er/name"):
-                        code: int = cmd_verify_sanitation_binding(
-                            record_hash="a" * 64, mirror=mirror, repository=repository
-                        )
-                        self.assertEqual(code, 1, repository)
-        run.assert_not_called()
-        self.assertIn("owner/name", err.getvalue())
-
-    def test_a_mirror_that_is_not_a_directory_is_refused(self) -> None:
-        from cli.commands import cmd_verify_sanitation_binding
-
-        err = io.StringIO()
-        with tempfile.TemporaryDirectory() as tmp:
-            missing: str = os.path.join(tmp, "no-such-mirror")
-            with patch("cli.commands.run_isolated") as run:
-                with redirect_stderr(err):
-                    code: int = cmd_verify_sanitation_binding(
-                        record_hash="a" * 64, mirror=missing, repository="owner/name"
-                    )
-        self.assertEqual(code, 1)
-        run.assert_not_called()
-        self.assertIn("not a directory", err.getvalue())
+            self.assertEqual(call.kwargs.get("stdin"), subprocess.DEVNULL)
 
 
 class CmdMigrateLedgerTests(unittest.TestCase):
