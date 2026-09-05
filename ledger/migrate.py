@@ -46,12 +46,25 @@ _LEDGER_FILENAME: str = "bench-ledger.json"
 _GIT_TIMEOUT_SECONDS: float = 60.0
 
 
+class GitTimeout(Exception):
+    """A git call did not finish within _GIT_TIMEOUT_SECONDS.
+
+    Distinct from a non-zero exit on purpose. The history probes read a
+    non-zero code as a negative answer ("this commit does not hold the
+    chain"), and a timeout read that way would let migrate_ledger report
+    nothing_to_migrate over a chain that is in fact in history, after which
+    the next governed edit would open a fresh genesis and fork it. A timeout
+    is an unanswered question, so it propagates as a failed migration.
+    """
+
+
 def _run_git(args: list[str], cwd: Path) -> tuple[int, str]:
     """Run a git command, returning (returncode, stdout).
 
     Failures are logged and returned rather than raised, so callers degrade
-    with a typed result instead of a traceback (C-001). A timeout is
-    reported the same way, as a non-zero code with empty output.
+    with a typed result instead of a traceback (C-001). The one exception
+    is a timeout, which raises GitTimeout: it is not a negative answer and
+    must not be mistaken for one (see the class).
     """
     try:
         # stdin is detached so a prompt of any kind fails at once instead
@@ -66,13 +79,13 @@ def _run_git(args: list[str], cwd: Path) -> tuple[int, str]:
             stdin=subprocess.DEVNULL,
             timeout=_GIT_TIMEOUT_SECONDS,
         )
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as exc:
         print(
             f"[bench migrate] git {' '.join(args)} did not finish within "
             f"{_GIT_TIMEOUT_SECONDS:g}s",
             file=sys.stderr,
         )
-        return 1, ""
+        raise GitTimeout(f"git {' '.join(args)}") from exc
     except OSError as exc:
         print(f"[bench migrate] git unavailable: {exc}", file=sys.stderr)
         return 1, ""
@@ -226,6 +239,32 @@ def _finish(
     }
 
 
+def _timed_out(target: Path, exc: GitTimeout) -> dict[str, Any]:
+    """The failed-migration result for a git call that did not finish.
+
+    Same shape as the other failure results so callers and the CLI render
+    it the same way; failure_type names the cause so a retry is the obvious
+    next step rather than a fresh genesis.
+    """
+    return {
+        "status": "failed",
+        "source": "git history",
+        "target": str(target),
+        "files": 0,
+        "expected": 0,
+        "verified": False,
+        "entries": 0,
+        "genesis_hash": "",
+        "failure_type": "GIT_TIMEOUT",
+        "detail": (
+            f"{exc} did not finish within {_GIT_TIMEOUT_SECONDS:g}s, so "
+            "whether history holds a chain is unknown. Nothing was restored "
+            "and nothing was opened: appending to a chain that only looks "
+            "absent would fork it. Retry, or inspect the repository."
+        ),
+    }
+
+
 def migrate_ledger(repo_root: Path | None = None) -> dict[str, Any]:
     """Populate this clone's private chain from the pre-migration location.
 
@@ -256,7 +295,15 @@ def migrate_ledger(repo_root: Path | None = None) -> dict[str, Any]:
         written, expected = _copy_from_disk(legacy_dir, target)
         return _finish(target, "working tree", written, expected)
 
-    ref: str | None = _last_ref_with_chain(root)
+    # A git call that times out is an unanswered question, not a negative
+    # answer. It is reported as a failed migration so the caller retries or
+    # looks into the repository, never as nothing_to_migrate, which would
+    # let the next governed edit open a fresh genesis over a chain that is
+    # in history after all.
+    try:
+        ref: str | None = _last_ref_with_chain(root)
+    except GitTimeout as exc:
+        return _timed_out(target, exc)
     if ref is None:
         return {
             "status": "nothing_to_migrate",
@@ -268,7 +315,10 @@ def migrate_ledger(repo_root: Path | None = None) -> dict[str, Any]:
             ),
         }
 
-    restored: tuple[int, int] | None = _restore_from_git(root, ref, target)
+    try:
+        restored: tuple[int, int] | None = _restore_from_git(root, ref, target)
+    except GitTimeout as exc:
+        return _timed_out(target, exc)
     if restored is None:
         return {
             "status": "failed",

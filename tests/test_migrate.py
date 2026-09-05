@@ -27,7 +27,7 @@ _REPO_ROOT: Path = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from ledger.migrate import _run_git, migrate_ledger  # noqa: E402
+from ledger.migrate import GitTimeout, _run_git, migrate_ledger  # noqa: E402
 from tests._ledger_fixtures import build_valid_chain  # noqa: E402
 
 
@@ -180,17 +180,46 @@ class GitHistorySourceTests(_MigrateTestCase):
         shutil.rmtree(legacy)
         self._git("commit", "-q", "-m", "untrack")
 
-    def test_git_timeout_is_a_failed_step_not_a_hang(self) -> None:
-        """A git call that never returns ends as (1, "") with a stderr line."""
+    def test_git_timeout_raises_a_typed_error_not_a_negative_answer(self) -> None:
+        """A git call that never returns raises GitTimeout with a stderr line."""
         err = io.StringIO()
         with patch(
             "ledger.migrate.subprocess.run",
             side_effect=subprocess.TimeoutExpired(["git", "log"], 60),
         ):
             with redirect_stderr(err):
-                code, out = _run_git(["log", "-1"], self.repo)
-        self.assertEqual((code, out), (1, ""))
+                with self.assertRaises(GitTimeout):
+                    _run_git(["log", "-1"], self.repo)
         self.assertIn("did not finish within", err.getvalue())
+
+    def test_timeout_during_history_probe_is_a_failed_migration(self) -> None:
+        """Not nothing_to_migrate: that would let the next edit fork the chain."""
+        self._commit_then_untrack()
+        with patch(
+            "ledger.migrate.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(["git", "log"], 60),
+        ):
+            with redirect_stderr(io.StringIO()):
+                result = migrate_ledger(self.repo)
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["failure_type"], "GIT_TIMEOUT")
+        self.assertFalse((self.target / "bench-ledger.json").exists())
+
+    def test_timeout_during_restore_is_a_failed_migration(self) -> None:
+        """The probe answered; a cat-file or show that hangs still fails."""
+        self._commit_then_untrack()
+        real = subprocess.run
+
+        def hang_on_show(args, **kwargs):  # type: ignore[no-untyped-def]
+            if "show" in args:
+                raise subprocess.TimeoutExpired(args, 60)
+            return real(args, **kwargs)
+
+        with patch("ledger.migrate.subprocess.run", side_effect=hang_on_show):
+            with redirect_stderr(io.StringIO()):
+                result = migrate_ledger(self.repo)
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["failure_type"], "GIT_TIMEOUT")
 
     def test_git_calls_carry_a_timeout_and_detach_stdin(self) -> None:
         with patch("ledger.migrate.subprocess.run") as run:
