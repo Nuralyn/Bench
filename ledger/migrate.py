@@ -65,6 +65,16 @@ _INCOMPLETE_MARKER: str = "restore-incomplete"
 _GIT_TIMEOUT_SECONDS: float = 60.0
 
 
+class RestoreIncomplete(Exception):
+    """A publish ended with the incomplete marker still in the target.
+
+    Either a failed publish could not be fully moved back, or a complete
+    one could not remove its marker. In both the target holds files and
+    the marker, every later run will refuse with INCOMPLETE_RESTORE, and
+    this run must not report success over that state.
+    """
+
+
 class GitTimeout(Exception):
     """A git call did not finish within _GIT_TIMEOUT_SECONDS.
 
@@ -355,9 +365,9 @@ def _publish(staging: Path, target_dir: Path, written: int, expected: int) -> in
             f"files: {exc}; moving them back",
             file=sys.stderr,
         )
-        if _move_back(moved):
-            _remove_marker(marker)
-        return 0
+        if _move_back(moved) and _remove_marker(marker):
+            return 0
+        raise RestoreIncomplete("publish failed and could not be fully rolled back")
 
     if len(moved) < expected:
         print(
@@ -366,9 +376,12 @@ def _publish(staging: Path, target_dir: Path, written: int, expected: int) -> in
             f"a complete chain",
             file=sys.stderr,
         )
-    else:
-        _remove_marker(marker)
-        _remove_staging(staging)
+        return len(moved)
+    if not _remove_marker(marker):
+        # The files are all in place but every later run would refuse
+        # them; that is not a success this run may report.
+        raise RestoreIncomplete("published in full but the marker could not be removed")
+    _remove_staging(staging)
     return len(moved)
 
 
@@ -388,8 +401,8 @@ def _move_back(moved: list[tuple[Path, Path]]) -> bool:
     return all_back
 
 
-def _remove_marker(marker: Path) -> None:
-    """Remove the incomplete marker; a failure is logged and leaves it."""
+def _remove_marker(marker: Path) -> bool:
+    """Remove the incomplete marker. False, and a log, if it stays."""
     try:
         marker.unlink()
     except OSError as exc:
@@ -399,6 +412,8 @@ def _remove_marker(marker: Path) -> None:
             f"`python -m cli verify` passes",
             file=sys.stderr,
         )
+        return False
+    return True
 
 
 def _copy_from_disk(legacy_dir: Path, target_dir: Path) -> tuple[int, int]:
@@ -442,6 +457,35 @@ def _finish(
         "entries": result.get("entries", 0),
         "genesis_hash": result.get("genesis_hash", ""),
         "failure_type": result.get("failure_type", ""),
+    }
+
+
+def _incomplete(target: Path) -> dict[str, Any]:
+    """The failed result for a target carrying the incomplete marker.
+
+    Returned both when a run finds the marker left by an earlier attempt
+    and when this run's own publish ends with the marker in place (see
+    RestoreIncomplete), so the two read the same and neither is mistaken
+    for a chain.
+    """
+    return {
+        "status": "failed",
+        "source": "git history",
+        "target": str(target),
+        "files": 0,
+        "expected": 0,
+        "verified": False,
+        "entries": 0,
+        "genesis_hash": "",
+        "failure_type": "INCOMPLETE_RESTORE",
+        "detail": (
+            f"{target / _INCOMPLETE_MARKER} exists: a restore was interrupted "
+            "while publishing, or published fewer files than the commit held, "
+            "or could not remove its marker after publishing, and the target "
+            "must not be taken for a complete chain. Inspect the target, "
+            "remove what the interrupted restore left, and retry; or, if "
+            "`python -m cli verify` passes on it, remove the marker by hand."
+        ),
     }
 
 
@@ -490,25 +534,7 @@ def migrate_ledger(repo_root: Path | None = None) -> dict[str, Any]:
     # already_started guard, which would otherwise take the part for the
     # whole and report already_migrated.
     if (target / _INCOMPLETE_MARKER).exists():
-        return {
-            "status": "failed",
-            "source": "git history",
-            "target": str(target),
-            "files": 0,
-            "expected": 0,
-            "verified": False,
-            "entries": 0,
-            "genesis_hash": "",
-            "failure_type": "INCOMPLETE_RESTORE",
-            "detail": (
-                f"{target / _INCOMPLETE_MARKER} exists: an earlier restore was "
-                "interrupted while publishing, or published fewer files than "
-                "the commit held, and the target must not be taken for a "
-                "complete chain. Inspect the target, remove what the "
-                "interrupted restore left, and retry; or, if `python -m cli "
-                "verify` passes on it, remove the marker by hand."
-            ),
-        }
+        return _incomplete(target)
 
     entries_dir: Path = target / ENTRIES_DIRNAME
     already_started: bool = (target / _LEDGER_FILENAME).exists() or (
@@ -550,6 +576,9 @@ def migrate_ledger(repo_root: Path | None = None) -> dict[str, Any]:
         restored: tuple[int, int] | None = _restore_from_git(root, ref, target)
     except GitTimeout as exc:
         return _timed_out(target, exc)
+    except RestoreIncomplete as exc:
+        print(f"[bench migrate] {exc}", file=sys.stderr)
+        return _incomplete(target)
     if restored is None:
         return {
             "status": "failed",

@@ -406,6 +406,33 @@ class GitHistorySourceTests(_MigrateTestCase):
         self.assertTrue(second["verified"])
         self.assertEqual(self._staging_dirs(), [])
 
+    def test_marker_that_cannot_be_removed_is_not_a_successful_migration(
+        self,
+    ) -> None:
+        """Every rename succeeded, the marker stays: that is a failure.
+
+        Reporting migrated here would leave the CLI exiting 0 while every
+        later run refuses with INCOMPLETE_RESTORE.
+        """
+        self._commit_valid_chain_then_untrack()
+        real_unlink = Path.unlink
+
+        def refuse_marker(self_path, *args, **kwargs):  # type: ignore[no-untyped-def]
+            if self_path.name == "restore-incomplete":
+                raise OSError("filesystem went away")
+            return real_unlink(self_path, *args, **kwargs)
+
+        with patch("ledger.migrate.Path.unlink", new=refuse_marker):
+            with redirect_stderr(io.StringIO()):
+                result = migrate_ledger(self.repo)
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["failure_type"], "INCOMPLETE_RESTORE")
+        self.assertTrue((self.target / "restore-incomplete").exists())
+        # The files did arrive; only the marker is wrong, and the detail
+        # tells the operator how to clear it after verifying.
+        self.assertTrue((self.target / "bench-ledger.json").exists())
+        self.assertIn("verify", result["detail"])
+
     def test_incomplete_marker_blocks_already_migrated(self) -> None:
         """A publish that could not be rolled back is a failure, not a chain."""
         self._commit_valid_chain_then_untrack()
