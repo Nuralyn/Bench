@@ -318,6 +318,52 @@ class GitHistorySourceTests(_MigrateTestCase):
         self.assertTrue(second["verified"])
         self.assertEqual(self._staging_dirs(), [])
 
+    def test_staging_debris_is_ignored_even_under_an_unignored_ledger_path(
+        self,
+    ) -> None:
+        """A custom BENCH_LEDGER_PATH may sit where nothing ignores it.
+
+        The staging directory ignores itself, so the debris of a failed
+        attempt never shows as untracked, and a `git add -A` cannot commit
+        the diff bodies a restored entry carries.
+        """
+        custom: Path = self.repo / "custom-ledger"
+        os.environ["BENCH_LEDGER_PATH"] = str(custom / "bench-ledger.json")
+        self._commit_valid_chain_then_untrack()
+        real = subprocess.run
+        shows: list[int] = [0]
+
+        def hang_on_second_show(args, **kwargs):  # type: ignore[no-untyped-def]
+            if "show" in args:
+                shows[0] += 1
+                if shows[0] == 2:
+                    raise subprocess.TimeoutExpired(args, 60)
+            return real(args, **kwargs)
+
+        def refuse(path):  # type: ignore[no-untyped-def]
+            raise OSError("filesystem went away")
+
+        with patch("ledger.migrate.subprocess.run", side_effect=hang_on_second_show):
+            with patch("ledger.migrate.shutil.rmtree", side_effect=refuse):
+                with redirect_stderr(io.StringIO()):
+                    result = migrate_ledger(self.repo)
+        self.assertEqual(result["status"], "failed")
+        stale: list[Path] = sorted(custom.glob(".restoring-*"))
+        self.assertEqual(len(stale), 1)
+        self.assertEqual((stale[0] / ".gitignore").read_text(encoding="utf-8"), "*\n")
+        self.assertTrue(any(stale[0].glob("*.json")) or any((stale[0] / "entries").glob("*.json")))
+
+        status = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=all"],
+            cwd=str(self.repo),
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=60,
+        ).stdout
+        self.assertNotIn(".restoring-", status)
+        self.assertNotIn("custom-ledger", status)
+
     def test_a_directory_bench_did_not_create_is_never_removed(self) -> None:
         """Only a staging directory carrying the ownership marker is cleared."""
         self._commit_valid_chain_then_untrack()

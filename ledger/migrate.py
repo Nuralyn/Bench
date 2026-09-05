@@ -41,9 +41,10 @@ _JSON_GLOB: str = "*.json"
 
 # A restore from git is fetched into a staging directory and published into
 # the target only once every fetch has finished. Staging lives INSIDE the
-# target directory: that is the one location the configured ledger path
-# proves writable, and it is the gitignored one, so debris from a failed
-# attempt can never be committed. Each attempt gets its own mkdtemp
+# target directory, the one location the configured ledger path proves
+# writable, and carries its own .gitignore of "*" so the debris of a failed
+# attempt is ignored wherever the target sits (a BENCH_LEDGER_PATH may name
+# a directory nothing else ignores). Each attempt gets its own mkdtemp
 # directory carrying an ownership marker, and only a directory that carries
 # the marker is ever removed, so a stale attempt is cleared and anything
 # else with a similar name is left alone.
@@ -197,8 +198,16 @@ def _restore_from_git(
 
 
 def _new_staging(target_dir: Path) -> Path:
-    """A fresh staging directory inside the target, marked as Bench's own."""
+    """A fresh staging directory inside the target, marked as Bench's own.
+
+    It carries its own ``.gitignore`` of ``*`` before any blob is written,
+    so the debris of a failed attempt is ignored wherever the target sits:
+    ``.bench/`` is ignored by the project's own file, but
+    ``BENCH_LEDGER_PATH`` may name a directory nothing ignores, and a
+    restored entry holds the full diff body of every change it recorded.
+    """
     staging: Path = Path(tempfile.mkdtemp(prefix=_STAGING_PREFIX, dir=target_dir))
+    (staging / ".gitignore").write_text("*\n", encoding="utf-8")
     (staging / _STAGING_OWNER_MARKER).write_text("", encoding="utf-8")
     (staging / ENTRIES_DIRNAME).mkdir()
     return staging
