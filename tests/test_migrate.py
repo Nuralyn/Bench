@@ -31,6 +31,30 @@ from ledger.migrate import GitTimeout, _run_git, migrate_ledger  # noqa: E402
 from tests._ledger_fixtures import build_valid_chain  # noqa: E402
 
 
+def _hang_on_show(nth: int):  # type: ignore[no-untyped-def]
+    """A subprocess.run stand-in whose ``nth`` `git show` times out.
+
+    Every other call goes to the real subprocess.run, so the probe and the
+    enumeration answer and only the fetch hangs.
+    """
+    real = subprocess.run
+    shows: list[int] = [0]
+
+    def run(args, **kwargs):  # type: ignore[no-untyped-def]
+        if "show" in args:
+            shows[0] += 1
+            if shows[0] == nth:
+                raise subprocess.TimeoutExpired(args, 60)
+        return real(args, **kwargs)
+
+    return run
+
+
+def _refuse(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+    """A filesystem call that fails, standing in for rmtree or unlink."""
+    raise OSError("filesystem went away")
+
+
 def _write_chain(
     directory: Path, count: int = 3, dag_entries: int = 0
 ) -> list[dict]:
@@ -230,22 +254,8 @@ class GitHistorySourceTests(_MigrateTestCase):
         deliberately broken entry so partial restores stay partial), so
         the retry can be asserted as a complete, verified migration.
         """
-        legacy: Path = self.repo / "ledger"
-        _write_chain(legacy, count=3, dag_entries=2)
-        self._git("add", "-A")
-        self._git("commit", "-q", "-m", "chain")
-        self._git("rm", "-r", "-q", "--cached", "ledger")
-        shutil.rmtree(legacy)
-        self._git("commit", "-q", "-m", "untrack")
-        real = subprocess.run
-        shows: list[int] = [0]
-
-        def hang_on_second_show(args, **kwargs):  # type: ignore[no-untyped-def]
-            if "show" in args:
-                shows[0] += 1
-                if shows[0] == 2:
-                    raise subprocess.TimeoutExpired(args, 60)
-            return real(args, **kwargs)
+        self._commit_valid_chain_then_untrack()
+        hang_on_second_show = _hang_on_show(2)
 
         with patch("ledger.migrate.subprocess.run", side_effect=hang_on_second_show):
             with redirect_stderr(io.StringIO()):
@@ -288,18 +298,9 @@ class GitHistorySourceTests(_MigrateTestCase):
         directory it owns, and restores in full.
         """
         self._commit_valid_chain_then_untrack()
-        real = subprocess.run
-        shows: list[int] = [0]
+        hang_on_second_show = _hang_on_show(2)
 
-        def hang_on_second_show(args, **kwargs):  # type: ignore[no-untyped-def]
-            if "show" in args:
-                shows[0] += 1
-                if shows[0] == 2:
-                    raise subprocess.TimeoutExpired(args, 60)
-            return real(args, **kwargs)
-
-        def refuse(path):  # type: ignore[no-untyped-def]
-            raise OSError("filesystem went away")
+        refuse = _refuse
 
         with patch("ledger.migrate.subprocess.run", side_effect=hang_on_second_show):
             with patch("ledger.migrate.shutil.rmtree", side_effect=refuse):
@@ -330,18 +331,9 @@ class GitHistorySourceTests(_MigrateTestCase):
         custom: Path = self.repo / "custom-ledger"
         os.environ["BENCH_LEDGER_PATH"] = str(custom / "bench-ledger.json")
         self._commit_valid_chain_then_untrack()
-        real = subprocess.run
-        shows: list[int] = [0]
+        hang_on_second_show = _hang_on_show(2)
 
-        def hang_on_second_show(args, **kwargs):  # type: ignore[no-untyped-def]
-            if "show" in args:
-                shows[0] += 1
-                if shows[0] == 2:
-                    raise subprocess.TimeoutExpired(args, 60)
-            return real(args, **kwargs)
-
-        def refuse(path):  # type: ignore[no-untyped-def]
-            raise OSError("filesystem went away")
+        refuse = _refuse
 
         with patch("ledger.migrate.subprocess.run", side_effect=hang_on_second_show):
             with patch("ledger.migrate.shutil.rmtree", side_effect=refuse):

@@ -460,6 +460,29 @@ def _finish(
     }
 
 
+def _failed(
+    target: Path, source: str, failure_type: str, detail: str
+) -> dict[str, Any]:
+    """A failed-migration result in which nothing was restored.
+
+    One shape for every failure so callers and the CLI render them the
+    same way; failure_type names the cause and detail says what to do,
+    which is always a retry or an inspection, never a fresh genesis.
+    """
+    return {
+        "status": "failed",
+        "source": source,
+        "target": str(target),
+        "files": 0,
+        "expected": 0,
+        "verified": False,
+        "entries": 0,
+        "genesis_hash": "",
+        "failure_type": failure_type,
+        "detail": detail,
+    }
+
+
 def _incomplete(target: Path) -> dict[str, Any]:
     """The failed result for a target carrying the incomplete marker.
 
@@ -468,51 +491,30 @@ def _incomplete(target: Path) -> dict[str, Any]:
     RestoreIncomplete), so the two read the same and neither is mistaken
     for a chain.
     """
-    return {
-        "status": "failed",
-        "source": "git history",
-        "target": str(target),
-        "files": 0,
-        "expected": 0,
-        "verified": False,
-        "entries": 0,
-        "genesis_hash": "",
-        "failure_type": "INCOMPLETE_RESTORE",
-        "detail": (
-            f"{target / _INCOMPLETE_MARKER} exists: a restore was interrupted "
-            "while publishing, or published fewer files than the commit held, "
-            "or could not remove its marker after publishing, and the target "
-            "must not be taken for a complete chain. Inspect the target, "
-            "remove what the interrupted restore left, and retry; or, if "
-            "`python -m cli verify` passes on it, remove the marker by hand."
-        ),
-    }
+    return _failed(
+        target,
+        "git history",
+        "INCOMPLETE_RESTORE",
+        f"{target / _INCOMPLETE_MARKER} exists: a restore was interrupted "
+        "while publishing, or published fewer files than the commit held, "
+        "or could not remove its marker after publishing, and the target "
+        "must not be taken for a complete chain. Inspect the target, "
+        "remove what the interrupted restore left, and retry; or, if "
+        "`python -m cli verify` passes on it, remove the marker by hand.",
+    )
 
 
 def _timed_out(target: Path, exc: GitTimeout) -> dict[str, Any]:
-    """The failed-migration result for a git call that did not finish.
-
-    Same shape as the other failure results so callers and the CLI render
-    it the same way; failure_type names the cause so a retry is the obvious
-    next step rather than a fresh genesis.
-    """
-    return {
-        "status": "failed",
-        "source": "git history",
-        "target": str(target),
-        "files": 0,
-        "expected": 0,
-        "verified": False,
-        "entries": 0,
-        "genesis_hash": "",
-        "failure_type": "GIT_TIMEOUT",
-        "detail": (
-            f"{exc} did not finish within {_GIT_TIMEOUT_SECONDS:g}s, so "
-            "whether history holds a chain is unknown. Nothing was restored "
-            "and nothing was opened: appending to a chain that only looks "
-            "absent would fork it. Retry, or inspect the repository."
-        ),
-    }
+    """The failed result for a git call that did not finish."""
+    return _failed(
+        target,
+        "git history",
+        "GIT_TIMEOUT",
+        f"{exc} did not finish within {_GIT_TIMEOUT_SECONDS:g}s, so "
+        "whether history holds a chain is unknown. Nothing was restored "
+        "and nothing was opened: appending to a chain that only looks "
+        "absent would fork it. Retry, or inspect the repository.",
+    )
 
 
 def migrate_ledger(repo_root: Path | None = None) -> dict[str, Any]:
@@ -580,22 +582,14 @@ def migrate_ledger(repo_root: Path | None = None) -> dict[str, Any]:
         print(f"[bench migrate] {exc}", file=sys.stderr)
         return _incomplete(target)
     if restored is None:
-        return {
-            "status": "failed",
-            "source": f"git history at {ref[:12]}",
-            "target": str(target),
-            "files": 0,
-            "expected": 0,
-            "verified": False,
-            "entries": 0,
-            "genesis_hash": "",
-            "failure_type": "ENUMERATION_FAILED",
-            "detail": (
-                "Could not list the chain at that commit, so nothing was "
-                "restored. This is reported rather than treated as an empty "
-                "chain, because appending to a chain that only looks empty "
-                "would fork it."
-            ),
-        }
+        return _failed(
+            target,
+            f"git history at {ref[:12]}",
+            "ENUMERATION_FAILED",
+            "Could not list the chain at that commit, or could not stage a "
+            "restore, so nothing was restored. This is reported rather than "
+            "treated as an empty chain, because appending to a chain that "
+            "only looks empty would fork it.",
+        )
     written, expected = restored
     return _finish(target, f"git history at {ref[:12]}", written, expected)
