@@ -365,6 +365,41 @@ class GitHistorySourceTests(_MigrateTestCase):
         migrate until the tracked lock was removed by hand.
         """
         custom: Path = self.repo / "custom-ledger"
+        status: str = self._migrate_leaving_the_lock(custom)
+        ignore: str = (custom / ".gitignore").read_text(encoding="utf-8")
+        for pattern in (".migrate.lock", "restore-incomplete", ".restoring-*/", ".gitignore"):
+            self.assertIn(pattern, ignore.splitlines())
+        self.assertNotIn(".migrate.lock", status)
+        self.assertNotIn("restore-incomplete", status)
+        self.assertNotIn(".gitignore", status)
+
+    def test_a_negated_ignore_rule_is_overridden_by_appending_last(self) -> None:
+        """Git applies the last matching pattern, so presence proves nothing.
+
+        An ignore file that names the lock and then negates it would leave
+        the lock committable if Bench only checked that its pattern was
+        present somewhere; Bench's block must be the tail of the file.
+        """
+        custom: Path = self.repo / "custom-ledger"
+        custom.mkdir(parents=True)
+        (custom / ".gitignore").write_text(
+            ".migrate.lock\n!.migrate.lock\nrestore-incomplete\n!restore-incomplete\n",
+            encoding="utf-8",
+        )
+        status: str = self._migrate_leaving_the_lock(custom)
+        self.assertNotIn(".migrate.lock", status)
+        self.assertNotIn("restore-incomplete", status)
+        lines: list[str] = (custom / ".gitignore").read_text(encoding="utf-8").splitlines()
+        self.assertEqual(lines[:2], [".migrate.lock", "!.migrate.lock"])
+        self.assertEqual(lines[-4:], [".migrate.lock", "restore-incomplete", ".restoring-*/", ".gitignore"])
+
+    def _migrate_leaving_the_lock(self, custom: Path) -> str:
+        """Migrate into `custom` with a lock that cannot be released.
+
+        Asserts the typed LOCK_NOT_RELEASED result and that the lock is
+        still on disk, then returns `git status --porcelain
+        --untracked-files=all` for the repository.
+        """
         os.environ["BENCH_LEDGER_PATH"] = str(custom / "bench-ledger.json")
         self._commit_valid_chain_then_untrack()
         real_unlink = Path.unlink
@@ -379,11 +414,7 @@ class GitHistorySourceTests(_MigrateTestCase):
                 result = migrate_ledger(self.repo)
         self.assertEqual(result["failure_type"], "LOCK_NOT_RELEASED")
         self.assertTrue((custom / ".migrate.lock").exists())
-        ignore: str = (custom / ".gitignore").read_text(encoding="utf-8")
-        for pattern in (".migrate.lock", "restore-incomplete", ".restoring-*/", ".gitignore"):
-            self.assertIn(pattern, ignore.splitlines())
-
-        status = subprocess.run(
+        return subprocess.run(
             ["git", "status", "--porcelain", "--untracked-files=all"],
             cwd=str(self.repo),
             capture_output=True,
@@ -391,9 +422,6 @@ class GitHistorySourceTests(_MigrateTestCase):
             check=True,
             timeout=60,
         ).stdout
-        self.assertNotIn(".migrate.lock", status)
-        self.assertNotIn("restore-incomplete", status)
-        self.assertNotIn(".gitignore", status)
 
     def test_existing_ignore_file_is_appended_not_replaced(self) -> None:
         custom: Path = self.repo / "custom-ledger"
@@ -433,7 +461,9 @@ class GitHistorySourceTests(_MigrateTestCase):
         written: bytes = (custom / ".gitignore").read_bytes()
         self.assertTrue(written.startswith(original + b"\n"))
         appended: list[bytes] = written[len(original) + 1 :].splitlines()
-        self.assertEqual(appended, [b"restore-incomplete", b".restoring-*/", b".gitignore"])
+        self.assertEqual(
+            appended, [b".migrate.lock", b"restore-incomplete", b".restoring-*/", b".gitignore"]
+        )
 
     def test_a_directory_bench_did_not_create_is_never_removed(self) -> None:
         """Only a staging directory carrying the ownership marker is cleared."""

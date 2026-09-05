@@ -602,30 +602,33 @@ _RUNTIME_IGNORES: tuple[str, ...] = (
     f"{_STAGING_PREFIX}*/",
     ".gitignore",
 )
+# The block _ensure_runtime_ignore keeps at the tail of that file.
+_RUNTIME_IGNORE_BLOCK: bytes = b"\n".join(p.encode("ascii") for p in _RUNTIME_IGNORES) + b"\n"
 
 
 def _ensure_runtime_ignore(target: Path) -> None:
     """Make sure the target's .gitignore covers Bench's runtime files.
 
-    Creates the file if absent and appends any missing pattern otherwise;
-    a .gitignore inside an already-ignored .bench/ is harmless. The file is
-    read and appended as bytes, so an existing file in any encoding is
-    kept as it was and cannot raise a decode error; the patterns Bench
-    adds are ASCII. Raises OSError to the caller, which is about to create
-    the lock in the same directory and reports both failures the same way.
+    Git applies the last matching pattern, so a pattern that is merely
+    present somewhere in the file proves nothing: `.migrate.lock` followed
+    by `!.migrate.lock` leaves the lock committable. Bench's block is
+    therefore appended whenever it is not already the tail of the file,
+    which makes it the last word on its own paths and keeps a rerun from
+    growing the file. A .gitignore inside an already-ignored .bench/ is
+    harmless. The file is read and appended as bytes, so an existing file
+    in any encoding is kept as it was and cannot raise a decode error; the
+    patterns Bench adds are ASCII. Raises OSError to the caller, which is
+    about to create the lock in the same directory and reports both
+    failures the same way (tests.test_migrate.GitHistorySourceTests).
     """
     ignore: Path = target / ".gitignore"
     raw: bytes = ignore.read_bytes() if ignore.exists() else b""
-    present: set[bytes] = {line.strip() for line in raw.splitlines()}
-    missing: list[bytes] = [
-        p.encode("ascii") for p in _RUNTIME_IGNORES if p.encode("ascii") not in present
-    ]
-    if not missing:
+    if raw == _RUNTIME_IGNORE_BLOCK or raw.endswith(b"\n" + _RUNTIME_IGNORE_BLOCK):
         return
     with ignore.open("ab") as handle:
         if raw and not raw.endswith(b"\n"):
             handle.write(b"\n")
-        handle.write(b"\n".join(missing) + b"\n")
+        handle.write(_RUNTIME_IGNORE_BLOCK)
 
 
 def _acquire_lock(target: Path) -> Path | None:
