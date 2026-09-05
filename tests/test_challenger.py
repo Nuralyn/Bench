@@ -233,9 +233,13 @@ class NormalizeChallengerResponseTests(unittest.TestCase):
         self.assertNotIn("_normalized", raw)
 
     @patch("pipeline.challenger.call_model")
-    def test_response_nested_too_deep_fails_closed_without_raising(
+    def test_deeply_nested_unknown_field_is_tolerated(
         self, mock_call: MagicMock
     ) -> None:
+        # The validator ignores unknown fields, so a valid CLEAR with one
+        # nested far beyond what a deep copy could walk must still be a
+        # CLEAR: the original is kept by targeted shallow copy, not by
+        # recursion, and the extra field rides through by reference.
         nested: dict = {}
         for _ in range(5000):
             nested = {"n": nested}
@@ -246,9 +250,8 @@ class NormalizeChallengerResponseTests(unittest.TestCase):
             "_tokens": {"input": 10, "output": 20},
         }
         result: dict = run_challenger(_valid_diff(), _valid_constitution(), "hash")
-        self.assertEqual(result["status"], "PIPELINE_ERROR")
-        self.assertEqual(result["error"], "INVALID_CHALLENGER_RESPONSE")
-        self.assertIsInstance(result["raw_response"], str)
+        self.assertEqual(result["status"], "CLEAR")
+        self.assertIs(result["extra"], nested)
 
     @patch("pipeline.challenger.call_model")
     def test_model_authored_normalized_key_does_not_survive(
