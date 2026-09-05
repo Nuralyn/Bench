@@ -12,10 +12,14 @@ by ledger/migrate.py; tests/test_procs.py proves a grandchild dies with
 its parent.
 """
 
+import contextlib
 import os
 import signal
 import subprocess
 import sys
+import threading
+from collections.abc import Iterator
+from types import FrameType
 from typing import Any
 
 # How long to wait for the group to be gone once it has been told to go.
@@ -55,13 +59,47 @@ def run_isolated(
         **isolate,
     )
     try:
-        stdout, stderr = proc.communicate(timeout=timeout)
+        with _ended_on_sigterm(proc):
+            stdout, stderr = proc.communicate(timeout=timeout)
     except BaseException:
         # A timeout, or an interrupt (Ctrl-C) while waiting: either way the
         # group must not outlive the call. Ended, then re-raised unchanged.
         _end_group(proc)
         raise
     return subprocess.CompletedProcess(args, proc.returncode, stdout, stderr)
+
+
+@contextlib.contextmanager
+def _ended_on_sigterm(proc: subprocess.Popen[str]) -> Iterator[None]:
+    """While active, a SIGTERM to this process ends the child's group first.
+
+    The child leads its own session, so a signal sent to Bench's process
+    group (a CI runner or a service manager cancelling the job) would not
+    reach it, and SIGTERM ends Python without passing through the except
+    clause above. POSIX only, and only on the main thread, where Python
+    lets a handler be installed; elsewhere the timeout stays the bound.
+    The previous handler is restored afterwards and, if it was a
+    callable, invoked; the default disposition becomes SystemExit(143),
+    which runs the finally clauses a plain termination would skip.
+    """
+    if sys.platform == "win32" or threading.current_thread() is not threading.main_thread():
+        yield
+        return
+    previous = signal.getsignal(signal.SIGTERM)
+
+    def end_then_terminate(signum: int, frame: FrameType | None) -> None:
+        _end_group(proc)
+        signal.signal(signal.SIGTERM, previous)
+        if callable(previous):
+            previous(signum, frame)
+            return
+        raise SystemExit(128 + signum)
+
+    signal.signal(signal.SIGTERM, end_then_terminate)
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGTERM, previous)
 
 
 def _end_group(proc: subprocess.Popen[str]) -> None:

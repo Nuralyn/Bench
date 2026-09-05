@@ -633,6 +633,10 @@ def _runtime_dir(target: Path) -> Path:
     failures the same way (tests.test_migrate.GitHistorySourceTests).
     """
     runtime: Path = target / _RUNTIME_DIRNAME
+    if runtime.is_symlink():
+        # mkdir would follow it and the lock, marker and staged entries
+        # would land wherever it points, outside the configured target.
+        raise OSError(f"{runtime} is a symbolic link, not a directory Bench created; left alone")
     runtime.mkdir(parents=True, exist_ok=True)
     ignore: Path = runtime / ".gitignore"
     if ignore.is_symlink() or ignore.exists():

@@ -521,6 +521,24 @@ class GitHistorySourceTests(_MigrateTestCase):
         self.assertIn("could not prepare", result["detail"])
         self.assertEqual((self.target / ".migrate").read_text(encoding="utf-8"), "not a directory")
 
+    def test_a_symlinked_runtime_directory_is_refused(self) -> None:
+        """A `.migrate` link would put the lock and staged entries elsewhere."""
+        self._commit_valid_chain_then_untrack()
+        elsewhere: Path = self.repo / "elsewhere"
+        elsewhere.mkdir()
+        (elsewhere / ".gitignore").write_text("*\n", encoding="utf-8")
+        self.target.mkdir(parents=True, exist_ok=True)
+        try:
+            os.symlink(elsewhere, self.target / ".migrate", target_is_directory=True)
+        except OSError as exc:  # symlinks need a privilege on some Windows setups
+            self.skipTest(f"cannot create a symlink here: {exc}")
+        with redirect_stderr(io.StringIO()):
+            result = migrate_ledger(self.repo)
+        self.assertEqual(result["failure_type"], "LOCK_FAILED")
+        self.assertIn("symbolic link", result["detail"])
+        self.assertEqual(sorted(p.name for p in elsewhere.iterdir()), [".gitignore"])
+        self.assertFalse((self.target / "bench-ledger.json").exists())
+
     def test_a_runtime_directory_bench_did_not_create_is_refused(self) -> None:
         """A .migrate/ that is not self-ignored is not Bench's, and not used.
 

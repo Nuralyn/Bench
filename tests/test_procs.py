@@ -105,6 +105,39 @@ class RunIsolatedTests(unittest.TestCase):
             time.sleep(0.2)
         self.assertFalse(_alive(pid), f"grandchild {pid} outlived the interrupt")
 
+    @unittest.skipIf(sys.platform == "win32", "SIGTERM delivery is a POSIX matter")
+    def test_a_sigterm_to_bench_ends_the_group_before_exiting(self) -> None:
+        """A cancelled job must not leave the probe's tree running.
+
+        The child leads its own session, so a signal to Bench's group would
+        not reach it on its own; the handler ends the group, then exits.
+        """
+        import signal
+        import threading
+
+        with tempfile.TemporaryDirectory() as tmp:
+            pid_file: Path = Path(tmp) / "grandchild.pid"
+
+            def terminate_once_ready() -> None:
+                ready: float = time.monotonic() + 10
+                while not pid_file.exists() and time.monotonic() < ready:
+                    time.sleep(0.05)
+                os.kill(os.getpid(), signal.SIGTERM)
+
+            threading.Thread(target=terminate_once_ready, daemon=True).start()
+            with self.assertRaises(SystemExit) as raised:
+                run_isolated(
+                    [sys.executable, "-c", _CHILD, str(pid_file), _GRANDCHILD],
+                    timeout=60,
+                )
+            self.assertEqual(raised.exception.code, 128 + signal.SIGTERM)
+            self.assertEqual(signal.getsignal(signal.SIGTERM), signal.SIG_DFL)
+            pid: int = int(pid_file.read_text(encoding="utf-8"))
+        deadline: float = time.monotonic() + 10
+        while _alive(pid) and time.monotonic() < deadline:
+            time.sleep(0.2)
+        self.assertFalse(_alive(pid), f"grandchild {pid} outlived the termination")
+
     def test_a_finished_child_returns_a_completed_process(self) -> None:
         result = run_isolated(
             [
