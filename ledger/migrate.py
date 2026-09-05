@@ -130,9 +130,6 @@ def _restore_from_git(
     on purpose: the latter is what an empty tree looks like, and a total
     failure must not be mistaken for a clean restore of nothing.
     """
-    target_dir.mkdir(parents=True, exist_ok=True)
-    (target_dir / ENTRIES_DIRNAME).mkdir(exist_ok=True)
-
     # Enumerate the tree first rather than probing each name with `git show`.
     # A failed `show` cannot be told apart from an absent file, so probing
     # would either count a chain that legitimately has no ledger-meta.json as
@@ -154,47 +151,75 @@ def _restore_from_git(
         )
         return None
 
+    wanted: list[str] = _wanted_paths(listing)
+
+    # Fetch into a staging directory beside the target and move into place
+    # only once every fetch has finished. Nothing reaches the target while
+    # git can still time out, so a timed-out attempt cannot leave a
+    # half-restored chain that the already_started guard would accept on
+    # the next run; the worst a failed cleanup can do is leave debris in
+    # the staging directory, which the next attempt clears first.
+    staging: Path = target_dir.parent / f"{target_dir.name}.restoring"
+    if not _clear_staging(staging):
+        return None
+    staging.mkdir(parents=True)
+    (staging / ENTRIES_DIRNAME).mkdir()
+    try:
+        written: int = _fetch_into(repo_root, ref, wanted, staging)
+    except GitTimeout:
+        _clear_staging(staging)
+        raise
+    return _move_into_place(staging, target_dir, written), len(wanted)
+
+
+def _wanted_paths(listing: str) -> list[str]:
+    """The chain files in an ls-tree listing: the two segments and entries."""
     wanted: list[str] = []
     for path in listing.split():
         parent: str = Path(path).parent.name
         name: str = Path(path).name
-        if parent == _LEGACY_DIRNAME and name in (
-            _LEDGER_FILENAME,
-            META_FILENAME,
-        ):
+        if parent == _LEGACY_DIRNAME and name in (_LEDGER_FILENAME, META_FILENAME):
+            wanted.append(path)
+        elif parent == ENTRIES_DIRNAME and name.endswith(".json"):
             wanted.append(path)
         elif parent == ENTRIES_DIRNAME:
-            if name.endswith(".json"):
-                wanted.append(path)
-            else:
-                print(
-                    f"[bench migrate] skipping non-JSON file in entries: "
-                    f"{path}",
-                    file=sys.stderr,
-                )
+            print(
+                f"[bench migrate] skipping non-JSON file in entries: {path}",
+                file=sys.stderr,
+            )
+    return wanted
 
-    expected: int = len(wanted)
+
+def _clear_staging(staging: Path) -> bool:
+    """Remove a staging directory, stale or just abandoned. False on failure.
+
+    A failure is logged and reported rather than raised (C-001). The
+    caller treats it as a failed restore, since fetching into a directory
+    that still holds another attempt's files would mix two restores.
+    """
+    if not staging.exists():
+        return True
+    try:
+        shutil.rmtree(staging)
+    except OSError as exc:
+        print(
+            f"[bench migrate] could not clear the staging directory "
+            f"{staging}: {exc}",
+            file=sys.stderr,
+        )
+        return False
+    return True
+
+
+def _fetch_into(repo_root: Path, ref: str, wanted: list[str], staging: Path) -> int:
+    """Write each wanted blob at ``ref`` into ``staging``; return the count.
+
+    A blob git cannot read is logged and skipped, which the caller reports
+    as a partial restore. A timeout propagates as GitTimeout.
+    """
     written: int = 0
-    written_paths: list[Path] = []
     for path in wanted:
-        try:
-            code, blob = _run_git(["show", f"{ref}:{path}"], repo_root)
-        except GitTimeout:
-            # Undo this attempt's writes before the timeout propagates. A
-            # half-restored chain left in place would satisfy the
-            # already_started guard on the next run and pass for a complete
-            # one, possibly without its tips, and every append after that
-            # would extend a silently truncated history.
-            for written_path in written_paths:
-                try:
-                    written_path.unlink()
-                except OSError as cleanup_exc:
-                    print(
-                        f"[bench migrate] could not remove {written_path} "
-                        f"after the timeout: {cleanup_exc}",
-                        file=sys.stderr,
-                    )
-            raise
+        code, blob = _run_git(["show", f"{ref}:{path}"], repo_root)
         if code != 0:
             print(
                 f"[bench migrate] could not read {path} at {ref[:12]}; "
@@ -202,20 +227,44 @@ def _restore_from_git(
                 file=sys.stderr,
             )
             continue
-        name = Path(path).name
+        name: str = Path(path).name
         destination: Path = (
-            target_dir / ENTRIES_DIRNAME / name
+            staging / ENTRIES_DIRNAME / name
             if Path(path).parent.name == ENTRIES_DIRNAME
-            else target_dir / name
+            else staging / name
         )
-        # Only a path this attempt created is eligible for rollback; a file
-        # that was already there is never removed by the rollback (C-008).
-        created: bool = not destination.exists()
         destination.write_text(blob, encoding="utf-8")
-        if created:
-            written_paths.append(destination)
         written += 1
-    return written, expected
+    return written
+
+
+def _move_into_place(staging: Path, target_dir: Path, written: int) -> int:
+    """Move every staged file into the target; return how many arrived.
+
+    Each move is a rename, so a file is either wholly in place or not there
+    at all. A move that fails is logged and stops the loop (C-001); what
+    arrived is counted, the caller verifies it and reports the shortfall as
+    partial, and the staging directory is left for inspection.
+    """
+    target_dir.mkdir(parents=True, exist_ok=True)
+    (target_dir / ENTRIES_DIRNAME).mkdir(exist_ok=True)
+    moved: int = 0
+    try:
+        for source in sorted(staging.glob("*.json")):
+            source.replace(target_dir / source.name)
+            moved += 1
+        for source in sorted((staging / ENTRIES_DIRNAME).glob("*.json")):
+            source.replace(target_dir / ENTRIES_DIRNAME / source.name)
+            moved += 1
+    except OSError as exc:
+        print(
+            f"[bench migrate] could not move a restored file into place: "
+            f"{exc}; {moved} of {written} arrived",
+            file=sys.stderr,
+        )
+        return moved
+    _clear_staging(staging)
+    return moved
 
 
 def _copy_from_disk(legacy_dir: Path, target_dir: Path) -> tuple[int, int]:

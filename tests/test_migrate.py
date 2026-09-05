@@ -252,14 +252,59 @@ class GitHistorySourceTests(_MigrateTestCase):
                 first = migrate_ledger(self.repo)
         self.assertEqual(first["status"], "failed")
         self.assertEqual(first["failure_type"], "GIT_TIMEOUT")
+        # Nothing reached the target, and the staging directory is gone.
         self.assertFalse((self.target / "bench-ledger.json").exists())
         self.assertEqual(list((self.target / "entries").glob("*.json")), [])
+        self.assertFalse((self.target.parent / ".bench.restoring").exists())
 
         # git is answering again: the retry restores the whole chain.
         with redirect_stderr(io.StringIO()):
             second = migrate_ledger(self.repo)
         self.assertEqual(second["status"], "migrated")
         self.assertTrue((self.target / "bench-ledger.json").exists())
+        self.assertFalse((self.target.parent / ".bench.restoring").exists())
+
+    def test_failed_cleanup_after_timeout_still_leaves_the_target_empty(self) -> None:
+        """Debris from a cleanup that fails lands in staging, never in target.
+
+        So the next attempt still sees no chain, clears the stale staging
+        directory, and restores in full.
+        """
+        legacy: Path = self.repo / "ledger"
+        _write_chain(legacy, count=3, dag_entries=2)
+        self._git("add", "-A")
+        self._git("commit", "-q", "-m", "chain")
+        self._git("rm", "-r", "-q", "--cached", "ledger")
+        shutil.rmtree(legacy)
+        self._git("commit", "-q", "-m", "untrack")
+        real = subprocess.run
+        shows: list[int] = [0]
+
+        def hang_on_second_show(args, **kwargs):  # type: ignore[no-untyped-def]
+            if "show" in args:
+                shows[0] += 1
+                if shows[0] == 2:
+                    raise subprocess.TimeoutExpired(args, 60)
+            return real(args, **kwargs)
+
+        def refuse(path):  # type: ignore[no-untyped-def]
+            raise OSError("filesystem went away")
+
+        with patch("ledger.migrate.subprocess.run", side_effect=hang_on_second_show):
+            with patch("ledger.migrate.shutil.rmtree", side_effect=refuse):
+                with redirect_stderr(io.StringIO()):
+                    first = migrate_ledger(self.repo)
+        self.assertEqual(first["status"], "failed")
+        self.assertEqual(first["failure_type"], "GIT_TIMEOUT")
+        self.assertFalse((self.target / "bench-ledger.json").exists())
+        self.assertEqual(list((self.target / "entries").glob("*.json")), [])
+        self.assertTrue((self.target.parent / ".bench.restoring").exists())
+
+        with redirect_stderr(io.StringIO()):
+            second = migrate_ledger(self.repo)
+        self.assertEqual(second["status"], "migrated")
+        self.assertTrue(second["verified"])
+        self.assertFalse((self.target.parent / ".bench.restoring").exists())
 
     def test_git_calls_carry_a_timeout_and_detach_stdin(self) -> None:
         with patch("ledger.migrate.subprocess.run") as run:
