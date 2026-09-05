@@ -248,7 +248,7 @@ class ProbeTimeoutTests(unittest.TestCase):
     def test_git_refs_timeout_returns_none_and_logs(self) -> None:
         err = io.StringIO()
         with patch(
-            "cli.commands.subprocess.run",
+            "cli.commands.run_isolated",
             side_effect=subprocess.TimeoutExpired(["git", "ls-remote"], 60),
         ):
             with redirect_stderr(err):
@@ -259,7 +259,7 @@ class ProbeTimeoutTests(unittest.TestCase):
     def test_gh_status_timeout_returns_zero_and_logs(self) -> None:
         err = io.StringIO()
         with patch(
-            "cli.commands.subprocess.run",
+            "cli.commands.run_isolated",
             side_effect=subprocess.TimeoutExpired(["gh", "api"], 60),
         ):
             with redirect_stderr(err):
@@ -267,17 +267,17 @@ class ProbeTimeoutTests(unittest.TestCase):
         self.assertEqual(status, 0)
         self.assertIn("did not answer within", err.getvalue())
 
-    def test_probes_pass_a_timeout_and_detach_stdin(self) -> None:
-        # Detached stdin makes a credential or auth prompt fail at once
-        # instead of holding the probe open until the timeout.
-        with patch("cli.commands.subprocess.run") as run:
+    def test_probes_go_through_run_isolated_with_a_timeout(self) -> None:
+        # run_isolated detaches stdin (a credential or auth prompt fails at
+        # once) and ends the process group on timeout; tests/test_procs.py
+        # proves that. Here only the routing and the timeout are checked.
+        with patch("cli.commands.run_isolated") as run:
             run.return_value = subprocess.CompletedProcess([], 0, "", "")
             _git_refs(["git", "ls-remote", "origin"])
             _gh_status("repos/x/y/commits/abc")
         self.assertEqual(len(run.call_args_list), 2)
         for call in run.call_args_list:
             self.assertGreater(call.kwargs.get("timeout", 0), 0)
-            self.assertEqual(call.kwargs.get("stdin"), subprocess.DEVNULL)
 
 
 class CmdMigrateLedgerTests(unittest.TestCase):

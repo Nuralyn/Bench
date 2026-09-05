@@ -29,15 +29,16 @@ if str(_REPO_ROOT) not in sys.path:
 
 from ledger.migrate import GitTimeout, _run_git, migrate_ledger  # noqa: E402
 from tests._ledger_fixtures import build_valid_chain  # noqa: E402
+from utils.procs import run_isolated  # noqa: E402
 
 
 def _hang_on_show(nth: int):  # type: ignore[no-untyped-def]
-    """A subprocess.run stand-in whose ``nth`` `git show` times out.
+    """A run_isolated stand-in whose ``nth`` `git show` times out.
 
-    Every other call goes to the real subprocess.run, so the probe and the
+    Every other call goes to the real run_isolated, so the probe and the
     enumeration answer and only the fetch hangs.
     """
-    real = subprocess.run
+    real = run_isolated
     shows: list[int] = [0]
 
     def run(args, **kwargs):  # type: ignore[no-untyped-def]
@@ -208,7 +209,7 @@ class GitHistorySourceTests(_MigrateTestCase):
         """A git call that never returns raises GitTimeout with a stderr line."""
         err = io.StringIO()
         with patch(
-            "ledger.migrate.subprocess.run",
+            "ledger.migrate.run_isolated",
             side_effect=subprocess.TimeoutExpired(["git", "log"], 60),
         ):
             with redirect_stderr(err):
@@ -220,7 +221,7 @@ class GitHistorySourceTests(_MigrateTestCase):
         """Not nothing_to_migrate: that would let the next edit fork the chain."""
         self._commit_then_untrack()
         with patch(
-            "ledger.migrate.subprocess.run",
+            "ledger.migrate.run_isolated",
             side_effect=subprocess.TimeoutExpired(["git", "log"], 60),
         ):
             with redirect_stderr(io.StringIO()):
@@ -232,14 +233,14 @@ class GitHistorySourceTests(_MigrateTestCase):
     def test_timeout_during_restore_is_a_failed_migration(self) -> None:
         """The probe answered; a cat-file or show that hangs still fails."""
         self._commit_then_untrack()
-        real = subprocess.run
+        real = run_isolated
 
         def hang_on_show(args, **kwargs):  # type: ignore[no-untyped-def]
             if "show" in args:
                 raise subprocess.TimeoutExpired(args, 60)
             return real(args, **kwargs)
 
-        with patch("ledger.migrate.subprocess.run", side_effect=hang_on_show):
+        with patch("ledger.migrate.run_isolated", side_effect=hang_on_show):
             with redirect_stderr(io.StringIO()):
                 result = migrate_ledger(self.repo)
         self.assertEqual(result["status"], "failed")
@@ -257,7 +258,7 @@ class GitHistorySourceTests(_MigrateTestCase):
         self._commit_valid_chain_then_untrack()
         hang_on_second_show = _hang_on_show(2)
 
-        with patch("ledger.migrate.subprocess.run", side_effect=hang_on_second_show):
+        with patch("ledger.migrate.run_isolated", side_effect=hang_on_second_show):
             with redirect_stderr(io.StringIO()):
                 first = migrate_ledger(self.repo)
         self.assertEqual(first["status"], "failed")
@@ -302,7 +303,7 @@ class GitHistorySourceTests(_MigrateTestCase):
 
         refuse = _refuse
 
-        with patch("ledger.migrate.subprocess.run", side_effect=hang_on_second_show):
+        with patch("ledger.migrate.run_isolated", side_effect=hang_on_second_show):
             with patch("ledger.migrate.shutil.rmtree", side_effect=refuse):
                 with redirect_stderr(io.StringIO()):
                     first = migrate_ledger(self.repo)
@@ -335,7 +336,7 @@ class GitHistorySourceTests(_MigrateTestCase):
 
         refuse = _refuse
 
-        with patch("ledger.migrate.subprocess.run", side_effect=hang_on_second_show):
+        with patch("ledger.migrate.run_isolated", side_effect=hang_on_second_show):
             with patch("ledger.migrate.shutil.rmtree", side_effect=refuse):
                 with redirect_stderr(io.StringIO()):
                     result = migrate_ledger(self.repo)
@@ -795,7 +796,7 @@ class GitHistorySourceTests(_MigrateTestCase):
                 raise OSError("filesystem went away")
             return real_unlink(self_path, *args, **kwargs)
 
-        with patch("ledger.migrate.subprocess.run", side_effect=_hang_on_show(1)):
+        with patch("ledger.migrate.run_isolated", side_effect=_hang_on_show(1)):
             with patch("ledger.migrate.Path.unlink", new=refuse_lock):
                 with redirect_stderr(io.StringIO()):
                     result = migrate_ledger(self.repo)
@@ -805,7 +806,7 @@ class GitHistorySourceTests(_MigrateTestCase):
 
     def test_lock_is_released_after_a_failed_run(self) -> None:
         self._commit_valid_chain_then_untrack()
-        with patch("ledger.migrate.subprocess.run", side_effect=_hang_on_show(1)):
+        with patch("ledger.migrate.run_isolated", side_effect=_hang_on_show(1)):
             with redirect_stderr(io.StringIO()):
                 result = migrate_ledger(self.repo)
         self.assertEqual(result["failure_type"], "GIT_TIMEOUT")
@@ -824,17 +825,18 @@ class GitHistorySourceTests(_MigrateTestCase):
         self.assertEqual(result["status"], "failed")
         self.assertEqual(result["failure_type"], "INCOMPLETE_RESTORE")
 
-    def test_git_calls_carry_a_timeout_and_detach_stdin(self) -> None:
-        with patch("ledger.migrate.subprocess.run") as run:
+    def test_git_calls_go_through_run_isolated_with_a_timeout(self) -> None:
+        # run_isolated detaches stdin and ends the process group on timeout
+        # (tests/test_procs.py); here only the routing and the timeout are checked.
+        with patch("ledger.migrate.run_isolated") as run:
             run.return_value = subprocess.CompletedProcess([], 0, "", "")
             _run_git(["status"], self.repo)
         self.assertGreater(run.call_args.kwargs.get("timeout", 0), 0)
-        self.assertEqual(run.call_args.kwargs.get("stdin"), subprocess.DEVNULL)
 
     def test_partial_restore_is_not_reported_as_migrated(self) -> None:
         """A read failure must not satisfy written == expected."""
         self._commit_then_untrack()
-        real = subprocess.run
+        real = run_isolated
 
         def flaky(args, **kwargs):
             joined: str = " ".join(str(a) for a in args)
@@ -842,7 +844,7 @@ class GitHistorySourceTests(_MigrateTestCase):
                 return subprocess.CompletedProcess(args, 1, "", "boom")
             return real(args, **kwargs)
 
-        with patch("ledger.migrate.subprocess.run", side_effect=flaky):
+        with patch("ledger.migrate.run_isolated", side_effect=flaky):
             result = migrate_ledger(self.repo)
 
         self.assertEqual(result["status"], "partial")
@@ -856,14 +858,14 @@ class GitHistorySourceTests(_MigrateTestCase):
         would fork the chain.
         """
         self._commit_then_untrack()
-        real = subprocess.run
+        real = run_isolated
 
         def no_ls_tree(args, **kwargs):
             if "ls-tree" in args:
                 return subprocess.CompletedProcess(args, 1, "", "boom")
             return real(args, **kwargs)
 
-        with patch("ledger.migrate.subprocess.run", side_effect=no_ls_tree):
+        with patch("ledger.migrate.run_isolated", side_effect=no_ls_tree):
             result = migrate_ledger(self.repo)
 
         self.assertEqual(result["status"], "failed")

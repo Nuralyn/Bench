@@ -7,7 +7,10 @@ could hang the command forever. This test walks every source module with
 the ast module and fails on a ``subprocess.run`` (or ``check_output``,
 ``check_call``, ``call``) that has no ``timeout`` keyword, and on any
 ``subprocess.Popen`` at all, since a Popen's timeout lives on a later
-``communicate`` call this scan cannot pair with it.
+``communicate`` call this scan cannot pair with it. The one Popen allowed
+is the one in ``utils/procs.py``: it is how ``run_isolated`` ends a
+timed-out child's whole process group, and a separate test here checks
+that module pairs its Popen with a ``communicate(timeout=...)``.
 
 Proof that the gate can fail: ``_calls_without_timeout`` is also run in a
 test against the three call sites as they stood before roadmap item 2.4,
@@ -29,6 +32,9 @@ if str(_REPO_ROOT) not in sys.path:
 # excluded on purpose: a test may spawn a process to prove a timeout fires.
 _SOURCE_DIRS: tuple[str, ...] = ("cli", "hooks", "ledger", "pipeline", "utils")
 _TIMED_CALLS: frozenset[str] = frozenset({"run", "check_output", "check_call", "call"})
+# The only module allowed a Popen: run_isolated needs the child's pid to end
+# its process group on timeout, which subprocess.run does not hand back.
+_GROUP_KILL_MODULE: str = "utils/procs.py"
 
 
 def _subprocess_names(tree: ast.AST) -> tuple[set[str], dict[str, str]]:
@@ -97,14 +103,39 @@ class SubprocessTimeoutTests(unittest.TestCase):
         offenders: list[str] = []
         for path in _source_files():
             label: str = path.relative_to(_REPO_ROOT).as_posix()
-            offenders.extend(
-                _calls_without_timeout(path.read_text(encoding="utf-8"), label)
-            )
+            found: list[str] = _calls_without_timeout(path.read_text(encoding="utf-8"), label)
+            if label == _GROUP_KILL_MODULE:
+                found = [f for f in found if not f.endswith("subprocess.Popen")]
+            offenders.extend(found)
         self.assertEqual(
             offenders,
             [],
             "subprocess calls without a timeout (a hung child would hang "
             "Bench): " + ", ".join(offenders),
+        )
+
+    def test_the_group_kill_module_pairs_its_popen_with_a_timed_communicate(self) -> None:
+        """The allowance above is for exactly one Popen, and it is timed."""
+        source: str = (_REPO_ROOT / _GROUP_KILL_MODULE).read_text(encoding="utf-8")
+        tree: ast.AST = ast.parse(source, filename=_GROUP_KILL_MODULE)
+        modules, functions = _subprocess_names(tree)
+        popens: list[int] = []
+        timed_communicates: list[int] = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            if _called_name(node.func, modules, functions) == "Popen":
+                popens.append(node.lineno)
+            if (
+                isinstance(node.func, ast.Attribute)
+                and node.func.attr == "communicate"
+                and any(kw.arg == "timeout" for kw in node.keywords)
+            ):
+                timed_communicates.append(node.lineno)
+        self.assertEqual(len(popens), 1, f"expected one Popen, found {popens}")
+        self.assertTrue(
+            any(line > popens[0] for line in timed_communicates),
+            "the Popen must be followed by a communicate(timeout=...)",
         )
 
     def test_the_scan_covers_every_source_package(self) -> None:

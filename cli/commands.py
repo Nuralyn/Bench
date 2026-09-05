@@ -30,6 +30,7 @@ from ledger.chain import (
 )
 from ledger.attestation import AttestationError, build_attestation, render
 from ledger.migrate import migrate_ledger
+from utils.procs import run_isolated
 from ledger.sanitize import (
     SANITATION_VERDICT,
     SanitationError,
@@ -369,16 +370,10 @@ def _git_refs(args: list[str]) -> dict[str, str] | None:
     mismatch. A timeout is a failure of the same kind.
     """
     try:
-        # stdin is detached so a credential prompt fails at once instead of
-        # waiting on a terminal nobody is watching until the timeout fires.
-        proc = subprocess.run(
-            args,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            stdin=subprocess.DEVNULL,
-            timeout=_SUBPROCESS_TIMEOUT_SECONDS,
-        )
+        # run_isolated detaches stdin, so a credential prompt fails at once
+        # instead of waiting on a terminal nobody is watching, and ends git
+        # together with anything it launched (ssh, a helper) on timeout.
+        proc = run_isolated(args, timeout=_SUBPROCESS_TIMEOUT_SECONDS)
     except subprocess.TimeoutExpired:
         print(
             f"[bench cli] git did not answer within "
@@ -414,16 +409,10 @@ def _gh_status(endpoint: str) -> int:
     (C-001: the failure is surfaced, not swallowed into a pass).
     """
     try:
-        # stdin is detached so an auth prompt fails at once instead of
-        # waiting on a terminal nobody is watching until the timeout fires.
-        proc = subprocess.run(
-            ["gh", "api", "-i", endpoint],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            stdin=subprocess.DEVNULL,
-            timeout=_SUBPROCESS_TIMEOUT_SECONDS,
-        )
+        # run_isolated detaches stdin, so an auth prompt fails at once
+        # instead of waiting on a terminal nobody is watching, and ends gh
+        # together with anything it launched on timeout.
+        proc = run_isolated(["gh", "api", "-i", endpoint], timeout=_SUBPROCESS_TIMEOUT_SECONDS)
     except subprocess.TimeoutExpired:
         # Unanswered, so inconclusive: 0 is the value classify_removal
         # treats as "could not tell", never as a removal.
