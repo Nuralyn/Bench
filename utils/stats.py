@@ -331,7 +331,7 @@ def tokens_by_stage(entries: list[dict]) -> dict[str, dict[str, int]]:
     stage's input priced at cached rates (see billed_input).
     """
     totals: dict[str, dict[str, int]] = {
-        stage: {field: 0 for field in _TOKEN_FIELDS} | {"entries": 0}
+        stage: dict.fromkeys(_TOKEN_FIELDS, 0) | {"entries": 0}
         for stage in _STAGES
     }
     entries_with_tokens: int = 0

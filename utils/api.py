@@ -137,7 +137,7 @@ _USAGE_FIELDS: tuple[str, ...] = ("input", "output", "cache_read", "cache_creati
 
 def _zero_usage() -> dict[str, int]:
     """A usage record with every field at zero."""
-    return {field: 0 for field in _USAGE_FIELDS}
+    return dict.fromkeys(_USAGE_FIELDS, 0)
 
 
 def _add_usage(totals: dict[str, int], usage: dict[str, int]) -> None:
