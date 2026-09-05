@@ -13,12 +13,12 @@ Invariants:
     response preserved under "raw_response".
 """
 
-import copy
 import json
 import sys
 from typing import Any
 
 from pipeline.constitution import build_cached_prefix, build_context_section
+from pipeline.snapshot import snapshot_response
 from utils.api import DEFENDER_MODEL, call_model
 
 
@@ -159,23 +159,11 @@ def run_defender(
     # tolerates unknown keys, so a model-authored one is dropped first;
     # otherwise it would reach the ledger and count as a repair.
     # The ledger's raw_response on a failure is what the model wrote, not
-    # the repaired copy, so an invalid response can still be diagnosed.
-    try:
-        original: dict[str, Any] = copy.deepcopy(response)
-    except RecursionError:
-        # Nested too deep to copy, which also means too deep to serialize
-        # into the ledger. Fail closed with a note in place of the payload
-        # rather than let the exception escape the stage.
-        print(
-            "[bench defender] response nested too deep to record; failing closed",
-            file=sys.stderr,
-        )
-        return {
-            "status": "PIPELINE_ERROR",
-            "error": "INVALID_DEFENDER_RESPONSE",
-            "raw_response": "omitted: response nested too deep to copy or record",
-            "_tokens": tokens,
-        }
+    # the repaired copy, so an invalid response can still be diagnosed. The
+    # snapshot copies only what the normalizer can touch (the top level and
+    # each rebuttal dict) and shares the rest by reference, so an unknown
+    # field of any depth is kept without a recursive copy that could fail.
+    original: dict[str, Any] = snapshot_response(response, "rebuttals")
     response.pop("_normalized", None)
     notes: list[str] = _normalize_defender_response(response, challenger_result)
     if notes:
