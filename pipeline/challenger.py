@@ -14,6 +14,7 @@ Invariants:
     response preserved under "raw_response".
 """
 
+import copy
 import json
 import sys
 from typing import Any
@@ -155,6 +156,9 @@ def run_challenger(
     # "_normalized" is reserved for this stage's own record. The validator
     # tolerates unknown keys, so a model-authored one is dropped first;
     # otherwise it would reach the ledger and count as a repair.
+    # The ledger's raw_response on a failure is what the model wrote, not
+    # the repaired copy, so an invalid response can still be diagnosed.
+    original: dict[str, Any] = copy.deepcopy(response)
     response.pop("_normalized", None)
     notes: list[str] = _normalize_challenger_response(response)
     if notes:
@@ -164,7 +168,7 @@ def run_challenger(
         return {
             "status": "PIPELINE_ERROR",
             "error": "INVALID_CHALLENGER_RESPONSE",
-            "raw_response": response,
+            "raw_response": original,
             "_tokens": tokens,
         }
 

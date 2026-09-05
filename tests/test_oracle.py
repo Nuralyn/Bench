@@ -301,6 +301,24 @@ class NormalizeOracleResponseTests(unittest.TestCase):
         self.assertNotIn("_normalized", result)
 
     @patch("pipeline.oracle.call_model")
+    def test_raw_response_on_failure_is_the_model_output_not_the_repair(
+        self, mock_call: MagicMock
+    ) -> None:
+        resp: dict = _valid_pass()
+        del resp["confidence"]
+        resp["constraint_citations"][0]["disposition"] = "BREACHED"
+        resp["_tokens"] = {"input": 10, "output": 20}
+        mock_call.return_value = resp
+        result: dict = run_oracle(
+            _valid_diff(), _valid_constitution(), "hash",
+            _valid_challenger(), _valid_defender(),
+        )
+        self.assertEqual(result["status"], "PIPELINE_ERROR")
+        raw: dict = result["raw_response"]
+        self.assertNotIn("confidence", raw)
+        self.assertNotIn("_normalized", raw)
+
+    @patch("pipeline.oracle.call_model")
     def test_model_authored_normalized_key_does_not_survive(
         self, mock_call: MagicMock
     ) -> None:

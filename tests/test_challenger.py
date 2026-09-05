@@ -203,6 +203,26 @@ class NormalizeChallengerResponseTests(unittest.TestCase):
         self.assertNotIn("_normalized", result)
 
     @patch("pipeline.challenger.call_model")
+    def test_raw_response_on_failure_is_the_model_output_not_the_repair(
+        self, mock_call: MagicMock
+    ) -> None:
+        # Repairable drift beside a fatal defect: the ledger must show what
+        # the model actually wrote, so the defect can be diagnosed.
+        finding: dict = _valid_finding()
+        finding["severity"] = "WARNING"
+        del finding["constraint_id"]
+        mock_call.return_value = {
+            "status": "FINDINGS",
+            "findings": [finding],
+            "_tokens": {"input": 10, "output": 20},
+        }
+        result: dict = run_challenger(_valid_diff(), _valid_constitution(), "hash")
+        self.assertEqual(result["status"], "PIPELINE_ERROR")
+        raw: dict = result["raw_response"]
+        self.assertEqual(raw["findings"][0]["severity"], "WARNING")
+        self.assertNotIn("_normalized", raw)
+
+    @patch("pipeline.challenger.call_model")
     def test_model_authored_normalized_key_does_not_survive(
         self, mock_call: MagicMock
     ) -> None:
