@@ -438,11 +438,39 @@ class GitHistorySourceTests(_MigrateTestCase):
             timeout=60,
         ).stdout
 
+    def test_a_runtime_directory_bench_did_not_create_is_refused(self) -> None:
+        """A .migrate/ that is not self-ignored is not Bench's, and not used.
+
+        Accepting it would stage entries carrying full diff bodies where
+        nothing keeps them out of a commit. The run is refused as
+        LOCK_FAILED, the directory is left as found, and nothing is
+        restored.
+        """
+        custom: Path = self.repo / "custom-ledger"
+        os.environ["BENCH_LEDGER_PATH"] = str(custom / "bench-ledger.json")
+        theirs: Path = custom / ".migrate"
+        theirs.mkdir(parents=True)
+        (theirs / ".gitignore").write_text("cache\n", encoding="utf-8")
+        (theirs / "keep.txt").write_text("mine", encoding="utf-8")
+        self._commit_valid_chain_then_untrack()
+        for ignore_text in ("cache\n", None):
+            if ignore_text is None:
+                (theirs / ".gitignore").unlink()
+            with self.subTest(ignore=ignore_text):
+                with redirect_stderr(io.StringIO()):
+                    result = migrate_ledger(self.repo)
+                self.assertEqual(result["failure_type"], "LOCK_FAILED")
+                self.assertIn("not created by Bench", result["detail"])
+                self.assertEqual((theirs / "keep.txt").read_text(encoding="utf-8"), "mine")
+                self.assertEqual(sorted(p.name for p in theirs.iterdir() if p.name != ".gitignore"), ["keep.txt"])
+                self.assertFalse((custom / "bench-ledger.json").exists())
+
     def test_a_directory_bench_did_not_create_is_never_removed(self) -> None:
         """Only a staging directory carrying the ownership marker is cleared."""
         self._commit_valid_chain_then_untrack()
         foreign: Path = self.target / ".migrate" / ".restoring-user-data"
         foreign.mkdir(parents=True)
+        (self.target / ".migrate" / ".gitignore").write_text("*\n", encoding="utf-8")
         (foreign / "keep.txt").write_text("mine", encoding="utf-8")
 
         with redirect_stderr(io.StringIO()):
@@ -511,6 +539,7 @@ class GitHistorySourceTests(_MigrateTestCase):
         """Two runs cannot overlap: the second reports, it does not delete."""
         self._commit_valid_chain_then_untrack()
         (self.target / ".migrate").mkdir(parents=True, exist_ok=True)
+        (self.target / ".migrate" / ".gitignore").write_text("*\n", encoding="utf-8")
         lock: Path = self.target / ".migrate" / ".migrate.lock"
         lock.write_text("12345", encoding="utf-8")
         live: Path = self.target / ".migrate" / ".restoring-live"
@@ -549,6 +578,7 @@ class GitHistorySourceTests(_MigrateTestCase):
 
     def test_incomplete_marker_is_reported_without_needing_a_lock(self) -> None:
         (self.target / ".migrate").mkdir(parents=True, exist_ok=True)
+        (self.target / ".migrate" / ".gitignore").write_text("*\n", encoding="utf-8")
         (self.target / ".migrate" / "restore-incomplete").write_text("", encoding="utf-8")
         with patch("ledger.migrate.os.open", side_effect=PermissionError("read-only")):
             with redirect_stderr(io.StringIO()):
@@ -700,6 +730,7 @@ class GitHistorySourceTests(_MigrateTestCase):
         """A publish that could not be rolled back is a failure, not a chain."""
         self._commit_valid_chain_then_untrack()
         (self.target / ".migrate").mkdir(parents=True, exist_ok=True)
+        (self.target / ".migrate" / ".gitignore").write_text("*\n", encoding="utf-8")
         (self.target / ".migrate" / "restore-incomplete").write_text("", encoding="utf-8")
         (self.target / "bench-ledger.json").write_text("[]", encoding="utf-8")
 

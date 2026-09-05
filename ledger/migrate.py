@@ -611,15 +611,32 @@ def _runtime_dir(target: Path) -> Path:
     _RUNTIME_DIRNAME). Its own ``.gitignore`` of ``*`` is written before
     anything else lands in it, so every runtime file is ignored wherever
     the target sits; Bench writes no .gitignore anywhere but inside this
-    directory of its own. Raises OSError to the caller, which is about to
-    create the lock in it and reports both failures the same way
-    (tests.test_migrate.GitHistorySourceTests).
+    directory of its own. That file is also the ownership proof: a
+    directory of this name whose ignore file says anything else, or which
+    has contents but no ignore file, was not created by Bench, and it is
+    refused rather than used, since staged entries carry full diff bodies
+    and nothing would keep them out of a commit there. Raises OSError to
+    the caller, which is about to create the lock in it and reports both
+    failures the same way (tests.test_migrate.GitHistorySourceTests).
     """
     runtime: Path = target / _RUNTIME_DIRNAME
     runtime.mkdir(parents=True, exist_ok=True)
     ignore: Path = runtime / ".gitignore"
-    if not ignore.exists():
-        ignore.write_text("*\n", encoding="utf-8")
+    if ignore.exists():
+        # Compared stripped: Bench writes "*\n" with newline="\n", but an
+        # editor or a checkout may have turned that into CRLF.
+        if ignore.read_bytes().strip() != b"*":
+            raise OSError(
+                f"{ignore} is not Bench's own ignore file (a single '*' line), "
+                f"so {runtime} was not created by Bench and is left alone"
+            )
+    elif any(runtime.iterdir()):
+        raise OSError(
+            f"{runtime} has contents but no ignore file, so it was not created "
+            "by Bench and is left alone"
+        )
+    else:
+        ignore.write_text("*\n", encoding="utf-8", newline="\n")
     return runtime
 
 
