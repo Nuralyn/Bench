@@ -164,17 +164,46 @@ class CachedPrefixTests(unittest.TestCase):
         joined: str = "".join(block["text"] for block in blocks)
         self.assertEqual(joined, "PREFIX\n\nBODY")
 
-    def test_claude_code_gets_the_same_blocks_as_anthropic(self) -> None:
-        # The CLI path lifts the first block into its system prompt file;
-        # what it is handed here is identical to the anthropic turn.
-        self.assertEqual(
-            _first_user_turn("claude_code", "PREFIX", "BODY"),
-            _first_user_turn("anthropic", "PREFIX", "BODY"),
-        )
+    def test_claude_code_keeps_context_out_of_the_lifted_block(self) -> None:
+        # The CLI path lifts only the first block into its system prompt
+        # file. The repository context is untrusted and rides with the
+        # body, at user priority.
+        turn: dict = _first_user_turn("claude_code", "PREFIX", "BODY", "CONTEXT")
+        blocks: list[dict] = turn["content"]
+        self.assertEqual(len(blocks), 2)
+        self.assertEqual(blocks[0]["text"], "PREFIX")
+        self.assertEqual(blocks[1]["text"], "\n\nCONTEXT\n\nBODY")
+        self.assertNotIn("CONTEXT", blocks[0]["text"])
+
+    def test_anthropic_breakpoint_lands_on_the_last_stable_block(self) -> None:
+        turn: dict = _first_user_turn("anthropic", "PREFIX", "BODY", "CONTEXT")
+        blocks: list[dict] = turn["content"]
+        self.assertEqual([b["text"] for b in blocks], ["PREFIX", "\n\nCONTEXT", "\n\nBODY"])
+        self.assertNotIn("cache_control", blocks[0])
+        self.assertEqual(blocks[1]["cache_control"], {"type": "ephemeral"})
+        self.assertNotIn("cache_control", blocks[2])
 
     def test_openrouter_gets_one_string_in_the_same_order(self) -> None:
-        turn: dict = _first_user_turn("openrouter", "PREFIX", "BODY")
-        self.assertEqual(turn["content"], "PREFIX\n\nBODY")
+        turn: dict = _first_user_turn("openrouter", "PREFIX", "BODY", "CONTEXT")
+        self.assertEqual(turn["content"], "PREFIX\n\nCONTEXT\n\nBODY")
+
+    def test_every_provider_renders_identical_text(self) -> None:
+        cases: list[tuple[str, str, str]] = [
+            ("PREFIX", "BODY", "CONTEXT"),
+            ("PREFIX", "BODY", ""),
+            ("", "BODY", "CONTEXT"),
+            ("", "BODY", ""),
+        ]
+        for prefix, body, context in cases:
+            expected: str = "\n\n".join(p for p in (prefix, context, body) if p)
+            for provider in ("anthropic", "claude_code", "openrouter"):
+                content = _first_user_turn(provider, prefix, body, context)["content"]
+                rendered: str = (
+                    content
+                    if isinstance(content, str)
+                    else "".join(b["text"] for b in content)
+                )
+                self.assertEqual(rendered, expected, (provider, prefix, context))
 
     @patch("utils.api._anthropic_call")
     def test_call_model_passes_the_breakpoint_turn_to_the_provider(

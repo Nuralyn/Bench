@@ -17,7 +17,10 @@ _REPO_ROOT: Path = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from pipeline.constitution import build_cached_prefix  # noqa: E402
+from pipeline.constitution import (  # noqa: E402
+    build_cached_prefix,
+    build_context_section,
+)
 from pipeline.defender import (  # noqa: E402
     _build_user_content,
     _validate_defender_response,
@@ -147,15 +150,16 @@ class BuildUserContentTests(unittest.TestCase):
         self.assertNotIn("CONSTITUTION:", content)
         self.assertNotIn("FILE CONTEXT:", content)
 
-    def test_prefix_carries_constitution_and_file_context(self) -> None:
-        prefix: str = build_cached_prefix(_valid_constitution(), "source code")
+    def test_prefix_carries_the_constitution_only(self) -> None:
+        prefix: str = build_cached_prefix(_valid_constitution())
         self.assertIn("CONSTITUTION:", prefix)
-        self.assertIn("FILE CONTEXT:", prefix)
-        self.assertIn("source code", prefix)
-
-    def test_file_context_omitted_when_empty(self) -> None:
-        prefix: str = build_cached_prefix(_valid_constitution(), "")
         self.assertNotIn("FILE CONTEXT:", prefix)
+
+    def test_context_section_carries_file_context(self) -> None:
+        section: str = build_context_section("source code")
+        self.assertIn("FILE CONTEXT:", section)
+        self.assertIn("source code", section)
+        self.assertEqual(build_context_section(""), "")
 
 
 class RunDefenderTests(unittest.TestCase):

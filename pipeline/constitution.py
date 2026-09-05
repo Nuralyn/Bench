@@ -228,25 +228,35 @@ def prompt_view(constitution: dict) -> dict:
     return view
 
 
-def build_cached_prefix(constitution: dict, file_context: str) -> str:
-    """Render the part of a stage prompt that is the same on every edit.
+def build_cached_prefix(constitution: dict) -> str:
+    """Render the constitution as the text that opens every stage prompt.
 
-    The constitution's prompt view and the governed project's repository
-    context open the user turn of all three stages, ahead of the diff and
-    the earlier stages' findings. They change only when bench.json or the
-    project's CLAUDE.md does, so utils.api.call_model can place a
-    prompt-cache breakpoint after them and pay for them once per session
-    instead of three times per edit. The framing that marks the repository
-    context as untrusted is part of file_context itself (pipeline.runner
-    prepends it), so it is cached together with the content it governs.
+    The constitution's prompt view changes only when bench.json does, so
+    utils.api.call_model can treat it as a cached prefix: on the anthropic
+    provider it sits under a prompt-cache breakpoint, and on the claude_code
+    provider it is folded into the system prompt file, the part of the
+    request the CLI caches. Both are places for trusted text, which the
+    constitution is; the repository context is not, and travels separately
+    (see build_context_section).
     """
-    sections: list[str] = [
-        "CONSTITUTION:",
-        json.dumps(prompt_view(constitution), indent=2),
-    ]
-    if file_context:
-        sections.extend(["", "FILE CONTEXT:", file_context])
-    return "\n".join(sections)
+    return "\n".join(
+        ["CONSTITUTION:", json.dumps(prompt_view(constitution), indent=2)]
+    )
+
+
+def build_context_section(file_context: str) -> str:
+    """Render the governed project's repository context, or "" if none.
+
+    The framing that marks it as untrusted is part of file_context itself
+    (pipeline.runner prepends it). This section follows the constitution
+    and precedes the diff in every stage's user turn, so it is stable
+    across edits and cacheable, but it is never lifted to system priority:
+    a project's CLAUDE.md is repository input and may not outrank the
+    stage prompt or the constitution on any provider.
+    """
+    if not file_context:
+        return ""
+    return "\n".join(["FILE CONTEXT:", file_context])
 
 
 def merge_constitutions(core: dict, project: dict) -> dict:

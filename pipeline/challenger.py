@@ -18,7 +18,7 @@ import json
 import sys
 from typing import Any
 
-from pipeline.constitution import build_cached_prefix
+from pipeline.constitution import build_cached_prefix, build_context_section
 from utils.api import CHALLENGER_MODEL, call_model
 
 
@@ -121,15 +121,21 @@ def run_challenger(
             "_tokens": {"input": 0, "output": 0},
         }
 
-    # The prompt is the cached prefix (constitution, repository context) and
-    # then this edit's content. Both are built fresh from this run's
-    # constitution snapshot; the cache holds bytes, not a stale snapshot,
-    # and a changed constitution renders different bytes and misses it.
-    cached_prefix: str = build_cached_prefix(constitution, file_context)
+    # The prompt is the constitution (cached prefix), the repository context
+    # (cached where a provider can do so at user priority), then this
+    # edit's content. All built fresh from this run's snapshot; the cache
+    # holds bytes, not a stale snapshot, and a changed constitution renders
+    # different bytes and misses it.
+    cached_prefix: str = build_cached_prefix(constitution)
+    cached_context: str = build_context_section(file_context)
     user_content: str = _build_user_content(diff_info)
 
     response: dict[str, Any] = call_model(
-        CHALLENGER_MODEL, _SYSTEM_PROMPT, user_content, cached_prefix=cached_prefix
+        CHALLENGER_MODEL,
+        _SYSTEM_PROMPT,
+        user_content,
+        cached_prefix=cached_prefix,
+        cached_context=cached_context,
     )
 
     tokens: Any = response.get("_tokens", {"input": 0, "output": 0})

@@ -168,38 +168,64 @@ def _provider_result(
     return text, {field: _coerce_int(raw.get(field, 0)) for field in _USAGE_FIELDS}
 
 
+def _text_block(text: str, breakpoint: bool = False) -> dict[str, Any]:
+    """One text content block, with a prompt-cache breakpoint if asked."""
+    block: dict[str, Any] = {"type": "text", "text": text}
+    if breakpoint:
+        block["cache_control"] = {"type": "ephemeral"}
+    return block
+
+
 def _first_user_turn(
-    provider: str, cached_prefix: str, user_content: str
+    provider: str,
+    cached_prefix: str,
+    user_content: str,
+    cached_context: str = "",
 ) -> dict[str, Any]:
     """Build the opening user message, with a cache breakpoint where supported.
 
-    On the anthropic provider the prefix is its own text block marked
-    ``cache_control: ephemeral``. Render order is system, then messages, so
-    the breakpoint caches the system prompt and the prefix together; the
-    content after it (the diff, the earlier stages' findings) is never
-    cached. The claude_code provider gets the same two blocks and lifts the
-    first into its system prompt file, the part of its request the CLI
-    caches (see _lift_cached_prefix). Every other provider receives the
-    same text as one string, in the same order, so no provider's judge
-    reads different words.
+    Three pieces, in this order: ``cached_prefix`` (the constitution, trusted
+    text), ``cached_context`` (the governed project's repository context,
+    untrusted text), and ``user_content`` (this edit). Every provider reads
+    the same words in the same order; the block layout differs because each
+    provider caches a different part of the request:
+
+    * anthropic: one text block per piece, with ``cache_control: ephemeral``
+      on the last stable block (the context, or the prefix when there is no
+      context). Render order is system, then messages, so that breakpoint
+      caches the system prompt and both stable pieces together; the edit
+      after it is never cached.
+    * claude_code: two blocks, the prefix and everything after it. The CLI
+      lifts the first block into its system prompt file, the part of its
+      request it caches (see _lift_cached_prefix). The context stays in the
+      second block, on stdin, at user priority: a project's CLAUDE.md must
+      not outrank the stage prompt or the constitution.
+    * openrouter: one string.
+
+    Later blocks open with the same separator the single-string form uses,
+    so the block renderings and the string rendering are identical text.
     """
+    tail: str = (
+        f"\n\n{cached_context}\n\n{user_content}"
+        if cached_context
+        else f"\n\n{user_content}"
+    )
     if not cached_prefix:
-        return {"role": "user", "content": user_content}
-    if provider in (_PROVIDER_ANTHROPIC, _PROVIDER_CLAUDE_CLI):
-        # The second block opens with the same separator the single-string
-        # form uses, so the two renderings are byte-identical text.
+        return {"role": "user", "content": tail[2:]}
+    if provider == _PROVIDER_ANTHROPIC:
+        blocks: list[dict[str, Any]] = [
+            _text_block(cached_prefix, breakpoint=not cached_context)
+        ]
+        if cached_context:
+            blocks.append(_text_block(f"\n\n{cached_context}", breakpoint=True))
+        blocks.append(_text_block(f"\n\n{user_content}"))
+        return {"role": "user", "content": blocks}
+    if provider == _PROVIDER_CLAUDE_CLI:
         return {
             "role": "user",
-            "content": [
-                {
-                    "type": "text",
-                    "text": cached_prefix,
-                    "cache_control": {"type": "ephemeral"},
-                },
-                {"type": "text", "text": f"\n\n{user_content}"},
-            ],
+            "content": [_text_block(cached_prefix), _text_block(tail)],
         }
-    return {"role": "user", "content": f"{cached_prefix}\n\n{user_content}"}
+    return {"role": "user", "content": f"{cached_prefix}{tail}"}
 
 
 def call_model(
@@ -208,14 +234,15 @@ def call_model(
     user_content: str,
     max_tokens: int = 8192,  # Sonnet 5 stages spend part of this on adaptive thinking
     cached_prefix: str = "",
+    cached_context: str = "",
 ) -> dict[str, Any]:
     """Call the configured LLM provider expecting a JSON-object response.
 
-    ``cached_prefix`` is text that opens the user turn ahead of
-    ``user_content`` and is the same from one governed edit to the next: the
-    constitution and the repository context. See _first_user_turn for how
-    each provider carries it. It is part of the prompt on every provider;
-    only the anthropic provider caches it.
+    ``cached_prefix`` (the constitution) and ``cached_context`` (the
+    repository context) open the user turn ahead of ``user_content`` and
+    are the same from one governed edit to the next. See _first_user_turn
+    for how each provider carries them. Both are part of the prompt on every
+    provider; which of them is cached depends on the provider.
 
     Returns a dict on every code path. Successful calls return the parsed
     JSON object with an "_tokens" key appended, a usage record with the
@@ -241,7 +268,7 @@ def call_model(
         }
 
     first_turn: dict[str, Any] = _first_user_turn(
-        provider, cached_prefix, user_content
+        provider, cached_prefix, user_content, cached_context
     )
     messages: list[dict[str, Any]] = [first_turn]
     totals: dict[str, int] = _zero_usage()
@@ -780,22 +807,23 @@ def verify_subprocess_nonce(token: str) -> bool:
 def _lift_cached_prefix(
     system_prompt: str, messages: list[dict[str, Any]]
 ) -> tuple[str, list[dict[str, Any]]]:
-    """Move a cached-prefix block from the opening user turn into the system prompt.
+    """Move the cached-prefix block from the opening user turn into the system prompt.
 
     The CLI takes its prompt as text on stdin, one block, so a breakpoint
     between the prefix and the body cannot be expressed there. What the CLI
     does cache is the system prompt file. Folding the prefix into it puts
-    the constitution and the repository context in the part of the request
-    Claude Code writes to the prompt cache once and reads back on the calls
-    that follow. Measured on this machine: with the prefix on stdin the
-    second of two calls read nothing from cache; with it in the system
-    prompt file the second call read 8,940 of 11,560 prefix tokens.
+    the constitution in the part of the request Claude Code writes to the
+    prompt cache once and reads back on the calls that follow. Measured on
+    this machine: with the prefix on stdin the second of two calls read
+    nothing from cache; with it in the system prompt file the second call
+    read 8,940 of 11,560 prefix tokens.
 
-    The repository context keeps the untrusted framing pipeline.runner
-    prepends to the content itself, so the words a judge reads about it do
-    not change, only their position, and Claude Code's own default prompt
-    places a project's CLAUDE.md in that same position. A message whose
-    content is already a string passes through unchanged.
+    Only the first block is lifted, and _first_user_turn puts only the
+    constitution there. The repository context is untrusted repository
+    input and stays in the second block, on stdin, at user priority, so a
+    project's CLAUDE.md cannot outrank the stage prompt or the constitution
+    on this provider any more than on the others. A message whose content
+    is already a string passes through unchanged.
     """
     if not messages:
         return system_prompt, messages

@@ -25,6 +25,7 @@ from pipeline import challenger, defender, oracle  # noqa: E402
 from pipeline.constitution import (  # noqa: E402
     ConstitutionSchemaError,
     build_cached_prefix,
+    build_context_section,
     load_constitution_snapshot,
     prompt_view,
 )
@@ -176,23 +177,26 @@ class StagePromptTests(unittest.TestCase):
         self.assertNotIn("not for the models", content)
 
     def test_cached_prefix_is_the_prompt_view(self) -> None:
-        self._assert_view_sent(build_cached_prefix(_constitution(), ""))
+        self._assert_view_sent(build_cached_prefix(_constitution()))
 
-    def test_prefix_renders_identical_bytes_for_every_stage(self) -> None:
+    def test_prefix_is_the_constitution_and_context_is_separate(self) -> None:
         source: dict = _constitution()
         rendered: str = json.dumps(prompt_view(source), indent=2)
-        prefix: str = build_cached_prefix(source, "CTX")
-        self.assertIn(rendered, prefix)
-        self.assertTrue(prefix.startswith("CONSTITUTION:\n"))
-        self.assertTrue(prefix.endswith("FILE CONTEXT:\nCTX"))
+        prefix: str = build_cached_prefix(source)
+        self.assertEqual(prefix, f"CONSTITUTION:\n{rendered}")
+        self.assertEqual(build_context_section("CTX"), "FILE CONTEXT:\nCTX")
+        self.assertEqual(build_context_section(""), "")
 
     def _stage_prefixes(self) -> list[str]:
-        """The cached_prefix each stage passes to call_model, captured."""
+        """The cached_prefix and cached_context each stage passes, joined."""
         source: dict = _constitution()
         prefixes: list[str] = []
 
         def capture(*_args: object, **kwargs: object) -> dict:
-            prefixes.append(str(kwargs.get("cached_prefix", "")))
+            prefixes.append(
+                f"{kwargs.get('cached_prefix', '')}\n\n"
+                f"{kwargs.get('cached_context', '')}"
+            )
             return {"error": "API_ERROR", "detail": "captured", "_tokens": {}}
 
         with patch("pipeline.challenger.call_model", side_effect=capture):
@@ -221,9 +225,9 @@ class StagePromptTests(unittest.TestCase):
 
     def test_changed_constitution_changes_the_prefix_bytes(self) -> None:
         source: dict = _constitution()
-        before: str = build_cached_prefix(source, "")
+        before: str = build_cached_prefix(source)
         source["constraints"][0]["rule"] += " Also log the traceback."
-        self.assertNotEqual(build_cached_prefix(source, ""), before)
+        self.assertNotEqual(build_cached_prefix(source), before)
 
 
 class BenchConstitutionBudgetTests(unittest.TestCase):
