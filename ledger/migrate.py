@@ -25,6 +25,7 @@ overwrite an existing ``.bench/`` chain, so it cannot destroy a chain a
 clone has already started.
 """
 
+import os
 import shutil
 import subprocess
 import sys
@@ -38,6 +39,13 @@ from ledger.verify import verify_chain
 _LEGACY_DIRNAME: str = "ledger"
 _LEDGER_FILENAME: str = "bench-ledger.json"
 _JSON_GLOB: str = "*.json"
+
+# One migration at a time per target. The lock is a file created with an
+# exclusive create, so two runs cannot both hold it, and it is removed when
+# the run ends. Under the lock, a staging directory found in the target can
+# only belong to an attempt that died, so clearing it cannot pull a live
+# attempt's files out from under it.
+_LOCK_FILENAME: str = ".migrate.lock"
 
 # A restore from git is fetched into a staging directory and published into
 # the target only once every fetch has finished. Staging lives INSIDE the
@@ -517,15 +525,71 @@ def _timed_out(target: Path, exc: GitTimeout) -> dict[str, Any]:
     )
 
 
+def _acquire_lock(target: Path) -> Path | None:
+    """Take the target's migration lock, or None if it is held or cannot be.
+
+    An exclusive create is atomic, so of two runs that race for it exactly
+    one gets a file descriptor. The holder's pid is written for the note a
+    refused run prints; a failure other than "exists" is logged and also
+    refuses (C-001), since a migration that cannot prove it is alone must
+    not clear another attempt's staging.
+    """
+    lock: Path = target / _LOCK_FILENAME
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+        descriptor: int = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        return None
+    except OSError as exc:
+        print(f"[bench migrate] could not take {lock}: {exc}", file=sys.stderr)
+        return None
+    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        handle.write(str(os.getpid()))
+    return lock
+
+
+def _release_lock(lock: Path) -> None:
+    """Remove the lock; a failure is logged, and the note says what to do."""
+    try:
+        lock.unlink()
+    except OSError as exc:
+        print(
+            f"[bench migrate] could not remove {lock}: {exc}; remove it by "
+            f"hand once no migration is running",
+            file=sys.stderr,
+        )
+
+
 def migrate_ledger(repo_root: Path | None = None) -> dict[str, Any]:
     """Populate this clone's private chain from the pre-migration location.
 
     Idempotent and non-destructive: an existing ``.bench/`` chain is left
     alone and reported as ``already_migrated`` rather than overwritten.
+    One run at a time per target: a second run while the lock is held is
+    refused with MIGRATION_IN_PROGRESS and touches nothing.
     """
     root: Path = repo_root or Path.cwd()
     target: Path = Path(resolve_ledger_path()).parent
     legacy_dir: Path = root / _LEGACY_DIRNAME
+
+    lock: Path | None = _acquire_lock(target)
+    if lock is None:
+        return _failed(
+            target,
+            "none",
+            "MIGRATION_IN_PROGRESS",
+            f"{target / _LOCK_FILENAME} is held: another migration is running, "
+            "or one ended without releasing it. Nothing was touched. Wait for "
+            "it, or if no migration is running, remove the lock file and retry.",
+        )
+    try:
+        return _migrate_locked(root, target, legacy_dir)
+    finally:
+        _release_lock(lock)
+
+
+def _migrate_locked(root: Path, target: Path, legacy_dir: Path) -> dict[str, Any]:
+    """The migration proper, run while the target's lock is held."""
 
     # A chain opened after the switch has no legacy segment at all: its
     # entries live only in entries/. Checking for bench-ledger.json alone

@@ -847,6 +847,12 @@ def cmd_migrate_ledger() -> int:
         f"  failure  : {result.get('failure_type') or 'incomplete restore'}",
         file=sys.stderr,
     )
+    # A failure result names its cause and what to do (retry after a
+    # timeout, wait for or remove a lock, inspect an incomplete restore);
+    # print that ahead of the general note.
+    detail: str = str(result.get("detail", "") or "")
+    if detail:
+        print(f"  detail   : {detail}", file=sys.stderr)
     print(
         "The restored chain is incomplete or does not verify. It has been "
         "left in place for inspection rather than deleted; resolve the "

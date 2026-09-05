@@ -425,6 +425,41 @@ class GitHistorySourceTests(_MigrateTestCase):
         self.assertTrue((self.target / "bench-ledger.json").exists())
         self.assertIn("verify", result["detail"])
 
+    def test_a_held_lock_refuses_a_second_migration(self) -> None:
+        """Two runs cannot overlap: the second reports, it does not delete."""
+        self._commit_valid_chain_then_untrack()
+        self.target.mkdir(parents=True, exist_ok=True)
+        lock: Path = self.target / ".migrate.lock"
+        lock.write_text("12345", encoding="utf-8")
+        live: Path = self.target / ".restoring-live"
+        live.mkdir()
+        (live / ".bench-restore").write_text("", encoding="utf-8")
+        (live / "bench-ledger.json").write_text("[]", encoding="utf-8")
+
+        with redirect_stderr(io.StringIO()):
+            result = migrate_ledger(self.repo)
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["failure_type"], "MIGRATION_IN_PROGRESS")
+        self.assertIn(".migrate.lock", result["detail"])
+        # The other attempt's staging and the lock are untouched.
+        self.assertTrue((live / "bench-ledger.json").exists())
+        self.assertEqual(lock.read_text(encoding="utf-8"), "12345")
+
+        lock.unlink()
+        with redirect_stderr(io.StringIO()):
+            second = migrate_ledger(self.repo)
+        self.assertEqual(second["status"], "migrated")
+        self.assertFalse(lock.exists())
+        self.assertFalse(live.exists())
+
+    def test_lock_is_released_after_a_failed_run(self) -> None:
+        self._commit_valid_chain_then_untrack()
+        with patch("ledger.migrate.subprocess.run", side_effect=_hang_on_show(1)):
+            with redirect_stderr(io.StringIO()):
+                result = migrate_ledger(self.repo)
+        self.assertEqual(result["failure_type"], "GIT_TIMEOUT")
+        self.assertFalse((self.target / ".migrate.lock").exists())
+
     def test_incomplete_marker_blocks_already_migrated(self) -> None:
         """A publish that could not be rolled back is a failure, not a chain."""
         self._commit_valid_chain_then_untrack()

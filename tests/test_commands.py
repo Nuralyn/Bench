@@ -27,6 +27,7 @@ from cli.commands import (  # noqa: E402
     _git_refs,
     cmd_constitution,
     cmd_ledger,
+    cmd_migrate_ledger,
     cmd_stats,
     cmd_verify,
     cmd_viewer,
@@ -277,6 +278,46 @@ class ProbeTimeoutTests(unittest.TestCase):
         for call in run.call_args_list:
             self.assertGreater(call.kwargs.get("timeout", 0), 0)
             self.assertEqual(call.kwargs.get("stdin"), subprocess.DEVNULL)
+
+
+class CmdMigrateLedgerTests(unittest.TestCase):
+    """A failed migration prints the result's own recovery note."""
+
+    def _failed(self, failure_type: str, detail: str) -> dict:
+        return {
+            "status": "failed",
+            "source": "git history",
+            "target": "/tmp/x/.bench",
+            "files": 0,
+            "expected": 0,
+            "verified": False,
+            "entries": 0,
+            "genesis_hash": "",
+            "failure_type": failure_type,
+            "detail": detail,
+        }
+
+    def test_failure_prints_type_and_detail_and_exits_one(self) -> None:
+        err = io.StringIO()
+        with patch(
+            "cli.commands.migrate_ledger",
+            return_value=self._failed("GIT_TIMEOUT", "git log did not finish. Retry."),
+        ):
+            with redirect_stdout(io.StringIO()), redirect_stderr(err):
+                code: int = cmd_migrate_ledger()
+        self.assertEqual(code, 1)
+        self.assertIn("failure  : GIT_TIMEOUT", err.getvalue())
+        self.assertIn("detail   : git log did not finish. Retry.", err.getvalue())
+
+    def test_failure_without_detail_prints_no_detail_line(self) -> None:
+        err = io.StringIO()
+        with patch(
+            "cli.commands.migrate_ledger",
+            return_value=dict(self._failed("ENUMERATION_FAILED", ""), detail=""),
+        ):
+            with redirect_stdout(io.StringIO()), redirect_stderr(err):
+                cmd_migrate_ledger()
+        self.assertNotIn("detail   :", err.getvalue())
 
 
 class CmdConstitutionTests(unittest.TestCase):
