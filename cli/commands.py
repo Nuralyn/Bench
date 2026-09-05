@@ -364,6 +364,9 @@ _SUBPROCESS_TIMEOUT_SECONDS: float = 60.0
 # A GitHub API path as the purge manifest records it: segments of letters,
 # digits, dots, underscores and dashes, never starting with a dash.
 _ENDPOINT_PATTERN: re.Pattern[str] = re.compile(r"[A-Za-z0-9][A-Za-z0-9_./-]*")
+# A GitHub repository as owner/name, the only shape the probes above build
+# a URL or an API path from.
+_REPOSITORY_PATTERN: re.Pattern[str] = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 
 
 def _git_refs(args: list[str]) -> dict[str, str] | None:
@@ -605,6 +608,18 @@ def cmd_verify_sanitation_binding(
             f"{', '.join(missing)}.",
             file=sys.stderr,
         )
+        return 1
+    # Both reach git as arguments. Only an owner/name repository and an
+    # existing mirror directory are probed; anything else is refused here,
+    # before a process is started with it.
+    if not _REPOSITORY_PATTERN.fullmatch(repository or ""):
+        print(
+            f"[bench cli] --repository must be owner/name, got {repository!r}.",
+            file=sys.stderr,
+        )
+        return 1
+    if not Path(mirror or "").is_dir():
+        print(f"[bench cli] --mirror is not a directory: {mirror!r}.", file=sys.stderr)
         return 1
 
     chain: dict[str, Any] = verify_chain()

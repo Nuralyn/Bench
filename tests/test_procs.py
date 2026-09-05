@@ -14,6 +14,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 _REPO_ROOT: Path = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
@@ -72,6 +73,34 @@ class RunIsolatedTests(unittest.TestCase):
         while _alive(pid) and time.monotonic() < deadline:
             time.sleep(0.2)
         self.assertFalse(_alive(pid), f"grandchild {pid} outlived the timeout")
+
+    def test_an_interrupt_while_waiting_ends_the_group_too(self) -> None:
+        """Ctrl-C during a probe must not leave the probe's tree running."""
+        real_communicate = subprocess.Popen.communicate
+        calls: list[int] = [0]
+
+        def interrupt_first_wait(self_proc, *args, **kwargs):  # type: ignore[no-untyped-def]
+            calls[0] += 1
+            if calls[0] == 1:
+                raise KeyboardInterrupt
+            return real_communicate(self_proc, *args, **kwargs)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            pid_file: Path = Path(tmp) / "grandchild.pid"
+            with patch("subprocess.Popen.communicate", new=interrupt_first_wait):
+                with self.assertRaises(KeyboardInterrupt):
+                    run_isolated(
+                        [sys.executable, "-c", _CHILD, str(pid_file), _GRANDCHILD],
+                        timeout=60,
+                    )
+            deadline: float = time.monotonic() + 10
+            while not pid_file.exists() and time.monotonic() < deadline:
+                time.sleep(0.1)
+            pid: int = int(pid_file.read_text(encoding="utf-8"))
+        deadline = time.monotonic() + 10
+        while _alive(pid) and time.monotonic() < deadline:
+            time.sleep(0.2)
+        self.assertFalse(_alive(pid), f"grandchild {pid} outlived the interrupt")
 
     def test_a_finished_child_returns_a_completed_process(self) -> None:
         result = run_isolated(

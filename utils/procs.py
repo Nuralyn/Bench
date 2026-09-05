@@ -55,7 +55,9 @@ def run_isolated(
     )
     try:
         stdout, stderr = proc.communicate(timeout=timeout)
-    except subprocess.TimeoutExpired:
+    except BaseException:
+        # A timeout, or an interrupt (Ctrl-C) while waiting: either way the
+        # group must not outlive the call. Ended, then re-raised unchanged.
         _end_group(proc)
         raise
     return subprocess.CompletedProcess(args, proc.returncode, stdout, stderr)

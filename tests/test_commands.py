@@ -291,6 +291,40 @@ class ProbeTimeoutTests(unittest.TestCase):
             self.assertGreater(call.kwargs.get("timeout", 0), 0)
 
 
+class SanitationBindingArgumentTests(unittest.TestCase):
+    """Both arguments reach git; a malformed one is refused before that."""
+
+    def test_a_repository_that_is_not_owner_slash_name_is_refused(self) -> None:
+        from cli.commands import cmd_verify_sanitation_binding
+
+        err = io.StringIO()
+        with tempfile.TemporaryDirectory() as mirror:
+            with patch("cli.commands.run_isolated") as run:
+                with redirect_stderr(err):
+                    for repository in ("-c core.x=y", "owner", "owner/name/extra", "own er/name"):
+                        code: int = cmd_verify_sanitation_binding(
+                            record_hash="a" * 64, mirror=mirror, repository=repository
+                        )
+                        self.assertEqual(code, 1, repository)
+        run.assert_not_called()
+        self.assertIn("owner/name", err.getvalue())
+
+    def test_a_mirror_that_is_not_a_directory_is_refused(self) -> None:
+        from cli.commands import cmd_verify_sanitation_binding
+
+        err = io.StringIO()
+        with tempfile.TemporaryDirectory() as tmp:
+            missing: str = os.path.join(tmp, "no-such-mirror")
+            with patch("cli.commands.run_isolated") as run:
+                with redirect_stderr(err):
+                    code: int = cmd_verify_sanitation_binding(
+                        record_hash="a" * 64, mirror=missing, repository="owner/name"
+                    )
+        self.assertEqual(code, 1)
+        run.assert_not_called()
+        self.assertIn("not a directory", err.getvalue())
+
+
 class CmdMigrateLedgerTests(unittest.TestCase):
     """A failed migration prints the result's own recovery note."""
 
