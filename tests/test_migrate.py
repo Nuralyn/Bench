@@ -495,6 +495,76 @@ class GitHistorySourceTests(_MigrateTestCase):
             second = migrate_ledger(self.repo)
         self.assertEqual(second["status"], "migrated")
 
+    def test_partial_lock_that_cannot_be_removed_is_reported_as_stuck(self) -> None:
+        """A failed pid write followed by a failed unlink leaves the lock,
+        and the result must say so instead of claiming nothing was touched."""
+        self._commit_valid_chain_then_untrack()
+        real_unlink = Path.unlink
+
+        def refuse_lock(self_path, *args, **kwargs):  # type: ignore[no-untyped-def]
+            if self_path.name == ".migrate.lock":
+                raise OSError("filesystem went away")
+            return real_unlink(self_path, *args, **kwargs)
+
+        with patch("ledger.migrate.os.fdopen", side_effect=OSError("quota")):
+            with patch("ledger.migrate.Path.unlink", new=refuse_lock):
+                with redirect_stderr(io.StringIO()):
+                    result = migrate_ledger(self.repo)
+        self.assertEqual(result["failure_type"], "LOCK_NOT_RELEASED")
+        self.assertIn("removed by hand", result["detail"])
+        self.assertTrue((self.target / ".migrate.lock").exists())
+
+    def test_working_tree_copy_goes_through_staging(self) -> None:
+        """A copy that fails halfway leaves no chain files in the target."""
+        legacy: Path = self.repo / "ledger"
+        _write_chain(legacy, count=3, dag_entries=2)
+        real_copy2 = shutil.copy2
+        copies: list[int] = [0]
+
+        def fail_third_copy(src, dst, *args, **kwargs):  # type: ignore[no-untyped-def]
+            copies[0] += 1
+            if copies[0] == 3:
+                raise OSError("disk full")
+            return real_copy2(src, dst, *args, **kwargs)
+
+        with patch("ledger.migrate.shutil.copy2", side_effect=fail_third_copy):
+            with redirect_stderr(io.StringIO()):
+                first = migrate_ledger(self.repo)
+        self.assertEqual(first["status"], "failed")
+        self.assertEqual(first["failure_type"], "COPY_FAILED")
+        self._assert_no_chain_in_target()
+
+        with redirect_stderr(io.StringIO()):
+            second = migrate_ledger(self.repo)
+        self.assertEqual(second["status"], "migrated")
+        self.assertTrue(second["verified"])
+        self.assertEqual(self._staging_dirs(), [])
+
+    def test_fetch_that_cannot_write_staging_is_a_failed_restore(self) -> None:
+        """A blob that cannot be written (disk full) fails the restore
+        cleanly; nothing reaches the target and the retry completes."""
+        self._commit_valid_chain_then_untrack()
+        real_write = Path.write_text
+        writes: list[int] = [0]
+
+        def fail_second_blob(self_path, *args, **kwargs):  # type: ignore[no-untyped-def]
+            if ".restoring-" in str(self_path) and self_path.suffix == ".json":
+                writes[0] += 1
+                if writes[0] == 2:
+                    raise OSError("disk full")
+            return real_write(self_path, *args, **kwargs)
+
+        with patch("ledger.migrate.Path.write_text", new=fail_second_blob):
+            with redirect_stderr(io.StringIO()):
+                first = migrate_ledger(self.repo)
+        self.assertEqual(first["status"], "failed")
+        self.assertEqual(first["failure_type"], "ENUMERATION_FAILED")
+        self._assert_no_chain_in_target()
+
+        with redirect_stderr(io.StringIO()):
+            second = migrate_ledger(self.repo)
+        self.assertEqual(second["status"], "migrated")
+
     def test_lock_that_cannot_be_released_turns_success_into_failure(self) -> None:
         """A migrated chain behind a stuck lock is reported as a failure.
 

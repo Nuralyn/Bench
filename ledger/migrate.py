@@ -76,9 +76,15 @@ _GIT_TIMEOUT_SECONDS: float = 60.0
 class LockError(Exception):
     """The migration lock could not be taken for a reason other than "held".
 
-    Raised after any partly created lock file has been removed, so a
-    refused run never leaves a lock behind for later runs to trip on.
+    Raised after an attempt to remove any partly created lock file, so a
+    refused run leaves no lock behind when it can help it. ``lock_left``
+    says whether that removal failed, in which case later runs will refuse
+    with MIGRATION_IN_PROGRESS until the file is removed by hand.
     """
+
+    def __init__(self, message: str, lock_left: bool = False) -> None:
+        super().__init__(message)
+        self.lock_left: bool = lock_left
 
 
 class RestoreIncomplete(Exception):
@@ -220,6 +226,16 @@ def _restore_from_git(
     except GitTimeout:
         _remove_staging(staging)
         raise
+    except OSError as exc:
+        # A blob that cannot be written to staging (disk full, a vanished
+        # mount) fails the restore before anything reaches the target.
+        print(
+            f"[bench migrate] could not stage the chain at {ref[:12]}: {exc}; "
+            f"nothing was restored",
+            file=sys.stderr,
+        )
+        _remove_staging(staging)
+        return None
     return _publish(staging, target_dir, written, len(wanted)), len(wanted)
 
 
@@ -351,9 +367,9 @@ def _publish(staging: Path, target_dir: Path, written: int, expected: int) -> in
     the commit held, for the same reason. Staging is removed after a
     complete publish and left for inspection otherwise.
     """
-    (target_dir / ENTRIES_DIRNAME).mkdir(exist_ok=True)
     marker: Path = target_dir / _INCOMPLETE_MARKER
     try:
+        (target_dir / ENTRIES_DIRNAME).mkdir(exist_ok=True)
         marker.write_text("", encoding="utf-8")
     except OSError as exc:
         print(
@@ -454,6 +470,40 @@ def _copy_from_disk(legacy_dir: Path, target_dir: Path) -> tuple[int, int]:
             shutil.copy2(entry, entries_dst / entry.name)
             written += 1
     return written, expected
+
+
+def _restore_from_disk(legacy_dir: Path, target_dir: Path) -> tuple[int, int] | None:
+    """Copy the working-tree chain into the target through staging.
+
+    The same shape as _restore_from_git: files are copied into a staging
+    directory and published only once every copy has finished, so a copy
+    that fails halfway (disk full, a vanished mount) leaves no chain files
+    in the target for the started guard to accept. None means nothing was
+    restored; RestoreIncomplete propagates from a publish that ended with
+    the marker in place.
+    """
+    target_dir.mkdir(parents=True, exist_ok=True)
+    _clear_stale_staging(target_dir)
+    try:
+        staging: Path = _new_staging(target_dir)
+    except OSError as exc:
+        print(
+            f"[bench migrate] could not create a staging directory under "
+            f"{target_dir}: {exc}; nothing was restored",
+            file=sys.stderr,
+        )
+        return None
+    try:
+        written, expected = _copy_from_disk(legacy_dir, staging)
+    except OSError as exc:
+        print(
+            f"[bench migrate] could not copy the chain from {legacy_dir}: "
+            f"{exc}; nothing was restored",
+            file=sys.stderr,
+        )
+        _remove_staging(staging)
+        return None
+    return _publish(staging, target_dir, written, expected), expected
 
 
 def _finish(
@@ -569,8 +619,10 @@ def _acquire_lock(target: Path) -> Path | None:
                     f"[bench migrate] could not close {lock}: {close_exc}",
                     file=sys.stderr,
                 )
-        _release_lock(lock)
-        raise LockError(f"could not initialise {lock}: {exc}") from exc
+        removed: bool = _release_lock(lock)
+        raise LockError(
+            f"could not initialise {lock}: {exc}", lock_left=not removed
+        ) from exc
     return lock
 
 
@@ -616,6 +668,16 @@ def migrate_ledger(repo_root: Path | None = None) -> dict[str, Any]:
         lock: Path | None = _acquire_lock(target)
     except LockError as exc:
         print(f"[bench migrate] {exc}", file=sys.stderr)
+        if exc.lock_left:
+            return _failed(
+                target,
+                "none",
+                "LOCK_NOT_RELEASED",
+                f"{exc}, and the partly created {target / _LOCK_FILENAME} could "
+                "not be removed, so every later run would refuse with "
+                "MIGRATION_IN_PROGRESS until it is removed by hand once no "
+                "migration is running. Nothing else was touched.",
+            )
         return _failed(
             target,
             "none",
@@ -693,7 +755,21 @@ def _migrate_locked(root: Path, target: Path, legacy_dir: Path) -> dict[str, Any
         return existing
 
     if (legacy_dir / _LEDGER_FILENAME).exists():
-        written, expected = _copy_from_disk(legacy_dir, target)
+        try:
+            copied: tuple[int, int] | None = _restore_from_disk(legacy_dir, target)
+        except RestoreIncomplete as exc:
+            print(f"[bench migrate] {exc}", file=sys.stderr)
+            return _incomplete(target)
+        if copied is None:
+            return _failed(
+                target,
+                "working tree",
+                "COPY_FAILED",
+                f"Could not copy the chain from {legacy_dir} into place, so "
+                "nothing was restored. The working-tree chain is untouched; "
+                "check that the target is writable and has room, then retry.",
+            )
+        written, expected = copied
         return _finish(target, "working tree", written, expected)
 
     # A git call that times out is an unanswered question, not a negative
