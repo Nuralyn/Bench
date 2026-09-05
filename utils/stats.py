@@ -320,6 +320,25 @@ def billed_input(figures: dict[str, int]) -> int:
     return round(uncached + written * CACHE_WRITE_RATE + read * CACHE_READ_RATE)
 
 
+def normalized_entries(entries: list[dict]) -> int:
+    """Entries in which at least one stage repaired cosmetic schema drift.
+
+    A stage records what it repaired as ``_normalized`` (the
+    _normalize_*_response functions in pipeline/). Each such response would
+    otherwise have been a pipeline error and a fail-closed VETO, so this
+    count beside the pipeline-error count shows how much of the judges'
+    schema drift is being absorbed instead of blocking edits.
+    """
+    count: int = 0
+    for entry in entries:
+        for stage in _STAGES:
+            result: Any = entry.get(stage)
+            if isinstance(result, dict) and result.get("_normalized"):
+                count += 1
+                break
+    return count
+
+
 def tokens_by_stage(entries: list[dict]) -> dict[str, dict[str, int]]:
     """Token totals per stage and overall.
 

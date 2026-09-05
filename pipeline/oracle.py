@@ -174,6 +174,14 @@ def run_oracle(
             "_tokens": tokens,
         }
 
+    # Repair cosmetic drift before validating, and record what was repaired
+    # on the result so the ledger entry shows it. The validator still fails
+    # closed on everything the normalizer leaves alone: the verdict, the
+    # reasoning, the citations, and a VETO's remediation.
+    notes: list[str] = _normalize_oracle_response(response)
+    if notes:
+        response["_normalized"] = notes
+
     if not _validate_oracle_response(response):
         return {
             "status": "PIPELINE_ERROR",
@@ -211,6 +219,55 @@ def _build_user_content(
             json.dumps(defender_result, indent=2),
         ]
     )
+
+
+# Cosmetic drift in otherwise sound Oracle responses. A missing confidence
+# is the one the ledger has recorded (every invalid Oracle response so far);
+# the remediation placeholders and blank advisories are the drift the
+# schema invites, since it asks for null on PASS and an optional list.
+_DEFAULT_CONFIDENCE: str = "LOW"
+_REMEDIATION_PLACEHOLDERS: frozenset[str] = frozenset(
+    {"", "null", "none", "n/a", "na", "not applicable"}
+)
+
+
+def _normalize_oracle_response(response: dict[str, Any]) -> list[str]:
+    """Repair cosmetic drift in an Oracle response in place; return notes.
+
+    A missing or null confidence is recorded as LOW, the weakest claim,
+    since the Oracle made none. A blank or placeholder remediation on a
+    PASS becomes null, which is what the schema asks for. Blank advisory
+    strings are dropped and a missing advisories list becomes empty. None
+    of these touches the verdict, the reasoning, or the citations: a
+    missing or unknown verdict, a citation with a missing field or unknown
+    disposition, and a VETO without remediation still fail closed in the
+    validator. The notes go on the result as ``_normalized`` so the ledger
+    entry shows what was repaired.
+    """
+    notes: list[str] = []
+    if response.get("confidence") is None:
+        response["confidence"] = _DEFAULT_CONFIDENCE
+        notes.append(f"confidence missing; recorded as {_DEFAULT_CONFIDENCE}")
+    advisories: Any = response.get("advisories")
+    if advisories is None:
+        response["advisories"] = []
+        notes.append("advisories missing; recorded as empty")
+    elif isinstance(advisories, list):
+        kept: list[Any] = [
+            a for a in advisories if not (isinstance(a, str) and not a.strip())
+        ]
+        if len(kept) != len(advisories):
+            response["advisories"] = kept
+            notes.append(f"{len(advisories) - len(kept)} blank advisory string(s) dropped")
+    if response.get("verdict") == "PASS":
+        remediation: Any = response.get("remediation")
+        if (
+            isinstance(remediation, str)
+            and remediation.strip().lower() in _REMEDIATION_PLACEHOLDERS
+        ):
+            response["remediation"] = None
+            notes.append(f"remediation {remediation!r} on PASS recorded as null")
+    return notes
 
 
 def _validate_oracle_response(response: dict[str, Any]) -> bool:

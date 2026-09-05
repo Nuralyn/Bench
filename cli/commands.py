@@ -62,6 +62,7 @@ from utils.stats import (
     compute_ledger_stats,
     entry_has_pipeline_error,
     entry_verdict,
+    normalized_entries,
     pct,
     seconds_by_stage,
     tokens_per_entry,
@@ -893,6 +894,10 @@ def cmd_stats() -> int:
     print(f"Passed                 : {passed} ({pct(passed, adjudicated)})")
     print(f"Vetoed                 : {vetoed} ({pct(vetoed, adjudicated)})")
     print(f"Pipeline errors        : {pipeline_errors}")
+    # Responses a stage repaired for cosmetic schema drift (see the
+    # _normalize_*_response functions in pipeline/). Each would otherwise
+    # have been a pipeline error, so the two lines read together.
+    print(f"Normalized responses   : {normalized_entries(entries)}")
     if anchors:
         # Chain-retirement markers (C-008). Not adjudicated changes, so they
         # sit outside the pass/veto rates above.

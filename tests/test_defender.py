@@ -23,6 +23,7 @@ from pipeline.constitution import (  # noqa: E402
 )
 from pipeline.defender import (  # noqa: E402
     _build_user_content,
+    _normalize_defender_response,
     _validate_defender_response,
     run_defender,
 )
@@ -138,6 +139,128 @@ class ValidateDefenderResponseTests(unittest.TestCase):
                 {"status": "REBUTTAL", "summary": "x", "rebuttals": [r]}
             )
         )
+
+
+class NormalizeDefenderResponseTests(unittest.TestCase):
+    """One test per repair the ledger has recorded, and the fail-closed line.
+
+    The operational ledger recorded these exact shapes as
+    INVALID_DEFENDER_RESPONSE on 2026-07-31 (twice) and 2026-08-04 (twice):
+    finding_index as a digit string, and the positions CONFIRM and
+    CONFIRM_CLEAR, each a fail-closed VETO on an edit the Defender had
+    argued for. The system prompt already names CONFIRM and AGREE as the
+    mistakes to avoid and says they mean CONCEDE.
+    """
+
+    def _resp(self, rebuttal: dict) -> dict:
+        return {"status": "REBUTTAL", "summary": "Sound.", "rebuttals": [rebuttal]}
+
+    def test_digit_string_finding_index_becomes_int_with_a_note(self) -> None:
+        rebuttal: dict = _valid_rebuttal()
+        rebuttal["finding_index"] = "0"
+        resp: dict = self._resp(rebuttal)
+        notes: list[str] = _normalize_defender_response(resp)
+        self.assertEqual(resp["rebuttals"][0]["finding_index"], 0)
+        self.assertEqual(len(notes), 1)
+        self.assertTrue(_validate_defender_response(resp))
+
+    def test_concede_aliases_become_concede_with_a_note(self) -> None:
+        for alias in ("CONFIRM", "CONFIRM_CLEAR", "AGREE", "confirm_clear"):
+            rebuttal: dict = _valid_rebuttal()
+            rebuttal["position"] = alias
+            resp: dict = self._resp(rebuttal)
+            notes: list[str] = _normalize_defender_response(resp)
+            self.assertEqual(resp["rebuttals"][0]["position"], "CONCEDE", alias)
+            self.assertEqual(len(notes), 1, alias)
+            self.assertTrue(_validate_defender_response(resp), alias)
+
+    def test_clean_response_is_untouched_and_unnoted(self) -> None:
+        resp: dict = self._resp(_valid_rebuttal())
+        self.assertEqual(_normalize_defender_response(resp), [])
+        self.assertEqual(resp["rebuttals"][0], _valid_rebuttal())
+
+    def test_unknown_position_still_fails_closed(self) -> None:
+        # Only agreement synonyms are aliased. A position that could mean
+        # disagreement is not guessed at.
+        for position in ("REFUTE", "REJECT", "DISPUTE", "PARTIAL"):
+            rebuttal: dict = _valid_rebuttal()
+            rebuttal["position"] = position
+            resp: dict = self._resp(rebuttal)
+            self.assertEqual(_normalize_defender_response(resp), [], position)
+            self.assertFalse(_validate_defender_response(resp), position)
+
+    def test_non_numeric_or_negative_index_still_fails_closed(self) -> None:
+        for index in ("first", "-1", "1.5", None):
+            rebuttal: dict = _valid_rebuttal()
+            rebuttal["finding_index"] = index
+            resp: dict = self._resp(rebuttal)
+            _normalize_defender_response(resp)
+            self.assertFalse(_validate_defender_response(resp), repr(index))
+
+    def test_missing_argument_or_summary_still_fails_closed(self) -> None:
+        rebuttal: dict = _valid_rebuttal()
+        del rebuttal["argument"]
+        resp: dict = self._resp(rebuttal)
+        _normalize_defender_response(resp)
+        self.assertFalse(_validate_defender_response(resp))
+        resp = self._resp(_valid_rebuttal())
+        del resp["summary"]
+        _normalize_defender_response(resp)
+        self.assertFalse(_validate_defender_response(resp))
+
+    @patch("pipeline.defender.call_model")
+    def test_run_defender_records_repairs_on_the_result(
+        self, mock_call: MagicMock
+    ) -> None:
+        rebuttal: dict = _valid_rebuttal()
+        rebuttal["finding_index"] = "0"
+        rebuttal["position"] = "CONFIRM_CLEAR"
+        mock_call.return_value = {
+            "status": "REBUTTAL",
+            "summary": "Sound.",
+            "rebuttals": [rebuttal],
+            "_tokens": {"input": 10, "output": 20},
+        }
+        result: dict = run_defender(
+            _valid_diff(), _valid_constitution(), "hash", _valid_challenger()
+        )
+        self.assertEqual(result["status"], "REBUTTAL")
+        self.assertEqual(result["rebuttals"][0]["finding_index"], 0)
+        self.assertEqual(result["rebuttals"][0]["position"], "CONCEDE")
+        self.assertEqual(len(result["_normalized"]), 2)
+
+    @patch("pipeline.defender.call_model")
+    def test_run_defender_leaves_no_note_when_nothing_repaired(
+        self, mock_call: MagicMock
+    ) -> None:
+        mock_call.return_value = {
+            "status": "REBUTTAL",
+            "summary": "Sound.",
+            "rebuttals": [_valid_rebuttal()],
+            "_tokens": {"input": 10, "output": 20},
+        }
+        result: dict = run_defender(
+            _valid_diff(), _valid_constitution(), "hash", _valid_challenger()
+        )
+        self.assertNotIn("_normalized", result)
+
+    @patch("pipeline.defender.call_model")
+    def test_run_defender_still_fails_closed_on_unknown_position(
+        self, mock_call: MagicMock
+    ) -> None:
+        rebuttal: dict = _valid_rebuttal()
+        rebuttal["position"] = "REFUTE"
+        mock_call.return_value = {
+            "status": "REBUTTAL",
+            "summary": "Sound.",
+            "rebuttals": [rebuttal],
+            "_tokens": {"input": 10, "output": 20},
+        }
+        result: dict = run_defender(
+            _valid_diff(), _valid_constitution(), "hash", _valid_challenger()
+        )
+        self.assertEqual(result["status"], "PIPELINE_ERROR")
+        self.assertEqual(result["error"], "INVALID_DEFENDER_RESPONSE")
 
 
 class BuildUserContentTests(unittest.TestCase):

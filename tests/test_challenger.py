@@ -23,6 +23,7 @@ from pipeline.constitution import (  # noqa: E402
 )
 from pipeline.challenger import (  # noqa: E402
     _build_user_content,
+    _normalize_challenger_response,
     _validate_challenger_response,
     run_challenger,
 )
@@ -103,6 +104,118 @@ class ValidateChallengerResponseTests(unittest.TestCase):
                 {"status": "FINDINGS", "findings": ["not a dict"]}
             )
         )
+
+
+class NormalizeChallengerResponseTests(unittest.TestCase):
+    """One test per repair the ledger has recorded, and the fail-closed line.
+
+    The operational ledger recorded these exact shapes as
+    INVALID_CHALLENGER_RESPONSE on 2026-08-06, 2026-08-22, 2026-08-23, and
+    twice on 2026-09-05: each a fail-closed VETO on an edit the Challenger
+    had examined and reported findings for.
+    """
+
+    def _resp(self, finding: dict) -> dict:
+        return {"status": "FINDINGS", "findings": [finding]}
+
+    def test_warning_severity_becomes_concern_with_a_note(self) -> None:
+        finding: dict = _valid_finding()
+        finding["severity"] = "WARNING"
+        resp: dict = self._resp(finding)
+        notes: list[str] = _normalize_challenger_response(resp)
+        self.assertEqual(resp["findings"][0]["severity"], "CONCERN")
+        self.assertEqual(len(notes), 1)
+        self.assertIn("WARNING", notes[0])
+        self.assertTrue(_validate_challenger_response(resp))
+
+    def test_missing_or_misspelled_evidence_still_fails_closed(self) -> None:
+        # The ledger recorded findings with no evidence string and one under
+        # the key "eviduence". Neither is repaired: evidence is what the
+        # Challenger quotes from the diff, and the normalizer never
+        # synthesizes a field the schema requires.
+        for mutate in (
+            lambda f: f.pop("evidence"),
+            lambda f: f.__setitem__("eviduence", f.pop("evidence")),
+            lambda f: f.__setitem__("evidence", ""),
+        ):
+            finding: dict = _valid_finding()
+            mutate(finding)
+            resp: dict = self._resp(finding)
+            self.assertEqual(_normalize_challenger_response(resp), [])
+            self.assertFalse(_validate_challenger_response(resp), finding)
+
+    def test_clean_response_is_untouched_and_unnoted(self) -> None:
+        resp: dict = self._resp(_valid_finding())
+        self.assertEqual(_normalize_challenger_response(resp), [])
+        self.assertEqual(resp["findings"][0], _valid_finding())
+
+    def test_unknown_severity_still_fails_closed(self) -> None:
+        finding: dict = _valid_finding()
+        finding["severity"] = "CRITICAL"
+        resp: dict = self._resp(finding)
+        self.assertEqual(_normalize_challenger_response(resp), [])
+        self.assertFalse(_validate_challenger_response(resp))
+
+    def test_missing_constraint_location_or_reasoning_still_fails_closed(
+        self,
+    ) -> None:
+        for field in ("constraint_id", "location", "reasoning"):
+            finding: dict = _valid_finding()
+            del finding[field]
+            resp: dict = self._resp(finding)
+            _normalize_challenger_response(resp)
+            self.assertFalse(_validate_challenger_response(resp), field)
+
+    def test_unknown_status_and_non_list_findings_still_fail_closed(self) -> None:
+        for resp in (
+            {"status": "MAYBE", "findings": []},
+            {"status": "FINDINGS", "findings": "none"},
+        ):
+            _normalize_challenger_response(resp)
+            self.assertFalse(_validate_challenger_response(resp), resp)
+
+    @patch("pipeline.challenger.call_model")
+    def test_run_challenger_records_repairs_on_the_result(
+        self, mock_call: MagicMock
+    ) -> None:
+        finding: dict = _valid_finding()
+        finding["severity"] = "WARNING"
+        mock_call.return_value = {
+            "status": "FINDINGS",
+            "findings": [finding],
+            "_tokens": {"input": 10, "output": 20},
+        }
+        result: dict = run_challenger(_valid_diff(), _valid_constitution(), "hash")
+        self.assertEqual(result["status"], "FINDINGS")
+        self.assertEqual(result["findings"][0]["severity"], "CONCERN")
+        self.assertEqual(len(result["_normalized"]), 1)
+
+    @patch("pipeline.challenger.call_model")
+    def test_run_challenger_leaves_no_note_when_nothing_repaired(
+        self, mock_call: MagicMock
+    ) -> None:
+        mock_call.return_value = {
+            "status": "FINDINGS",
+            "findings": [_valid_finding()],
+            "_tokens": {"input": 10, "output": 20},
+        }
+        result: dict = run_challenger(_valid_diff(), _valid_constitution(), "hash")
+        self.assertNotIn("_normalized", result)
+
+    @patch("pipeline.challenger.call_model")
+    def test_run_challenger_still_fails_closed_on_unknown_severity(
+        self, mock_call: MagicMock
+    ) -> None:
+        finding: dict = _valid_finding()
+        finding["severity"] = "CRITICAL"
+        mock_call.return_value = {
+            "status": "FINDINGS",
+            "findings": [finding],
+            "_tokens": {"input": 10, "output": 20},
+        }
+        result: dict = run_challenger(_valid_diff(), _valid_constitution(), "hash")
+        self.assertEqual(result["status"], "PIPELINE_ERROR")
+        self.assertEqual(result["error"], "INVALID_CHALLENGER_RESPONSE")
 
 
 class BuildUserContentTests(unittest.TestCase):

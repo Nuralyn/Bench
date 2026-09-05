@@ -147,6 +147,15 @@ def run_challenger(
             "_tokens": tokens,
         }
 
+    # Repair the one cosmetic drift before validating and record it on the
+    # result, so the ledger entry shows it. _normalize_challenger_response
+    # (below) maps a finding severity of "WARNING" to "CONCERN" and nothing
+    # else, so every response that fails on substance still fails closed
+    # in the validator.
+    notes: list[str] = _normalize_challenger_response(response)
+    if notes:
+        response["_normalized"] = notes
+
     if not _validate_challenger_response(response):
         return {
             "status": "PIPELINE_ERROR",
@@ -168,6 +177,50 @@ def _build_user_content(diff_info: dict) -> str:
     rule is sent whole; nothing a constraint forbids is dropped.
     """
     return "\n".join(["PROPOSED CHANGE:", json.dumps(diff_info, indent=2)])
+
+
+# The one cosmetic drift repaired in a Challenger response. "WARNING" is the
+# word C-005 uses for its own severity, echoed back where the schema wants
+# VIOLATION, CONCERN, or OBSERVATION. It maps to CONCERN, the middle value,
+# never to VIOLATION, so the repair cannot raise a finding's weight.
+_SEVERITY_ALIASES: dict[str, str] = {"WARNING": "CONCERN"}
+
+
+def _normalize_challenger_response(response: dict[str, Any]) -> list[str]:
+    """Repair one cosmetic drift in a Challenger response in place; return notes.
+
+    A finding severity of "WARNING" becomes "CONCERN". The operational
+    ledger recorded that shape as INVALID_CHALLENGER_RESPONSE on 2026-08-22
+    and 2026-09-05 (UTC): each a fail-closed VETO recorded as a pipeline
+    error, not a ruling, on an edit the Challenger had examined and
+    reported findings for. The finding reaches the Oracle with its
+    constraint, location, evidence, and reasoning untouched.
+
+    Nothing else is repaired. A finding without evidence, a location, a
+    constraint, or reasoning, any other severity, an unknown status, and a
+    non-list findings are left for _validate_challenger_response to fail
+    closed exactly as before: the normalizer never synthesizes a field the
+    schema requires. run_challenger records the returned notes on the
+    result as ``_normalized`` so the ledger entry shows the repair.
+    tests/test_challenger.py NormalizeChallengerResponseTests covers the
+    repair, the untouched clean response, and each fail-closed case end to
+    end through run_challenger.
+    """
+    notes: list[str] = []
+    findings: Any = response.get("findings")
+    if not isinstance(findings, list):
+        return notes
+    for index, finding in enumerate(findings):
+        if not isinstance(finding, dict):
+            continue
+        severity: Any = finding.get("severity")
+        if isinstance(severity, str) and severity.upper() in _SEVERITY_ALIASES:
+            finding["severity"] = _SEVERITY_ALIASES[severity.upper()]
+            notes.append(
+                f"finding {index}: severity {severity!r} recorded as "
+                f"{finding['severity']!r}"
+            )
+    return notes
 
 
 def _validate_challenger_response(response: dict[str, Any]) -> bool:
