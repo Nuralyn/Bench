@@ -649,7 +649,20 @@ def _runtime_dir(target: Path) -> Path:
             "by Bench and is left alone"
         )
     else:
-        ignore.write_text("*\n", encoding="utf-8", newline="\n")
+        try:
+            ignore.write_text("*\n", encoding="utf-8", newline="\n")
+        except OSError:
+            # A partial file left by a failed write would make Bench's own
+            # directory read as foreign on every retry the failure asks for.
+            try:
+                ignore.unlink(missing_ok=True)
+            except OSError as unlink_exc:
+                print(
+                    f"[bench migrate] could not remove the partial {ignore}: "
+                    f"{unlink_exc}; remove it by hand before retrying",
+                    file=sys.stderr,
+                )
+            raise
     return runtime
 
 
@@ -724,16 +737,6 @@ def migrate_ledger(repo_root: Path | None = None) -> dict[str, Any]:
     target: Path = Path(resolve_ledger_path()).parent
     legacy_dir: Path = root / _LEGACY_DIRNAME
 
-    # A target that already holds a chain, or the marker of an interrupted
-    # restore, is answered without taking the lock: neither answer writes
-    # anything, and a read-only directory provisioned with a chain must
-    # still report already_migrated rather than fail to create a lock.
-    # The same check runs again under the lock before anything is written,
-    # so a chain that appears in between is not restored over.
-    existing: dict[str, Any] | None = _existing_chain(target, under_lock=False)
-    if existing is not None:
-        return existing
-
     try:
         lock: Path | None = _acquire_lock(target)
     except LockError as exc:
@@ -749,6 +752,15 @@ def migrate_ledger(repo_root: Path | None = None) -> dict[str, Any]:
                 "MIGRATION_IN_PROGRESS until it is removed by hand once no "
                 "migration is running. Nothing else was touched.",
             )
+        # A target where no lock can be created may still hold a chain, or
+        # the marker of an interrupted restore: a read-only directory
+        # provisioned with a chain must report already_migrated rather than
+        # fail to create a lock. This is the only lock-free read of the
+        # target's state, and it happens only where no run could have taken
+        # the lock either; a run that did is answered by that check first.
+        existing: dict[str, Any] | None = _existing_chain(target, under_lock=False)
+        if existing is not None:
+            return existing
         return _failed(
             target,
             "none",
@@ -785,23 +797,24 @@ def migrate_ledger(repo_root: Path | None = None) -> dict[str, Any]:
 def _existing_chain(target: Path, under_lock: bool) -> dict[str, Any] | None:
     """The result for a target that must not be restored into, or None.
 
-    Reads only, so it can answer before the lock is taken. A marker left by
-    an interrupted publish (see _publish) means the target may hold part of
-    a chain, and is checked first: the started check below would take the
-    part for the whole and report already_migrated. Off the lock, a marker
-    beside a held lock is a publish in progress, not an interrupted one,
-    and is reported as MIGRATION_IN_PROGRESS: the incomplete-restore
-    recovery text tells the operator to remove what the restore left,
-    which must not be said of a live publisher's files. Under the lock
-    the lock is this run's own, so the marker stands on its own. A chain
-    opened after the switch has no legacy segment at all, its entries live
-    only in entries/, so a non-empty entries/ counts as started too;
-    checking for bench-ledger.json alone would splice a restored history
-    into a running chain.
+    Reads only, so it can answer for a target where no lock could be
+    taken. Off the lock, the lock is checked before anything else: a held
+    lock means a run may be publishing, and neither the marker it writes
+    nor the files it renames into place may be read as a final state, so
+    the answer is MIGRATION_IN_PROGRESS. Under the lock, the lock is this
+    run's own. A marker left by an interrupted publish (see _publish)
+    means the target may hold part of a chain, and is checked before the
+    started check below, which would take the part for the whole and
+    report already_migrated. A chain opened after the switch has no
+    legacy segment at all, its entries live only in entries/, so a
+    non-empty entries/ counts as started too; checking for
+    bench-ledger.json alone would splice a restored history into a
+    running chain.
     """
-    if (target / _RUNTIME_DIRNAME / _INCOMPLETE_MARKER).exists():
-        if not under_lock and (target / _RUNTIME_DIRNAME / _LOCK_FILENAME).exists():
-            return _in_progress(target)
+    runtime: Path = target / _RUNTIME_DIRNAME
+    if not under_lock and (runtime / _LOCK_FILENAME).exists():
+        return _in_progress(target)
+    if (runtime / _INCOMPLETE_MARKER).exists():
         return _incomplete(target, "git history or the working tree")
     entries_dir: Path = target / ENTRIES_DIRNAME
     already_started: bool = (target / _LEDGER_FILENAME).exists() or (

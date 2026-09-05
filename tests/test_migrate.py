@@ -464,6 +464,46 @@ class GitHistorySourceTests(_MigrateTestCase):
             result = migrate_ledger(self.repo)
         self.assertEqual(result["failure_type"], "INCOMPLETE_RESTORE")
 
+    def test_a_held_lock_beats_an_existing_chain(self) -> None:
+        """A chain file beside a held lock may be mid-publish.
+
+        It is reported as a migration in progress, never accepted as
+        already_migrated: the publisher may still roll it back.
+        """
+        self._commit_valid_chain_then_untrack()
+        runtime: Path = self.target / ".migrate"
+        runtime.mkdir(parents=True, exist_ok=True)
+        (runtime / ".gitignore").write_text("*\n", encoding="utf-8")
+        (runtime / ".migrate.lock").write_text("12345", encoding="utf-8")
+        (self.target / "bench-ledger.json").write_text("[]", encoding="utf-8")
+        with redirect_stderr(io.StringIO()):
+            result = migrate_ledger(self.repo)
+        self.assertEqual(result["failure_type"], "MIGRATION_IN_PROGRESS")
+
+    def test_a_partial_ignore_file_from_a_failed_write_is_removed(self) -> None:
+        """A failed write must not leave Bench's own directory reading as foreign.
+
+        The ignore file's content is the ownership proof; an empty file left
+        behind would fail that check on every retry the failure asks for.
+        """
+        self._commit_valid_chain_then_untrack()
+        real_write_text = Path.write_text
+
+        def fail_after_creating(self_path, data, *args, **kwargs):  # type: ignore[no-untyped-def]
+            if self_path.name == ".gitignore":
+                self_path.write_bytes(b"")
+                raise OSError("quota exceeded")
+            return real_write_text(self_path, data, *args, **kwargs)
+
+        with patch("ledger.migrate.Path.write_text", new=fail_after_creating):
+            with redirect_stderr(io.StringIO()):
+                result = migrate_ledger(self.repo)
+        self.assertEqual(result["failure_type"], "LOCK_FAILED")
+        self.assertFalse((self.target / ".migrate" / ".gitignore").exists())
+        with redirect_stderr(io.StringIO()):
+            retry = migrate_ledger(self.repo)
+        self.assertEqual(retry["status"], "migrated")
+
     def test_a_runtime_directory_bench_did_not_create_is_refused(self) -> None:
         """A .migrate/ that is not self-ignored is not Bench's, and not used.
 
