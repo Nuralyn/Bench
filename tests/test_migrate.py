@@ -519,9 +519,12 @@ class GitHistorySourceTests(_MigrateTestCase):
         (theirs / ".gitignore").write_text("cache\n", encoding="utf-8")
         (theirs / "keep.txt").write_text("mine", encoding="utf-8")
         self._commit_valid_chain_then_untrack()
-        for ignore_text in ("cache\n", None):
+        # A leading space is part of a git pattern, so " *" ignores nothing.
+        for ignore_text in ("cache\n", " *\n", "*\n!*\n", None):
             if ignore_text is None:
                 (theirs / ".gitignore").unlink()
+            else:
+                (theirs / ".gitignore").write_text(ignore_text, encoding="utf-8")
             with self.subTest(ignore=ignore_text):
                 with redirect_stderr(io.StringIO()):
                     result = migrate_ledger(self.repo)

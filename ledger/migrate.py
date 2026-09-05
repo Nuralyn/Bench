@@ -636,9 +636,10 @@ def _runtime_dir(target: Path) -> Path:
     runtime.mkdir(parents=True, exist_ok=True)
     ignore: Path = runtime / ".gitignore"
     if ignore.exists():
-        # Compared stripped: Bench writes "*\n" with newline="\n", but an
-        # editor or a checkout may have turned that into CRLF.
-        if ignore.read_bytes().strip() != b"*":
+        # Only an effective "*" line: Bench writes "*\n" with newline="\n"
+        # and a checkout may have turned that into CRLF, but git reads a
+        # leading space as part of the pattern, so " *" ignores nothing.
+        if ignore.read_bytes() not in (b"*", b"*\n", b"*\r\n"):
             raise OSError(
                 f"{ignore} is not Bench's own ignore file (a single '*' line), "
                 f"so {runtime} was not created by Bench and is left alone"
