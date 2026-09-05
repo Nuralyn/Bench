@@ -452,6 +452,43 @@ class GitHistorySourceTests(_MigrateTestCase):
         self.assertFalse(lock.exists())
         self.assertFalse(live.exists())
 
+    def test_lock_that_cannot_be_initialised_is_removed_not_left(self) -> None:
+        """A pid write that fails must not leave a lock every retry trips on."""
+        self._commit_valid_chain_then_untrack()
+        with patch("ledger.migrate.os.fdopen", side_effect=OSError("quota")):
+            with redirect_stderr(io.StringIO()):
+                result = migrate_ledger(self.repo)
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["failure_type"], "LOCK_FAILED")
+        self.assertFalse((self.target / ".migrate.lock").exists())
+        # And the next run, with the filesystem behaving, completes.
+        with redirect_stderr(io.StringIO()):
+            second = migrate_ledger(self.repo)
+        self.assertEqual(second["status"], "migrated")
+
+    def test_lock_that_cannot_be_released_turns_success_into_failure(self) -> None:
+        """A migrated chain behind a stuck lock is reported as a failure.
+
+        Otherwise the CLI exits 0 while every later run refuses with
+        MIGRATION_IN_PROGRESS.
+        """
+        self._commit_valid_chain_then_untrack()
+        real_unlink = Path.unlink
+
+        def refuse_lock(self_path, *args, **kwargs):  # type: ignore[no-untyped-def]
+            if self_path.name == ".migrate.lock":
+                raise OSError("filesystem went away")
+            return real_unlink(self_path, *args, **kwargs)
+
+        with patch("ledger.migrate.Path.unlink", new=refuse_lock):
+            with redirect_stderr(io.StringIO()):
+                result = migrate_ledger(self.repo)
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["failure_type"], "LOCK_NOT_RELEASED")
+        self.assertIn("migrated", result["detail"])
+        self.assertTrue((self.target / ".migrate.lock").exists())
+        self.assertTrue((self.target / "bench-ledger.json").exists())
+
     def test_lock_is_released_after_a_failed_run(self) -> None:
         self._commit_valid_chain_then_untrack()
         with patch("ledger.migrate.subprocess.run", side_effect=_hang_on_show(1)):

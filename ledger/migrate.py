@@ -73,6 +73,14 @@ _INCOMPLETE_MARKER: str = "restore-incomplete"
 _GIT_TIMEOUT_SECONDS: float = 60.0
 
 
+class LockError(Exception):
+    """The migration lock could not be taken for a reason other than "held".
+
+    Raised after any partly created lock file has been removed, so a
+    refused run never leaves a lock behind for later runs to trip on.
+    """
+
+
 class RestoreIncomplete(Exception):
     """A publish ended with the incomplete marker still in the target.
 
@@ -541,15 +549,33 @@ def _acquire_lock(target: Path) -> Path | None:
     except FileExistsError:
         return None
     except OSError as exc:
-        print(f"[bench migrate] could not take {lock}: {exc}", file=sys.stderr)
-        return None
-    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-        handle.write(str(os.getpid()))
+        raise LockError(f"could not take {lock}: {exc}") from exc
+    # From here the lock file exists and is ours. If writing the pid fails
+    # the file is removed before the error propagates, so a run refused for
+    # a filesystem fault does not leave a lock every retry would trip on.
+    handle = None
+    try:
+        handle = os.fdopen(descriptor, "w", encoding="utf-8")
+        with handle:
+            handle.write(str(os.getpid()))
+    except OSError as exc:
+        if handle is None:
+            # fdopen never took the descriptor, so it is still open, and an
+            # open file cannot be unlinked on Windows.
+            try:
+                os.close(descriptor)
+            except OSError as close_exc:
+                print(
+                    f"[bench migrate] could not close {lock}: {close_exc}",
+                    file=sys.stderr,
+                )
+        _release_lock(lock)
+        raise LockError(f"could not initialise {lock}: {exc}") from exc
     return lock
 
 
-def _release_lock(lock: Path) -> None:
-    """Remove the lock; a failure is logged, and the note says what to do."""
+def _release_lock(lock: Path) -> bool:
+    """Remove the lock. False, and a log, if it stays."""
     try:
         lock.unlink()
     except OSError as exc:
@@ -558,6 +584,8 @@ def _release_lock(lock: Path) -> None:
             f"hand once no migration is running",
             file=sys.stderr,
         )
+        return False
+    return True
 
 
 def migrate_ledger(repo_root: Path | None = None) -> dict[str, Any]:
@@ -566,13 +594,25 @@ def migrate_ledger(repo_root: Path | None = None) -> dict[str, Any]:
     Idempotent and non-destructive: an existing ``.bench/`` chain is left
     alone and reported as ``already_migrated`` rather than overwritten.
     One run at a time per target: a second run while the lock is held is
-    refused with MIGRATION_IN_PROGRESS and touches nothing.
+    refused with MIGRATION_IN_PROGRESS and touches nothing. A run whose
+    lock cannot be released afterwards is reported as a failure even when
+    the chain migrated, because every later run would refuse.
     """
     root: Path = repo_root or Path.cwd()
     target: Path = Path(resolve_ledger_path()).parent
     legacy_dir: Path = root / _LEGACY_DIRNAME
 
-    lock: Path | None = _acquire_lock(target)
+    try:
+        lock: Path | None = _acquire_lock(target)
+    except LockError as exc:
+        print(f"[bench migrate] {exc}", file=sys.stderr)
+        return _failed(
+            target,
+            "none",
+            "LOCK_FAILED",
+            f"{exc}. Nothing was touched. Check that {target} is writable, "
+            "then retry.",
+        )
     if lock is None:
         return _failed(
             target,
@@ -583,9 +623,24 @@ def migrate_ledger(repo_root: Path | None = None) -> dict[str, Any]:
             "it, or if no migration is running, remove the lock file and retry.",
         )
     try:
-        return _migrate_locked(root, target, legacy_dir)
+        result: dict[str, Any] = _migrate_locked(root, target, legacy_dir)
     finally:
-        _release_lock(lock)
+        released: bool = _release_lock(lock)
+    if released or result.get("status") not in (
+        "migrated",
+        "already_migrated",
+        "nothing_to_migrate",
+    ):
+        return result
+    return _failed(
+        target,
+        str(result.get("source", "none")),
+        "LOCK_NOT_RELEASED",
+        f"The migration ended {result.get('status')} but {lock} could not be "
+        "removed, so every later run would refuse with MIGRATION_IN_PROGRESS. "
+        "The chain is as that status says; remove the lock by hand once no "
+        "migration is running, then `python -m cli verify`.",
+    )
 
 
 def _migrate_locked(root: Path, target: Path, legacy_dir: Path) -> dict[str, Any]:
