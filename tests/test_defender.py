@@ -190,7 +190,10 @@ class NormalizeDefenderResponseTests(unittest.TestCase):
             self.assertFalse(_validate_defender_response(resp), position)
 
     def test_non_numeric_or_negative_index_still_fails_closed(self) -> None:
-        for index in ("first", "-1", "1.5", None):
+        # "²" and "①" satisfy str.isdigit() but int() rejects them, and a
+        # 5,000-digit string exceeds int()'s conversion limit: each must
+        # reach the validator's fail-closed path, never raise.
+        for index in ("first", "-1", "1.5", None, "²", "①", "9" * 5000):
             rebuttal: dict = _valid_rebuttal()
             rebuttal["finding_index"] = index
             resp: dict = self._resp(rebuttal)
