@@ -367,11 +367,30 @@ class GitHistorySourceTests(_MigrateTestCase):
         custom: Path = self.repo / "custom-ledger"
         status: str = self._migrate_leaving_the_lock(custom)
         ignore: str = (custom / ".gitignore").read_text(encoding="utf-8")
-        for pattern in (".migrate.lock", "restore-incomplete", ".restoring-*/", ".gitignore"):
+        for pattern in ("/.migrate.lock", "/restore-incomplete", "/.restoring-*/", "/.gitignore"):
             self.assertIn(pattern, ignore.splitlines())
         self.assertNotIn(".migrate.lock", status)
         self.assertNotIn("restore-incomplete", status)
         self.assertNotIn(".gitignore", status)
+        # Files of the same names one level down are not Bench's and must
+        # stay visible: the patterns are anchored to the ledger directory.
+        for name in (".migrate.lock", "restore-incomplete", ".gitignore", ".restoring-x/data"):
+            self.assertTrue(self._git_ignores(f"custom-ledger/{name}"), name)
+            self.assertFalse(self._git_ignores(f"custom-ledger/sub/{name}"), name)
+
+    def _git_ignores(self, relative: str) -> bool:
+        """Whether git would ignore `relative` in the repository, existing or not."""
+        return (
+            subprocess.run(
+                ["git", "check-ignore", "-q", "--no-index", relative],
+                cwd=str(self.repo),
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=60,
+            ).returncode
+            == 0
+        )
 
     def test_a_negated_ignore_rule_is_overridden_by_appending_last(self) -> None:
         """Git applies the last matching pattern, so presence proves nothing.
@@ -391,7 +410,9 @@ class GitHistorySourceTests(_MigrateTestCase):
         self.assertNotIn("restore-incomplete", status)
         lines: list[str] = (custom / ".gitignore").read_text(encoding="utf-8").splitlines()
         self.assertEqual(lines[:2], [".migrate.lock", "!.migrate.lock"])
-        self.assertEqual(lines[-4:], [".migrate.lock", "restore-incomplete", ".restoring-*/", ".gitignore"])
+        self.assertEqual(
+            lines[-4:], ["/.migrate.lock", "/restore-incomplete", "/.restoring-*/", "/.gitignore"]
+        )
 
     def _migrate_leaving_the_lock(self, custom: Path) -> str:
         """Migrate into `custom` with a lock that cannot be released.
@@ -434,7 +455,7 @@ class GitHistorySourceTests(_MigrateTestCase):
         self.assertEqual(result["status"], "migrated")
         lines: list[str] = (custom / ".gitignore").read_text(encoding="utf-8").splitlines()
         self.assertEqual(lines[0], "viewer.html")
-        self.assertIn(".migrate.lock", lines)
+        self.assertIn("/.migrate.lock", lines)
         # Running again adds nothing.
         before: str = (custom / ".gitignore").read_text(encoding="utf-8")
         with redirect_stderr(io.StringIO()):
@@ -462,7 +483,7 @@ class GitHistorySourceTests(_MigrateTestCase):
         self.assertTrue(written.startswith(original + b"\n"))
         appended: list[bytes] = written[len(original) + 1 :].splitlines()
         self.assertEqual(
-            appended, [b".migrate.lock", b"restore-incomplete", b".restoring-*/", b".gitignore"]
+            appended, [b"/.migrate.lock", b"/restore-incomplete", b"/.restoring-*/", b"/.gitignore"]
         )
 
     def test_a_directory_bench_did_not_create_is_never_removed(self) -> None:

@@ -596,11 +596,15 @@ def _timed_out(target: Path, exc: GitTimeout) -> dict[str, Any]:
 # itself as well: git still reads an ignored .gitignore, and without that
 # entry the file Bench wrote would be the one untracked path left behind
 # (tests.test_migrate.GitHistorySourceTests).
+# Each pattern is anchored with a leading slash: a slashless pattern in a
+# .gitignore matches at every level beneath it, so under a ledger path that
+# shares its directory with project files (the repository root included)
+# Bench would otherwise hide `sub/.gitignore` or `sub/.restoring-x/` too.
 _RUNTIME_IGNORES: tuple[str, ...] = (
-    _LOCK_FILENAME,
-    _INCOMPLETE_MARKER,
-    f"{_STAGING_PREFIX}*/",
-    ".gitignore",
+    f"/{_LOCK_FILENAME}",
+    f"/{_INCOMPLETE_MARKER}",
+    f"/{_STAGING_PREFIX}*/",
+    "/.gitignore",
 )
 # The block _ensure_runtime_ignore keeps at the tail of that file.
 _RUNTIME_IGNORE_BLOCK: bytes = b"\n".join(p.encode("ascii") for p in _RUNTIME_IGNORES) + b"\n"
