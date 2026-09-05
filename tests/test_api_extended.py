@@ -164,10 +164,17 @@ class CachedPrefixTests(unittest.TestCase):
         joined: str = "".join(block["text"] for block in blocks)
         self.assertEqual(joined, "PREFIX\n\nBODY")
 
-    def test_other_providers_get_one_string_in_the_same_order(self) -> None:
-        for provider in ("openrouter", "claude_code"):
-            turn: dict = _first_user_turn(provider, "PREFIX", "BODY")
-            self.assertEqual(turn["content"], "PREFIX\n\nBODY", provider)
+    def test_claude_code_gets_the_same_blocks_as_anthropic(self) -> None:
+        # The CLI path lifts the first block into its system prompt file;
+        # what it is handed here is identical to the anthropic turn.
+        self.assertEqual(
+            _first_user_turn("claude_code", "PREFIX", "BODY"),
+            _first_user_turn("anthropic", "PREFIX", "BODY"),
+        )
+
+    def test_openrouter_gets_one_string_in_the_same_order(self) -> None:
+        turn: dict = _first_user_turn("openrouter", "PREFIX", "BODY")
+        self.assertEqual(turn["content"], "PREFIX\n\nBODY")
 
     @patch("utils.api._anthropic_call")
     def test_call_model_passes_the_breakpoint_turn_to_the_provider(

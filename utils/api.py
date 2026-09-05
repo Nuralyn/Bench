@@ -177,12 +177,15 @@ def _first_user_turn(
     ``cache_control: ephemeral``. Render order is system, then messages, so
     the breakpoint caches the system prompt and the prefix together; the
     content after it (the diff, the earlier stages' findings) is never
-    cached. Every other provider receives the same text as one string, in
-    the same order, so no provider's judge reads a different prompt.
+    cached. The claude_code provider gets the same two blocks and lifts the
+    first into its system prompt file, the part of its request the CLI
+    caches (see _lift_cached_prefix). Every other provider receives the
+    same text as one string, in the same order, so no provider's judge
+    reads different words.
     """
     if not cached_prefix:
         return {"role": "user", "content": user_content}
-    if provider == _PROVIDER_ANTHROPIC:
+    if provider in (_PROVIDER_ANTHROPIC, _PROVIDER_CLAUDE_CLI):
         # The second block opens with the same separator the single-string
         # form uses, so the two renderings are byte-identical text.
         return {
@@ -774,6 +777,43 @@ def verify_subprocess_nonce(token: str) -> bool:
     return True
 
 
+def _lift_cached_prefix(
+    system_prompt: str, messages: list[dict[str, Any]]
+) -> tuple[str, list[dict[str, Any]]]:
+    """Move a cached-prefix block from the opening user turn into the system prompt.
+
+    The CLI takes its prompt as text on stdin, one block, so a breakpoint
+    between the prefix and the body cannot be expressed there. What the CLI
+    does cache is the system prompt file. Folding the prefix into it puts
+    the constitution and the repository context in the part of the request
+    Claude Code writes to the prompt cache once and reads back on the calls
+    that follow. Measured on this machine: with the prefix on stdin the
+    second of two calls read nothing from cache; with it in the system
+    prompt file the second call read 8,940 of 11,560 prefix tokens.
+
+    The repository context keeps the untrusted framing pipeline.runner
+    prepends to the content itself, so the words a judge reads about it do
+    not change, only their position, and Claude Code's own default prompt
+    places a project's CLAUDE.md in that same position. A message whose
+    content is already a string passes through unchanged.
+    """
+    if not messages:
+        return system_prompt, messages
+    first: dict[str, Any] = messages[0]
+    content: Any = first.get("content")
+    if not isinstance(content, list) or not content:
+        return system_prompt, messages
+    blocks: list[dict[str, Any]] = [b for b in content if isinstance(b, dict)]
+    if not blocks:
+        return system_prompt, messages
+    prefix: str = str(blocks[0].get("text", ""))
+    body: str = "".join(str(b.get("text", "")) for b in blocks[1:]).lstrip("\n")
+    lifted: dict[str, Any] = dict(first)
+    lifted["content"] = body
+    system_text: str = f"{system_prompt}\n\n{prefix}" if prefix else system_prompt
+    return system_text, [lifted, *messages[1:]]
+
+
 def _claude_cli_call(
     model: str,
     system_prompt: str,
@@ -807,7 +847,11 @@ def _claude_cli_call(
     if binary is None:
         raise _ProviderError("claude_code: `claude` binary not found on PATH")
 
-    body: str = _flatten_cli_messages(messages)
+    # A cached-prefix block in the opening turn (constitution, repository
+    # context) is lifted into the system prompt, the part of the request the
+    # CLI serves from the prompt cache; see _lift_cached_prefix.
+    system_text, cli_messages = _lift_cached_prefix(system_prompt, messages)
+    body: str = _flatten_cli_messages(cli_messages)
     timeout: float = _resolve_cli_timeout()
 
     child_env: dict[str, str] = dict(os.environ)
@@ -818,7 +862,7 @@ def _claude_cli_call(
     # system-priority prompt), without the multi-line-argv truncation cmd.exe
     # inflicts on --system-prompt for a .cmd/.bat shim. The file is ephemeral
     # (model input only, never a governed project file) and removed in finally.
-    sys_prompt_path: str | None = _write_system_prompt_file(system_prompt)
+    sys_prompt_path: str | None = _write_system_prompt_file(system_text)
 
     # Give the judge NO tools at all: --tools "" removes the built-in tools and
     # --strict-mcp-config (with no --mcp-config) removes every MCP server, so an
