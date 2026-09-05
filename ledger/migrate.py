@@ -583,6 +583,43 @@ def _timed_out(target: Path, exc: GitTimeout) -> dict[str, Any]:
     )
 
 
+# The runtime files a migration may leave in the target: the lock, the
+# incomplete marker, and staging directories. Each must stay out of git
+# even when BENCH_LEDGER_PATH names a directory nothing else ignores, or a
+# lock left by an interrupted run could be committed and make every other
+# clone of that repository refuse to migrate. Written into the target's
+# own .gitignore before the first of them is created. The ignore file names
+# itself as well: git still reads an ignored .gitignore, and without that
+# entry the file Bench wrote would be the one untracked path left behind
+# (tests.test_migrate.GitHistorySourceTests).
+_RUNTIME_IGNORES: tuple[str, ...] = (
+    _LOCK_FILENAME,
+    _INCOMPLETE_MARKER,
+    f"{_STAGING_PREFIX}*/",
+    ".gitignore",
+)
+
+
+def _ensure_runtime_ignore(target: Path) -> None:
+    """Make sure the target's .gitignore covers Bench's runtime files.
+
+    Creates the file if absent and appends any missing pattern otherwise;
+    a .gitignore inside an already-ignored .bench/ is harmless. Raises
+    OSError to the caller, which is about to create the lock in the same
+    directory and reports both failures the same way.
+    """
+    ignore: Path = target / ".gitignore"
+    text: str = ignore.read_text(encoding="utf-8") if ignore.exists() else ""
+    present: set[str] = {line.strip() for line in text.splitlines()}
+    missing: list[str] = [p for p in _RUNTIME_IGNORES if p not in present]
+    if not missing:
+        return
+    with ignore.open("a", encoding="utf-8") as handle:
+        if text and not text.endswith("\n"):
+            handle.write("\n")
+        handle.write("\n".join(missing) + "\n")
+
+
 def _acquire_lock(target: Path) -> Path | None:
     """Take the target's migration lock, or None if it is held or cannot be.
 
@@ -595,6 +632,7 @@ def _acquire_lock(target: Path) -> Path | None:
     lock: Path = target / _LOCK_FILENAME
     try:
         target.mkdir(parents=True, exist_ok=True)
+        _ensure_runtime_ignore(target)
         descriptor: int = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
     except FileExistsError:
         return None

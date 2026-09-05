@@ -356,6 +356,63 @@ class GitHistorySourceTests(_MigrateTestCase):
         self.assertNotIn(".restoring-", status)
         self.assertNotIn("custom-ledger", status)
 
+    def test_lock_and_marker_are_ignored_under_an_unignored_ledger_path(
+        self,
+    ) -> None:
+        """A lock left by an interrupted run must not be committable.
+
+        Otherwise every other clone using that ledger path would refuse to
+        migrate until the tracked lock was removed by hand.
+        """
+        custom: Path = self.repo / "custom-ledger"
+        os.environ["BENCH_LEDGER_PATH"] = str(custom / "bench-ledger.json")
+        self._commit_valid_chain_then_untrack()
+        real_unlink = Path.unlink
+
+        def refuse_lock(self_path, *args, **kwargs):  # type: ignore[no-untyped-def]
+            if self_path.name == ".migrate.lock":
+                raise OSError("filesystem went away")
+            return real_unlink(self_path, *args, **kwargs)
+
+        with patch("ledger.migrate.Path.unlink", new=refuse_lock):
+            with redirect_stderr(io.StringIO()):
+                result = migrate_ledger(self.repo)
+        self.assertEqual(result["failure_type"], "LOCK_NOT_RELEASED")
+        self.assertTrue((custom / ".migrate.lock").exists())
+        ignore: str = (custom / ".gitignore").read_text(encoding="utf-8")
+        for pattern in (".migrate.lock", "restore-incomplete", ".restoring-*/", ".gitignore"):
+            self.assertIn(pattern, ignore.splitlines())
+
+        status = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=all"],
+            cwd=str(self.repo),
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=60,
+        ).stdout
+        self.assertNotIn(".migrate.lock", status)
+        self.assertNotIn("restore-incomplete", status)
+        self.assertNotIn(".gitignore", status)
+
+    def test_existing_ignore_file_is_appended_not_replaced(self) -> None:
+        custom: Path = self.repo / "custom-ledger"
+        os.environ["BENCH_LEDGER_PATH"] = str(custom / "bench-ledger.json")
+        custom.mkdir(parents=True)
+        (custom / ".gitignore").write_text("viewer.html", encoding="utf-8")
+        self._commit_valid_chain_then_untrack()
+        with redirect_stderr(io.StringIO()):
+            result = migrate_ledger(self.repo)
+        self.assertEqual(result["status"], "migrated")
+        lines: list[str] = (custom / ".gitignore").read_text(encoding="utf-8").splitlines()
+        self.assertEqual(lines[0], "viewer.html")
+        self.assertIn(".migrate.lock", lines)
+        # Running again adds nothing.
+        before: str = (custom / ".gitignore").read_text(encoding="utf-8")
+        with redirect_stderr(io.StringIO()):
+            migrate_ledger(self.repo)
+        self.assertEqual((custom / ".gitignore").read_text(encoding="utf-8"), before)
+
     def test_a_directory_bench_did_not_create_is_never_removed(self) -> None:
         """Only a staging directory carrying the ownership marker is cleared."""
         self._commit_valid_chain_then_untrack()
