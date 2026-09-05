@@ -16,6 +16,7 @@ the real ``sys.stdin.isatty`` and ``input``, and renders the result.
 
 import json
 import os
+import re
 import subprocess
 import sys
 import webbrowser
@@ -30,6 +31,7 @@ from ledger.chain import (
 )
 from ledger.attestation import AttestationError, build_attestation, render
 from ledger.migrate import migrate_ledger
+from utils.procs import run_isolated
 from ledger.sanitize import (
     SANITATION_VERDICT,
     SanitationError,
@@ -354,17 +356,38 @@ def cmd_record_sanitation(
     return 0
 
 
+# Ceiling on the git and gh probes below. Both talk to a remote, and a hung
+# remote must surface as a failed probe, not a CLI that never returns; every
+# subprocess in this tree carries a timeout (tests/test_subprocess_timeouts.py
+# scans for it). Generous, because a slow ref listing is still an answer.
+_SUBPROCESS_TIMEOUT_SECONDS: float = 60.0
+# A GitHub API path as the purge manifest records it: segments of letters,
+# digits, dots, underscores and dashes, never starting with a dash.
+_ENDPOINT_PATTERN: re.Pattern[str] = re.compile(r"[A-Za-z0-9][A-Za-z0-9_./-]*")
+# A GitHub repository as owner/name, the only shape the probes above build
+# a URL or an API path from.
+_REPOSITORY_PATTERN: re.Pattern[str] = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
+
+
 def _git_refs(args: list[str]) -> dict[str, str] | None:
     """Run a git ref-listing command into a {refname: sha} map.
 
     Returns None on failure rather than an empty map, because "no refs" and
     "could not read refs" must not look alike to a gate that refuses on
-    mismatch.
+    mismatch. A timeout is a failure of the same kind.
     """
     try:
-        proc = subprocess.run(
-            args, capture_output=True, text=True, encoding="utf-8"
+        # run_isolated detaches stdin, so a credential prompt fails at once
+        # instead of waiting on a terminal nobody is watching, and ends git
+        # together with anything it launched (ssh, a helper) on timeout.
+        proc = run_isolated(args, timeout=_SUBPROCESS_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        print(
+            f"[bench cli] git did not answer within "
+            f"{_SUBPROCESS_TIMEOUT_SECONDS:g}s: {' '.join(args)}",
+            file=sys.stderr,
         )
+        return None
     except OSError as exc:
         print(f"[bench cli] cannot run git: {exc}", file=sys.stderr)
         return None
@@ -392,13 +415,29 @@ def _gh_status(endpoint: str) -> int:
     inconclusive, so an unanswered probe can never be read as a removal
     (C-001: the failure is surfaced, not swallowed into a pass).
     """
-    try:
-        proc = subprocess.run(
-            ["gh", "api", "-i", endpoint],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
+    if not _ENDPOINT_PATTERN.fullmatch(endpoint):
+        # The endpoint comes from a manifest on disk, not from this code.
+        # One that is not a plain API path is not asked at all (a leading
+        # dash would reach gh as a flag), and unasked is inconclusive.
+        print(
+            f"[bench cli] refusing to probe a malformed endpoint: {endpoint!r}",
+            file=sys.stderr,
         )
+        return 0
+    try:
+        # run_isolated detaches stdin, so an auth prompt fails at once
+        # instead of waiting on a terminal nobody is watching, and ends gh
+        # together with anything it launched on timeout.
+        proc = run_isolated(["gh", "api", "-i", endpoint], timeout=_SUBPROCESS_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        # Unanswered, so inconclusive: 0 is the value classify_removal
+        # treats as "could not tell", never as a removal.
+        print(
+            f"[bench cli] gh did not answer within "
+            f"{_SUBPROCESS_TIMEOUT_SECONDS:g}s for {endpoint}",
+            file=sys.stderr,
+        )
+        return 0
     except OSError as exc:
         print(f"[bench cli] cannot run gh: {exc}", file=sys.stderr)
         return 0
@@ -569,6 +608,18 @@ def cmd_verify_sanitation_binding(
             f"{', '.join(missing)}.",
             file=sys.stderr,
         )
+        return 1
+    # Both reach git as arguments. Only an owner/name repository and an
+    # existing mirror directory are probed; anything else is refused here,
+    # before a process is started with it.
+    if not _REPOSITORY_PATTERN.fullmatch(repository or ""):
+        print(
+            f"[bench cli] --repository must be owner/name, got {repository!r}.",
+            file=sys.stderr,
+        )
+        return 1
+    if not Path(mirror or "").is_dir():
+        print(f"[bench cli] --mirror is not a directory: {mirror!r}.", file=sys.stderr)
         return 1
 
     chain: dict[str, Any] = verify_chain()
@@ -813,6 +864,12 @@ def cmd_migrate_ledger() -> int:
         f"  failure  : {result.get('failure_type') or 'incomplete restore'}",
         file=sys.stderr,
     )
+    # A failure result names its cause and what to do (retry after a
+    # timeout, wait for or remove a lock, inspect an incomplete restore);
+    # print that ahead of the general note.
+    detail: str = str(result.get("detail", "") or "")
+    if detail:
+        print(f"  detail   : {detail}", file=sys.stderr)
     print(
         "The restored chain is incomplete or does not verify. It has been "
         "left in place for inspection rather than deleted; resolve the "

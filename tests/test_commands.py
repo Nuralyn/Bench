@@ -8,6 +8,7 @@ Run: python -m unittest discover -s tests -p test_commands.py -v
 """
 
 import io
+import subprocess
 import os
 import shutil
 import sys
@@ -22,8 +23,11 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from cli.commands import (  # noqa: E402
+    _gh_status,
+    _git_refs,
     cmd_constitution,
     cmd_ledger,
+    cmd_migrate_ledger,
     cmd_stats,
     cmd_verify,
     cmd_viewer,
@@ -230,6 +234,135 @@ class CmdStatsTests(unittest.TestCase):
             with redirect_stdout(out):
                 code: int = cmd_stats()
         self.assertEqual(code, 0)
+
+
+class ProbeTimeoutTests(unittest.TestCase):
+    """A git or gh probe that hangs ends as a failed probe, not a hung CLI.
+
+    Both helpers feed a gate that must not mistake "no answer" for an
+    answer: _git_refs returns None (not an empty map) and _gh_status returns
+    0 (the value classify_removal reads as inconclusive), each with a
+    stderr line naming the timeout.
+    """
+
+    def test_git_refs_timeout_returns_none_and_logs(self) -> None:
+        err = io.StringIO()
+        with patch(
+            "cli.commands.run_isolated",
+            side_effect=subprocess.TimeoutExpired(["git", "ls-remote"], 60),
+        ):
+            with redirect_stderr(err):
+                result = _git_refs(["git", "ls-remote", "origin"])
+        self.assertIsNone(result)
+        self.assertIn("did not answer within", err.getvalue())
+
+    def test_gh_status_timeout_returns_zero_and_logs(self) -> None:
+        err = io.StringIO()
+        with patch(
+            "cli.commands.run_isolated",
+            side_effect=subprocess.TimeoutExpired(["gh", "api"], 60),
+        ):
+            with redirect_stderr(err):
+                status: int = _gh_status("repos/x/y/commits/abc")
+        self.assertEqual(status, 0)
+        self.assertIn("did not answer within", err.getvalue())
+
+    def test_a_malformed_endpoint_is_not_probed_and_is_inconclusive(self) -> None:
+        # The endpoint comes from a manifest on disk; one that is not a plain
+        # API path never reaches gh (a leading dash would be read as a flag).
+        err = io.StringIO()
+        with patch("cli.commands.run_isolated") as run:
+            with redirect_stderr(err):
+                for endpoint in ("-x", "repos/x y", "", "repos/x/y?ref=../z"):
+                    self.assertEqual(_gh_status(endpoint), 0, endpoint)
+        run.assert_not_called()
+        self.assertIn("malformed endpoint", err.getvalue())
+
+    def test_probes_go_through_run_isolated_with_a_timeout(self) -> None:
+        # run_isolated detaches stdin (a credential or auth prompt fails at
+        # once) and ends the process group on timeout; tests/test_procs.py
+        # proves that. Here only the routing and the timeout are checked.
+        with patch("cli.commands.run_isolated") as run:
+            run.return_value = subprocess.CompletedProcess([], 0, "", "")
+            _git_refs(["git", "ls-remote", "origin"])
+            _gh_status("repos/x/y/commits/abc")
+        self.assertEqual(len(run.call_args_list), 2)
+        for call in run.call_args_list:
+            self.assertGreater(call.kwargs.get("timeout", 0), 0)
+
+
+class SanitationBindingArgumentTests(unittest.TestCase):
+    """Both arguments reach git; a malformed one is refused before that."""
+
+    def test_a_repository_that_is_not_owner_slash_name_is_refused(self) -> None:
+        from cli.commands import cmd_verify_sanitation_binding
+
+        err = io.StringIO()
+        with tempfile.TemporaryDirectory() as mirror:
+            with patch("cli.commands.run_isolated") as run:
+                with redirect_stderr(err):
+                    for repository in ("-c core.x=y", "owner", "owner/name/extra", "own er/name"):
+                        code: int = cmd_verify_sanitation_binding(
+                            record_hash="a" * 64, mirror=mirror, repository=repository
+                        )
+                        self.assertEqual(code, 1, repository)
+        run.assert_not_called()
+        self.assertIn("owner/name", err.getvalue())
+
+    def test_a_mirror_that_is_not_a_directory_is_refused(self) -> None:
+        from cli.commands import cmd_verify_sanitation_binding
+
+        err = io.StringIO()
+        with tempfile.TemporaryDirectory() as tmp:
+            missing: str = os.path.join(tmp, "no-such-mirror")
+            with patch("cli.commands.run_isolated") as run:
+                with redirect_stderr(err):
+                    code: int = cmd_verify_sanitation_binding(
+                        record_hash="a" * 64, mirror=missing, repository="owner/name"
+                    )
+        self.assertEqual(code, 1)
+        run.assert_not_called()
+        self.assertIn("not a directory", err.getvalue())
+
+
+class CmdMigrateLedgerTests(unittest.TestCase):
+    """A failed migration prints the result's own recovery note."""
+
+    def _failed(self, failure_type: str, detail: str) -> dict:
+        return {
+            "status": "failed",
+            "source": "git history",
+            "target": "/tmp/x/.bench",
+            "files": 0,
+            "expected": 0,
+            "verified": False,
+            "entries": 0,
+            "genesis_hash": "",
+            "failure_type": failure_type,
+            "detail": detail,
+        }
+
+    def test_failure_prints_type_and_detail_and_exits_one(self) -> None:
+        err = io.StringIO()
+        with patch(
+            "cli.commands.migrate_ledger",
+            return_value=self._failed("GIT_TIMEOUT", "git log did not finish. Retry."),
+        ):
+            with redirect_stdout(io.StringIO()), redirect_stderr(err):
+                code: int = cmd_migrate_ledger()
+        self.assertEqual(code, 1)
+        self.assertIn("failure  : GIT_TIMEOUT", err.getvalue())
+        self.assertIn("detail   : git log did not finish. Retry.", err.getvalue())
+
+    def test_failure_without_detail_prints_no_detail_line(self) -> None:
+        err = io.StringIO()
+        with patch(
+            "cli.commands.migrate_ledger",
+            return_value=dict(self._failed("ENUMERATION_FAILED", ""), detail=""),
+        ):
+            with redirect_stdout(io.StringIO()), redirect_stderr(err):
+                cmd_migrate_ledger()
+        self.assertNotIn("detail   :", err.getvalue())
 
 
 class CmdConstitutionTests(unittest.TestCase):

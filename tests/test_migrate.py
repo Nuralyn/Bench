@@ -11,6 +11,7 @@ impossible.
 Run: python -m unittest tests.test_migrate -v
 """
 
+import io
 import json
 import os
 import shutil
@@ -18,6 +19,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stderr
 from pathlib import Path
 from unittest.mock import patch
 
@@ -25,8 +27,33 @@ _REPO_ROOT: Path = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from ledger.migrate import migrate_ledger  # noqa: E402
+from ledger.migrate import GitTimeout, _run_git, migrate_ledger  # noqa: E402
 from tests._ledger_fixtures import build_valid_chain  # noqa: E402
+from utils.procs import run_isolated  # noqa: E402
+
+
+def _hang_on_show(nth: int):  # type: ignore[no-untyped-def]
+    """A run_isolated stand-in whose ``nth`` `git show` times out.
+
+    Every other call goes to the real run_isolated, so the probe and the
+    enumeration answer and only the fetch hangs.
+    """
+    real = run_isolated
+    shows: list[int] = [0]
+
+    def run(args, **kwargs):  # type: ignore[no-untyped-def]
+        if "show" in args:
+            shows[0] += 1
+            if shows[0] == nth:
+                raise subprocess.TimeoutExpired(args, 60)
+        return real(args, **kwargs)
+
+    return run
+
+
+def _refuse(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+    """A filesystem call that fails, standing in for rmtree or unlink."""
+    raise OSError("filesystem went away")
 
 
 def _write_chain(
@@ -178,10 +205,638 @@ class GitHistorySourceTests(_MigrateTestCase):
         shutil.rmtree(legacy)
         self._git("commit", "-q", "-m", "untrack")
 
+    def test_git_timeout_raises_a_typed_error_not_a_negative_answer(self) -> None:
+        """A git call that never returns raises GitTimeout with a stderr line."""
+        err = io.StringIO()
+        with patch(
+            "ledger.migrate.run_isolated",
+            side_effect=subprocess.TimeoutExpired(["git", "log"], 60),
+        ):
+            with redirect_stderr(err):
+                with self.assertRaises(GitTimeout):
+                    _run_git(["log", "-1"], self.repo)
+        self.assertIn("did not finish within", err.getvalue())
+
+    def test_timeout_during_history_probe_is_a_failed_migration(self) -> None:
+        """Not nothing_to_migrate: that would let the next edit fork the chain."""
+        self._commit_then_untrack()
+        with patch(
+            "ledger.migrate.run_isolated",
+            side_effect=subprocess.TimeoutExpired(["git", "log"], 60),
+        ):
+            with redirect_stderr(io.StringIO()):
+                result = migrate_ledger(self.repo)
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["failure_type"], "GIT_TIMEOUT")
+        self.assertFalse((self.target / "bench-ledger.json").exists())
+
+    def test_timeout_during_restore_is_a_failed_migration(self) -> None:
+        """The probe answered; a cat-file or show that hangs still fails."""
+        self._commit_then_untrack()
+        real = run_isolated
+
+        def hang_on_show(args, **kwargs):  # type: ignore[no-untyped-def]
+            if "show" in args:
+                raise subprocess.TimeoutExpired(args, 60)
+            return real(args, **kwargs)
+
+        with patch("ledger.migrate.run_isolated", side_effect=hang_on_show):
+            with redirect_stderr(io.StringIO()):
+                result = migrate_ledger(self.repo)
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["failure_type"], "GIT_TIMEOUT")
+
+    def test_timeout_mid_restore_leaves_no_partial_chain_behind(self) -> None:
+        """Files written before the hang are removed, so a retry can succeed.
+
+        Left in place, they would satisfy the already_started guard and the
+        retry would report already_migrated over a truncated chain. A
+        fully valid chain is committed here (the shared fixture carries a
+        deliberately broken entry so partial restores stay partial), so
+        the retry can be asserted as a complete, verified migration.
+        """
+        self._commit_valid_chain_then_untrack()
+        hang_on_second_show = _hang_on_show(2)
+
+        with patch("ledger.migrate.run_isolated", side_effect=hang_on_second_show):
+            with redirect_stderr(io.StringIO()):
+                first = migrate_ledger(self.repo)
+        self.assertEqual(first["status"], "failed")
+        self.assertEqual(first["failure_type"], "GIT_TIMEOUT")
+        # Nothing reached the target, and the staging directory is gone.
+        self._assert_no_chain_in_target()
+        self.assertEqual(self._staging_dirs(), [])
+
+        # git is answering again: the retry restores the whole chain.
+        with redirect_stderr(io.StringIO()):
+            second = migrate_ledger(self.repo)
+        self.assertEqual(second["status"], "migrated")
+        self.assertTrue((self.target / "bench-ledger.json").exists())
+        self.assertEqual(self._staging_dirs(), [])
+
+    def _commit_valid_chain_then_untrack(self) -> None:
+        legacy: Path = self.repo / "ledger"
+        _write_chain(legacy, count=3, dag_entries=2)
+        self._git("add", "-A")
+        self._git("commit", "-q", "-m", "chain")
+        self._git("rm", "-r", "-q", "--cached", "ledger")
+        shutil.rmtree(legacy)
+        self._git("commit", "-q", "-m", "untrack")
+
+    def _staging_dirs(self) -> list[Path]:
+        return sorted((self.target / ".migrate").glob(".restoring-*"))
+
+    def _assert_no_chain_in_target(self) -> None:
+        self.assertFalse((self.target / "bench-ledger.json").exists())
+        self.assertEqual(list((self.target / "entries").glob("*.json")), [])
+        self.assertFalse((self.target / ".migrate" / "restore-incomplete").exists())
+
+    def test_failed_cleanup_after_timeout_still_leaves_the_target_empty(self) -> None:
+        """Debris from a cleanup that fails stays in staging, inside the
+        gitignored target, never in the target's chain files.
+
+        The next attempt still sees no chain, clears the stale staging
+        directory it owns, and restores in full.
+        """
+        self._commit_valid_chain_then_untrack()
+        hang_on_second_show = _hang_on_show(2)
+
+        refuse = _refuse
+
+        with patch("ledger.migrate.run_isolated", side_effect=hang_on_second_show):
+            with patch("ledger.migrate.shutil.rmtree", side_effect=refuse):
+                with redirect_stderr(io.StringIO()):
+                    first = migrate_ledger(self.repo)
+        self.assertEqual(first["status"], "failed")
+        self.assertEqual(first["failure_type"], "GIT_TIMEOUT")
+        self._assert_no_chain_in_target()
+        stale: list[Path] = self._staging_dirs()
+        self.assertEqual(len(stale), 1)
+        self.assertTrue((stale[0] / ".bench-restore").is_file())
+
+        with redirect_stderr(io.StringIO()):
+            second = migrate_ledger(self.repo)
+        self.assertEqual(second["status"], "migrated")
+        self.assertTrue(second["verified"])
+        self.assertEqual(self._staging_dirs(), [])
+
+    def test_staging_debris_is_ignored_even_under_an_unignored_ledger_path(
+        self,
+    ) -> None:
+        """A custom BENCH_LEDGER_PATH may sit where nothing ignores it.
+
+        Bench's runtime directory ignores itself, so the debris of a failed
+        attempt never shows as untracked, and a `git add -A` cannot commit
+        the diff bodies a restored entry carries.
+        """
+        custom: Path = self.repo / "custom-ledger"
+        os.environ["BENCH_LEDGER_PATH"] = str(custom / "bench-ledger.json")
+        self._commit_valid_chain_then_untrack()
+        hang_on_second_show = _hang_on_show(2)
+
+        refuse = _refuse
+
+        with patch("ledger.migrate.run_isolated", side_effect=hang_on_second_show):
+            with patch("ledger.migrate.shutil.rmtree", side_effect=refuse):
+                with redirect_stderr(io.StringIO()):
+                    result = migrate_ledger(self.repo)
+        self.assertEqual(result["status"], "failed")
+        stale: list[Path] = sorted((custom / ".migrate").glob(".restoring-*"))
+        self.assertEqual(len(stale), 1)
+        self.assertEqual((custom / ".migrate" / ".gitignore").read_text(encoding="utf-8"), "*\n")
+        self.assertFalse((custom / ".gitignore").exists())
+        self.assertTrue(any(stale[0].glob("*.json")) or any((stale[0] / "entries").glob("*.json")))
+
+        status = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=all"],
+            cwd=str(self.repo),
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=60,
+        ).stdout
+        self.assertNotIn(".restoring-", status)
+        self.assertNotIn("custom-ledger", status)
+
+    def test_lock_and_marker_are_ignored_under_an_unignored_ledger_path(
+        self,
+    ) -> None:
+        """A lock left by an interrupted run must not be committable.
+
+        Otherwise every other clone using that ledger path would refuse to
+        migrate until the tracked lock was removed by hand.
+        """
+        custom: Path = self.repo / "custom-ledger"
+        status: str = self._migrate_leaving_the_lock(custom)
+        self.assertEqual((custom / ".migrate" / ".gitignore").read_text(encoding="utf-8"), "*\n")
+        self.assertFalse((custom / ".gitignore").exists())
+        self.assertNotIn(".migrate", status)
+        # Only Bench's own runtime directory is ignored; the same names
+        # beside it, or one level down, are not Bench's and stay visible.
+        for name in (".migrate.lock", "restore-incomplete", ".restoring-x/data"):
+            self.assertTrue(self._git_ignores(f"custom-ledger/.migrate/{name}"), name)
+            self.assertFalse(self._git_ignores(f"custom-ledger/{name}"), name)
+            self.assertFalse(self._git_ignores(f"custom-ledger/sub/{name}"), name)
+
+    def _git_ignores(self, relative: str) -> bool:
+        """Whether git would ignore `relative` in the repository, existing or not."""
+        return (
+            subprocess.run(
+                ["git", "check-ignore", "-q", "--no-index", relative],
+                cwd=str(self.repo),
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=60,
+            ).returncode
+            == 0
+        )
+
+    def test_an_existing_ignore_file_is_never_modified(self) -> None:
+        """Bench edits no .gitignore it did not create.
+
+        A ledger placed beside project files, the repository root included,
+        would otherwise have a tracked file rewritten on every migration.
+        The file is compared as bytes, so an encoding Bench could not read
+        is covered too.
+        """
+        custom: Path = self.repo / "custom-ledger"
+        custom.mkdir(parents=True)
+        original: bytes = "café.html\r\nnotes".encode("latin-1")
+        (custom / ".gitignore").write_bytes(original)
+        status: str = self._migrate_leaving_the_lock(custom)
+        self.assertEqual((custom / ".gitignore").read_bytes(), original)
+        self.assertNotIn(".gitignore", status)
+        self.assertNotIn(".migrate", status)
+
+    def _migrate_leaving_the_lock(self, custom: Path) -> str:
+        """Migrate into `custom` with a lock that cannot be released.
+
+        Asserts the typed LOCK_NOT_RELEASED result and that the lock is
+        still on disk, then returns `git status --porcelain
+        --untracked-files=all` for the repository.
+        """
+        os.environ["BENCH_LEDGER_PATH"] = str(custom / "bench-ledger.json")
+        self._commit_valid_chain_then_untrack()
+        real_unlink = Path.unlink
+
+        def refuse_lock(self_path, *args, **kwargs):  # type: ignore[no-untyped-def]
+            if self_path.name == ".migrate.lock":
+                raise OSError("filesystem went away")
+            return real_unlink(self_path, *args, **kwargs)
+
+        with patch("ledger.migrate.Path.unlink", new=refuse_lock):
+            with redirect_stderr(io.StringIO()):
+                result = migrate_ledger(self.repo)
+        self.assertEqual(result["failure_type"], "LOCK_NOT_RELEASED")
+        self.assertTrue((custom / ".migrate" / ".migrate.lock").exists())
+        return subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=all"],
+            cwd=str(self.repo),
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=60,
+        ).stdout
+
+    def test_a_marker_beside_a_held_lock_is_a_migration_in_progress(self) -> None:
+        """While a publish is live, both the lock and the marker exist.
+
+        A second run must not read that as an interrupted restore: the
+        incomplete-restore recovery text says to remove what the restore
+        left, which would be a live publisher's files. Once the lock is
+        gone the marker stands on its own.
+        """
+        self._commit_valid_chain_then_untrack()
+        runtime: Path = self.target / ".migrate"
+        runtime.mkdir(parents=True, exist_ok=True)
+        (runtime / ".gitignore").write_text("*\n", encoding="utf-8")
+        (runtime / ".migrate.lock").write_text("12345", encoding="utf-8")
+        (runtime / "restore-incomplete").write_text("", encoding="utf-8")
+        with redirect_stderr(io.StringIO()):
+            result = migrate_ledger(self.repo)
+        self.assertEqual(result["failure_type"], "MIGRATION_IN_PROGRESS")
+        self.assertTrue((runtime / "restore-incomplete").exists())
+        self.assertTrue((runtime / ".migrate.lock").exists())
+        self.assertFalse((self.target / "bench-ledger.json").exists())
+
+        (runtime / ".migrate.lock").unlink()
+        with redirect_stderr(io.StringIO()):
+            result = migrate_ledger(self.repo)
+        self.assertEqual(result["failure_type"], "INCOMPLETE_RESTORE")
+
+    def test_a_held_lock_beats_an_existing_chain(self) -> None:
+        """A chain file beside a held lock may be mid-publish.
+
+        It is reported as a migration in progress, never accepted as
+        already_migrated: the publisher may still roll it back.
+        """
+        self._commit_valid_chain_then_untrack()
+        runtime: Path = self.target / ".migrate"
+        runtime.mkdir(parents=True, exist_ok=True)
+        (runtime / ".gitignore").write_text("*\n", encoding="utf-8")
+        (runtime / ".migrate.lock").write_text("12345", encoding="utf-8")
+        (self.target / "bench-ledger.json").write_text("[]", encoding="utf-8")
+        with redirect_stderr(io.StringIO()):
+            result = migrate_ledger(self.repo)
+        self.assertEqual(result["failure_type"], "MIGRATION_IN_PROGRESS")
+
+    def test_a_partial_ignore_file_from_a_failed_write_is_removed(self) -> None:
+        """A failed write must not leave Bench's own directory reading as foreign.
+
+        The ignore file's content is the ownership proof; an empty file left
+        behind would fail that check on every retry the failure asks for.
+        """
+        self._commit_valid_chain_then_untrack()
+        real_write_text = Path.write_text
+
+        def fail_after_creating(self_path, data, *args, **kwargs):  # type: ignore[no-untyped-def]
+            if self_path.name == ".gitignore":
+                self_path.write_bytes(b"")
+                raise OSError("quota exceeded")
+            return real_write_text(self_path, data, *args, **kwargs)
+
+        with patch("ledger.migrate.Path.write_text", new=fail_after_creating):
+            with redirect_stderr(io.StringIO()):
+                result = migrate_ledger(self.repo)
+        self.assertEqual(result["failure_type"], "LOCK_FAILED")
+        self.assertFalse((self.target / ".migrate" / ".gitignore").exists())
+        with redirect_stderr(io.StringIO()):
+            retry = migrate_ledger(self.repo)
+        self.assertEqual(retry["status"], "migrated")
+
+    def test_a_file_where_the_runtime_directory_should_be_is_a_collision(self) -> None:
+        """A plain `.migrate` file is not a held lock.
+
+        mkdir raises FileExistsError for it, which must not be read as the
+        exclusive lock create finding a lock: that would report a
+        migration in progress and point at a lock file that does not exist.
+        """
+        self._commit_valid_chain_then_untrack()
+        self.target.mkdir(parents=True, exist_ok=True)
+        (self.target / ".migrate").write_text("not a directory", encoding="utf-8")
+        with redirect_stderr(io.StringIO()):
+            result = migrate_ledger(self.repo)
+        self.assertEqual(result["failure_type"], "LOCK_FAILED")
+        self.assertIn("could not prepare", result["detail"])
+        self.assertEqual((self.target / ".migrate").read_text(encoding="utf-8"), "not a directory")
+
+    def test_a_runtime_directory_bench_did_not_create_is_refused(self) -> None:
+        """A .migrate/ that is not self-ignored is not Bench's, and not used.
+
+        Accepting it would stage entries carrying full diff bodies where
+        nothing keeps them out of a commit. The run is refused as
+        LOCK_FAILED, the directory is left as found, and nothing is
+        restored.
+        """
+        custom: Path = self.repo / "custom-ledger"
+        os.environ["BENCH_LEDGER_PATH"] = str(custom / "bench-ledger.json")
+        theirs: Path = custom / ".migrate"
+        theirs.mkdir(parents=True)
+        (theirs / ".gitignore").write_text("cache\n", encoding="utf-8")
+        (theirs / "keep.txt").write_text("mine", encoding="utf-8")
+        self._commit_valid_chain_then_untrack()
+        # A leading space is part of a git pattern, so " *" ignores nothing.
+        for ignore_text in ("cache\n", " *\n", "*\n!*\n", None):
+            if ignore_text is None:
+                (theirs / ".gitignore").unlink()
+            else:
+                (theirs / ".gitignore").write_text(ignore_text, encoding="utf-8")
+            with self.subTest(ignore=ignore_text):
+                with redirect_stderr(io.StringIO()):
+                    result = migrate_ledger(self.repo)
+                self.assertEqual(result["failure_type"], "LOCK_FAILED")
+                self.assertIn("not created by Bench", result["detail"])
+                self.assertEqual((theirs / "keep.txt").read_text(encoding="utf-8"), "mine")
+                self.assertEqual(sorted(p.name for p in theirs.iterdir() if p.name != ".gitignore"), ["keep.txt"])
+                self.assertFalse((custom / "bench-ledger.json").exists())
+
+    def test_a_directory_bench_did_not_create_is_never_removed(self) -> None:
+        """Only a staging directory carrying the ownership marker is cleared."""
+        self._commit_valid_chain_then_untrack()
+        foreign: Path = self.target / ".migrate" / ".restoring-user-data"
+        foreign.mkdir(parents=True)
+        (self.target / ".migrate" / ".gitignore").write_text("*\n", encoding="utf-8")
+        (foreign / "keep.txt").write_text("mine", encoding="utf-8")
+
+        with redirect_stderr(io.StringIO()):
+            result = migrate_ledger(self.repo)
+        self.assertEqual(result["status"], "migrated")
+        self.assertEqual((foreign / "keep.txt").read_text(encoding="utf-8"), "mine")
+
+    def test_failed_publish_is_rolled_back_and_the_retry_completes(self) -> None:
+        """A rename that fails after others succeeded moves them back.
+
+        Nothing stays in the target, so the retry sees no chain, and the
+        staged files are still there for it to publish.
+        """
+        self._commit_valid_chain_then_untrack()
+        real_replace = Path.replace
+        moves: list[int] = [0]
+
+        def fail_second_move(self_path, target):  # type: ignore[no-untyped-def]
+            if ".restoring-" in str(self_path):
+                moves[0] += 1
+                if moves[0] == 2:
+                    raise OSError("disk full")
+            return real_replace(self_path, target)
+
+        with patch("ledger.migrate.Path.replace", new=fail_second_move):
+            with redirect_stderr(io.StringIO()):
+                first = migrate_ledger(self.repo)
+        self.assertEqual(first["status"], "partial")
+        self.assertEqual(first["files"], 0)
+        self._assert_no_chain_in_target()
+
+        with redirect_stderr(io.StringIO()):
+            second = migrate_ledger(self.repo)
+        self.assertEqual(second["status"], "migrated")
+        self.assertTrue(second["verified"])
+        self.assertEqual(self._staging_dirs(), [])
+
+    def test_marker_that_cannot_be_removed_is_not_a_successful_migration(
+        self,
+    ) -> None:
+        """Every rename succeeded, the marker stays: that is a failure.
+
+        Reporting migrated here would leave the CLI exiting 0 while every
+        later run refuses with INCOMPLETE_RESTORE.
+        """
+        self._commit_valid_chain_then_untrack()
+        real_unlink = Path.unlink
+
+        def refuse_marker(self_path, *args, **kwargs):  # type: ignore[no-untyped-def]
+            if self_path.name == "restore-incomplete":
+                raise OSError("filesystem went away")
+            return real_unlink(self_path, *args, **kwargs)
+
+        with patch("ledger.migrate.Path.unlink", new=refuse_marker):
+            with redirect_stderr(io.StringIO()):
+                result = migrate_ledger(self.repo)
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["failure_type"], "INCOMPLETE_RESTORE")
+        self.assertTrue((self.target / ".migrate" / "restore-incomplete").exists())
+        # The files did arrive; only the marker is wrong, and the detail
+        # tells the operator how to clear it after verifying.
+        self.assertTrue((self.target / "bench-ledger.json").exists())
+        self.assertIn("verify", result["detail"])
+
+    def test_a_held_lock_refuses_a_second_migration(self) -> None:
+        """Two runs cannot overlap: the second reports, it does not delete."""
+        self._commit_valid_chain_then_untrack()
+        (self.target / ".migrate").mkdir(parents=True, exist_ok=True)
+        (self.target / ".migrate" / ".gitignore").write_text("*\n", encoding="utf-8")
+        lock: Path = self.target / ".migrate" / ".migrate.lock"
+        lock.write_text("12345", encoding="utf-8")
+        live: Path = self.target / ".migrate" / ".restoring-live"
+        live.mkdir()
+        (live / ".bench-restore").write_text("", encoding="utf-8")
+        (live / "bench-ledger.json").write_text("[]", encoding="utf-8")
+
+        with redirect_stderr(io.StringIO()):
+            result = migrate_ledger(self.repo)
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["failure_type"], "MIGRATION_IN_PROGRESS")
+        self.assertIn(".migrate.lock", result["detail"])
+        # The other attempt's staging and the lock are untouched.
+        self.assertTrue((live / "bench-ledger.json").exists())
+        self.assertEqual(lock.read_text(encoding="utf-8"), "12345")
+
+        lock.unlink()
+        with redirect_stderr(io.StringIO()):
+            second = migrate_ledger(self.repo)
+        self.assertEqual(second["status"], "migrated")
+        self.assertFalse(lock.exists())
+        self.assertFalse(live.exists())
+
+    def test_existing_chain_is_reported_without_needing_a_lock(self) -> None:
+        """A read-only directory that already holds a chain is a no-op.
+
+        Idempotence does not depend on being able to write; the lock is
+        only needed when a restore may happen.
+        """
+        _write_chain(self.target)
+        with patch("ledger.migrate.os.open", side_effect=PermissionError("read-only")):
+            with redirect_stderr(io.StringIO()):
+                result = migrate_ledger(self.repo)
+        self.assertEqual(result["status"], "already_migrated")
+        self.assertFalse((self.target / ".migrate" / ".migrate.lock").exists())
+
+    def test_incomplete_marker_is_reported_without_needing_a_lock(self) -> None:
+        (self.target / ".migrate").mkdir(parents=True, exist_ok=True)
+        (self.target / ".migrate" / ".gitignore").write_text("*\n", encoding="utf-8")
+        (self.target / ".migrate" / "restore-incomplete").write_text("", encoding="utf-8")
+        with patch("ledger.migrate.os.open", side_effect=PermissionError("read-only")):
+            with redirect_stderr(io.StringIO()):
+                result = migrate_ledger(self.repo)
+        self.assertEqual(result["failure_type"], "INCOMPLETE_RESTORE")
+
+    def test_unwritable_target_without_a_chain_is_lock_failed(self) -> None:
+        self._commit_valid_chain_then_untrack()
+        with patch("ledger.migrate.os.open", side_effect=PermissionError("read-only")):
+            with redirect_stderr(io.StringIO()):
+                result = migrate_ledger(self.repo)
+        self.assertEqual(result["failure_type"], "LOCK_FAILED")
+        self.assertIn("writable", result["detail"])
+
+    def test_lock_that_cannot_be_initialised_is_removed_not_left(self) -> None:
+        """A pid write that fails must not leave a lock every retry trips on."""
+        self._commit_valid_chain_then_untrack()
+        with patch("ledger.migrate.os.fdopen", side_effect=OSError("quota")):
+            with redirect_stderr(io.StringIO()):
+                result = migrate_ledger(self.repo)
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["failure_type"], "LOCK_FAILED")
+        self.assertFalse((self.target / ".migrate" / ".migrate.lock").exists())
+        # And the next run, with the filesystem behaving, completes.
+        with redirect_stderr(io.StringIO()):
+            second = migrate_ledger(self.repo)
+        self.assertEqual(second["status"], "migrated")
+
+    def test_partial_lock_that_cannot_be_removed_is_reported_as_stuck(self) -> None:
+        """A failed pid write followed by a failed unlink leaves the lock,
+        and the result must say so instead of claiming nothing was touched."""
+        self._commit_valid_chain_then_untrack()
+        real_unlink = Path.unlink
+
+        def refuse_lock(self_path, *args, **kwargs):  # type: ignore[no-untyped-def]
+            if self_path.name == ".migrate.lock":
+                raise OSError("filesystem went away")
+            return real_unlink(self_path, *args, **kwargs)
+
+        with patch("ledger.migrate.os.fdopen", side_effect=OSError("quota")):
+            with patch("ledger.migrate.Path.unlink", new=refuse_lock):
+                with redirect_stderr(io.StringIO()):
+                    result = migrate_ledger(self.repo)
+        self.assertEqual(result["failure_type"], "LOCK_NOT_RELEASED")
+        self.assertIn("removed by hand", result["detail"])
+        self.assertTrue((self.target / ".migrate" / ".migrate.lock").exists())
+
+    def test_working_tree_copy_goes_through_staging(self) -> None:
+        """A copy that fails halfway leaves no chain files in the target."""
+        legacy: Path = self.repo / "ledger"
+        _write_chain(legacy, count=3, dag_entries=2)
+        real_copy2 = shutil.copy2
+        copies: list[int] = [0]
+
+        def fail_third_copy(src, dst, *args, **kwargs):  # type: ignore[no-untyped-def]
+            copies[0] += 1
+            if copies[0] == 3:
+                raise OSError("disk full")
+            return real_copy2(src, dst, *args, **kwargs)
+
+        with patch("ledger.migrate.shutil.copy2", side_effect=fail_third_copy):
+            with redirect_stderr(io.StringIO()):
+                first = migrate_ledger(self.repo)
+        self.assertEqual(first["status"], "failed")
+        self.assertEqual(first["failure_type"], "COPY_FAILED")
+        self._assert_no_chain_in_target()
+
+        with redirect_stderr(io.StringIO()):
+            second = migrate_ledger(self.repo)
+        self.assertEqual(second["status"], "migrated")
+        self.assertTrue(second["verified"])
+        self.assertEqual(self._staging_dirs(), [])
+
+    def test_fetch_that_cannot_write_staging_is_a_failed_restore(self) -> None:
+        """A blob that cannot be written (disk full) fails the restore
+        cleanly; nothing reaches the target and the retry completes."""
+        self._commit_valid_chain_then_untrack()
+        real_write = Path.write_text
+        writes: list[int] = [0]
+
+        def fail_second_blob(self_path, *args, **kwargs):  # type: ignore[no-untyped-def]
+            if ".restoring-" in str(self_path) and self_path.suffix == ".json":
+                writes[0] += 1
+                if writes[0] == 2:
+                    raise OSError("disk full")
+            return real_write(self_path, *args, **kwargs)
+
+        with patch("ledger.migrate.Path.write_text", new=fail_second_blob):
+            with redirect_stderr(io.StringIO()):
+                first = migrate_ledger(self.repo)
+        self.assertEqual(first["status"], "failed")
+        self.assertEqual(first["failure_type"], "ENUMERATION_FAILED")
+        self._assert_no_chain_in_target()
+
+        with redirect_stderr(io.StringIO()):
+            second = migrate_ledger(self.repo)
+        self.assertEqual(second["status"], "migrated")
+
+    def test_lock_that_cannot_be_released_turns_success_into_failure(self) -> None:
+        """A migrated chain behind a stuck lock is reported as a failure.
+
+        Otherwise the CLI exits 0 while every later run refuses with
+        MIGRATION_IN_PROGRESS.
+        """
+        self._commit_valid_chain_then_untrack()
+        real_unlink = Path.unlink
+
+        def refuse_lock(self_path, *args, **kwargs):  # type: ignore[no-untyped-def]
+            if self_path.name == ".migrate.lock":
+                raise OSError("filesystem went away")
+            return real_unlink(self_path, *args, **kwargs)
+
+        with patch("ledger.migrate.Path.unlink", new=refuse_lock):
+            with redirect_stderr(io.StringIO()):
+                result = migrate_ledger(self.repo)
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["failure_type"], "LOCK_NOT_RELEASED")
+        self.assertIn("migrated", result["detail"])
+        self.assertTrue((self.target / ".migrate" / ".migrate.lock").exists())
+        self.assertTrue((self.target / "bench-ledger.json").exists())
+
+    def test_stuck_lock_after_a_failed_run_is_the_headline(self) -> None:
+        """A retry note is useless if every retry is refused by the lock."""
+        self._commit_valid_chain_then_untrack()
+        real_unlink = Path.unlink
+
+        def refuse_lock(self_path, *args, **kwargs):  # type: ignore[no-untyped-def]
+            if self_path.name == ".migrate.lock":
+                raise OSError("filesystem went away")
+            return real_unlink(self_path, *args, **kwargs)
+
+        with patch("ledger.migrate.run_isolated", side_effect=_hang_on_show(1)):
+            with patch("ledger.migrate.Path.unlink", new=refuse_lock):
+                with redirect_stderr(io.StringIO()):
+                    result = migrate_ledger(self.repo)
+        self.assertEqual(result["failure_type"], "LOCK_NOT_RELEASED")
+        self.assertIn("GIT_TIMEOUT", result["detail"])
+        self.assertIn("removed by hand", result["detail"])
+
+    def test_lock_is_released_after_a_failed_run(self) -> None:
+        self._commit_valid_chain_then_untrack()
+        with patch("ledger.migrate.run_isolated", side_effect=_hang_on_show(1)):
+            with redirect_stderr(io.StringIO()):
+                result = migrate_ledger(self.repo)
+        self.assertEqual(result["failure_type"], "GIT_TIMEOUT")
+        self.assertFalse((self.target / ".migrate" / ".migrate.lock").exists())
+
+    def test_incomplete_marker_blocks_already_migrated(self) -> None:
+        """A publish that could not be rolled back is a failure, not a chain."""
+        self._commit_valid_chain_then_untrack()
+        (self.target / ".migrate").mkdir(parents=True, exist_ok=True)
+        (self.target / ".migrate" / ".gitignore").write_text("*\n", encoding="utf-8")
+        (self.target / ".migrate" / "restore-incomplete").write_text("", encoding="utf-8")
+        (self.target / "bench-ledger.json").write_text("[]", encoding="utf-8")
+
+        with redirect_stderr(io.StringIO()):
+            result = migrate_ledger(self.repo)
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["failure_type"], "INCOMPLETE_RESTORE")
+
+    def test_git_calls_go_through_run_isolated_with_a_timeout(self) -> None:
+        # run_isolated detaches stdin and ends the process group on timeout
+        # (tests/test_procs.py); here only the routing and the timeout are checked.
+        with patch("ledger.migrate.run_isolated") as run:
+            run.return_value = subprocess.CompletedProcess([], 0, "", "")
+            _run_git(["status"], self.repo)
+        self.assertGreater(run.call_args.kwargs.get("timeout", 0), 0)
+
     def test_partial_restore_is_not_reported_as_migrated(self) -> None:
         """A read failure must not satisfy written == expected."""
         self._commit_then_untrack()
-        real = subprocess.run
+        real = run_isolated
 
         def flaky(args, **kwargs):
             joined: str = " ".join(str(a) for a in args)
@@ -189,7 +844,7 @@ class GitHistorySourceTests(_MigrateTestCase):
                 return subprocess.CompletedProcess(args, 1, "", "boom")
             return real(args, **kwargs)
 
-        with patch("ledger.migrate.subprocess.run", side_effect=flaky):
+        with patch("ledger.migrate.run_isolated", side_effect=flaky):
             result = migrate_ledger(self.repo)
 
         self.assertEqual(result["status"], "partial")
@@ -203,14 +858,14 @@ class GitHistorySourceTests(_MigrateTestCase):
         would fork the chain.
         """
         self._commit_then_untrack()
-        real = subprocess.run
+        real = run_isolated
 
         def no_ls_tree(args, **kwargs):
             if "ls-tree" in args:
                 return subprocess.CompletedProcess(args, 1, "", "boom")
             return real(args, **kwargs)
 
-        with patch("ledger.migrate.subprocess.run", side_effect=no_ls_tree):
+        with patch("ledger.migrate.run_isolated", side_effect=no_ls_tree):
             result = migrate_ledger(self.repo)
 
         self.assertEqual(result["status"], "failed")
