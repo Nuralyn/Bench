@@ -47,21 +47,27 @@ _JSON_GLOB: str = "*.json"
 # attempt's files out from under it.
 _LOCK_FILENAME: str = ".migrate.lock"
 
+# Everything transient a migration writes (the lock, the incomplete marker
+# and the staging directories) lives in one directory Bench owns INSIDE
+# the target, the one location the configured ledger path proves writable.
+# That directory carries its own .gitignore of "*", so all of it is ignored
+# wherever the target sits (a BENCH_LEDGER_PATH may name a directory
+# nothing else ignores, or one shared with project files) without Bench
+# ever editing a .gitignore it did not create.
+_RUNTIME_DIRNAME: str = ".migrate"
+
 # A restore from git is fetched into a staging directory and published into
-# the target only once every fetch has finished. Staging lives INSIDE the
-# target directory, the one location the configured ledger path proves
-# writable, and carries its own .gitignore of "*" so the debris of a failed
-# attempt is ignored wherever the target sits (a BENCH_LEDGER_PATH may name
-# a directory nothing else ignores). Each attempt gets its own mkdtemp
-# directory carrying an ownership marker, and only a directory that carries
-# the marker is ever removed, so a stale attempt is cleared and anything
-# else with a similar name is left alone.
+# the target only once every fetch has finished. Each attempt gets its own
+# mkdtemp directory under the runtime directory carrying an ownership
+# marker, and only a directory that carries the marker is ever removed, so
+# a stale attempt is cleared and anything else with a similar name is left
+# alone.
 _STAGING_PREFIX: str = ".restoring-"
 _STAGING_OWNER_MARKER: str = ".bench-restore"
-# Written into the target before the first staged file is published and
-# removed after the last. If it is found on a later run, a publish was
-# interrupted and could not be rolled back, and the target must not be
-# taken for a complete chain.
+# Written under the runtime directory before the first staged file is
+# published and removed after the last. If it is found on a later run, a
+# publish was interrupted and could not be rolled back, and the target
+# must not be taken for a complete chain.
 _INCOMPLETE_MARKER: str = "restore-incomplete"
 
 
@@ -240,16 +246,14 @@ def _restore_from_git(
 
 
 def _new_staging(target_dir: Path) -> Path:
-    """A fresh staging directory inside the target, marked as Bench's own.
+    """A fresh staging directory under the target's runtime directory.
 
-    It carries its own ``.gitignore`` of ``*`` before any blob is written,
-    so the debris of a failed attempt is ignored wherever the target sits:
-    ``.bench/`` is ignored by the project's own file, but
-    ``BENCH_LEDGER_PATH`` may name a directory nothing ignores, and a
-    restored entry holds the full diff body of every change it recorded.
+    The runtime directory ignores everything in it (see _runtime_dir), so
+    the debris of a failed attempt is never committable wherever the
+    target sits, and a restored entry holds the full diff body of every
+    change it recorded. The ownership marker names it as Bench's own.
     """
-    staging: Path = Path(tempfile.mkdtemp(prefix=_STAGING_PREFIX, dir=target_dir))
-    (staging / ".gitignore").write_text("*\n", encoding="utf-8")
+    staging: Path = Path(tempfile.mkdtemp(prefix=_STAGING_PREFIX, dir=_runtime_dir(target_dir)))
     (staging / _STAGING_OWNER_MARKER).write_text("", encoding="utf-8")
     (staging / ENTRIES_DIRNAME).mkdir()
     return staging
@@ -263,7 +267,7 @@ def _clear_stale_staging(target_dir: Path) -> None:
     is logged and skipped: this attempt uses its own fresh directory, so a
     stale one it cannot clear is debris, not a blocker.
     """
-    for candidate in sorted(target_dir.glob(f"{_STAGING_PREFIX}*")):
+    for candidate in sorted((target_dir / _RUNTIME_DIRNAME).glob(f"{_STAGING_PREFIX}*")):
         if not (candidate / _STAGING_OWNER_MARKER).is_file():
             print(
                 f"[bench migrate] {candidate} has no ownership marker and was "
@@ -367,7 +371,7 @@ def _publish(staging: Path, target_dir: Path, written: int, expected: int) -> in
     the commit held, for the same reason. Staging is removed after a
     complete publish and left for inspection otherwise.
     """
-    marker: Path = target_dir / _INCOMPLETE_MARKER
+    marker: Path = target_dir / _RUNTIME_DIRNAME / _INCOMPLETE_MARKER
     try:
         (target_dir / ENTRIES_DIRNAME).mkdir(exist_ok=True)
         marker.write_text("", encoding="utf-8")
@@ -550,27 +554,31 @@ def _failed(
     }
 
 
-def _incomplete(target: Path) -> dict[str, Any]:
+def _incomplete(target: Path, source: str) -> dict[str, Any]:
     """The failed result for a target carrying the incomplete marker.
 
     Returned both when a run finds the marker left by an earlier attempt
-    and when this run's own publish ends with the marker in place (see
-    RestoreIncomplete), so the two read the same and neither is mistaken
-    for a chain.
+    (source unknown by then) and when this run's own publish ends with the
+    marker in place (see RestoreIncomplete), so the two read the same and
+    neither is mistaken for a chain. `source` names where the restore was
+    reading from, since recovery is checked against it: the working-tree
+    `ledger/` directory when that is the source, a commit's listing when
+    git history is.
     """
     return _failed(
         target,
-        "git history",
+        source,
         "INCOMPLETE_RESTORE",
-        f"{target / _INCOMPLETE_MARKER} exists: a restore was interrupted "
-        "while publishing, or published fewer files than the commit held, "
-        "or could not remove its marker after publishing, and the target "
-        "must not be taken for a complete chain. Remove what the "
-        "interrupted restore left and retry: a retry restores the full "
-        "set from history. A passing `python -m cli verify` is not enough "
-        "on its own to clear the marker by hand, because a prefix of the "
-        "commit verifies; the target's files must first match the commit's "
-        "listing (`git ls-tree -r --name-only <commit> -- ledger/`).",
+        f"{target / _RUNTIME_DIRNAME / _INCOMPLETE_MARKER} exists: a restore "
+        f"from {source} was interrupted while publishing, or published fewer "
+        "files than the source held, or could not remove its marker after "
+        "publishing, and the target must not be taken for a complete chain. "
+        "Remove what the interrupted restore left and retry: a retry "
+        "restores the full set from the source. A passing `python -m cli "
+        "verify` is not enough on its own to clear the marker by hand, "
+        "because a prefix of the source verifies; the target's files must "
+        "first match the source's listing (the working-tree ledger/ "
+        "directory, or `git ls-tree -r --name-only <commit> -- ledger/`).",
     )
 
 
@@ -596,43 +604,23 @@ def _timed_out(target: Path, exc: GitTimeout) -> dict[str, Any]:
 # itself as well: git still reads an ignored .gitignore, and without that
 # entry the file Bench wrote would be the one untracked path left behind
 # (tests.test_migrate.GitHistorySourceTests).
-# Each pattern is anchored with a leading slash: a slashless pattern in a
-# .gitignore matches at every level beneath it, so under a ledger path that
-# shares its directory with project files (the repository root included)
-# Bench would otherwise hide `sub/.gitignore` or `sub/.restoring-x/` too.
-_RUNTIME_IGNORES: tuple[str, ...] = (
-    f"/{_LOCK_FILENAME}",
-    f"/{_INCOMPLETE_MARKER}",
-    f"/{_STAGING_PREFIX}*/",
-    "/.gitignore",
-)
-# The block _ensure_runtime_ignore keeps at the tail of that file.
-_RUNTIME_IGNORE_BLOCK: bytes = b"\n".join(p.encode("ascii") for p in _RUNTIME_IGNORES) + b"\n"
+def _runtime_dir(target: Path) -> Path:
+    """The target's runtime directory, created and self-ignored if needed.
 
-
-def _ensure_runtime_ignore(target: Path) -> None:
-    """Make sure the target's .gitignore covers Bench's runtime files.
-
-    Git applies the last matching pattern, so a pattern that is merely
-    present somewhere in the file proves nothing: `.migrate.lock` followed
-    by `!.migrate.lock` leaves the lock committable. Bench's block is
-    therefore appended whenever it is not already the tail of the file,
-    which makes it the last word on its own paths and keeps a rerun from
-    growing the file. A .gitignore inside an already-ignored .bench/ is
-    harmless. The file is read and appended as bytes, so an existing file
-    in any encoding is kept as it was and cannot raise a decode error; the
-    patterns Bench adds are ASCII. Raises OSError to the caller, which is
-    about to create the lock in the same directory and reports both
-    failures the same way (tests.test_migrate.GitHistorySourceTests).
+    Holds the lock, the incomplete marker and the staging directories (see
+    _RUNTIME_DIRNAME). Its own ``.gitignore`` of ``*`` is written before
+    anything else lands in it, so every runtime file is ignored wherever
+    the target sits; Bench writes no .gitignore anywhere but inside this
+    directory of its own. Raises OSError to the caller, which is about to
+    create the lock in it and reports both failures the same way
+    (tests.test_migrate.GitHistorySourceTests).
     """
-    ignore: Path = target / ".gitignore"
-    raw: bytes = ignore.read_bytes() if ignore.exists() else b""
-    if raw == _RUNTIME_IGNORE_BLOCK or raw.endswith(b"\n" + _RUNTIME_IGNORE_BLOCK):
-        return
-    with ignore.open("ab") as handle:
-        if raw and not raw.endswith(b"\n"):
-            handle.write(b"\n")
-        handle.write(_RUNTIME_IGNORE_BLOCK)
+    runtime: Path = target / _RUNTIME_DIRNAME
+    runtime.mkdir(parents=True, exist_ok=True)
+    ignore: Path = runtime / ".gitignore"
+    if not ignore.exists():
+        ignore.write_text("*\n", encoding="utf-8")
+    return runtime
 
 
 def _acquire_lock(target: Path) -> Path | None:
@@ -644,10 +632,9 @@ def _acquire_lock(target: Path) -> Path | None:
     refuses (C-001), since a migration that cannot prove it is alone must
     not clear another attempt's staging.
     """
-    lock: Path = target / _LOCK_FILENAME
+    lock: Path = target / _RUNTIME_DIRNAME / _LOCK_FILENAME
     try:
-        target.mkdir(parents=True, exist_ok=True)
-        _ensure_runtime_ignore(target)
+        _runtime_dir(target)
         descriptor: int = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
     except FileExistsError:
         return None
@@ -726,7 +713,8 @@ def migrate_ledger(repo_root: Path | None = None) -> dict[str, Any]:
                 target,
                 "none",
                 "LOCK_NOT_RELEASED",
-                f"{exc}, and the partly created {target / _LOCK_FILENAME} could "
+                f"{exc}, and the partly created "
+                f"{target / _RUNTIME_DIRNAME / _LOCK_FILENAME} could "
                 "not be removed, so every later run would refuse with "
                 "MIGRATION_IN_PROGRESS until it is removed by hand once no "
                 "migration is running. Nothing else was touched.",
@@ -743,7 +731,8 @@ def migrate_ledger(repo_root: Path | None = None) -> dict[str, Any]:
             target,
             "none",
             "MIGRATION_IN_PROGRESS",
-            f"{target / _LOCK_FILENAME} is held: another migration is running, "
+            f"{target / _RUNTIME_DIRNAME / _LOCK_FILENAME} is held: another "
+            "migration is running, "
             "or one ended without releasing it. Nothing was touched. Wait for "
             "it, or if no migration is running, remove the lock file and retry.",
         )
@@ -783,8 +772,8 @@ def _existing_chain(target: Path) -> dict[str, Any] | None:
     bench-ledger.json alone would splice a restored history into a running
     chain.
     """
-    if (target / _INCOMPLETE_MARKER).exists():
-        return _incomplete(target)
+    if (target / _RUNTIME_DIRNAME / _INCOMPLETE_MARKER).exists():
+        return _incomplete(target, "git history or the working tree")
     entries_dir: Path = target / ENTRIES_DIRNAME
     already_started: bool = (target / _LEDGER_FILENAME).exists() or (
         entries_dir.is_dir() and any(entries_dir.glob(_JSON_GLOB))
@@ -812,7 +801,7 @@ def _migrate_locked(root: Path, target: Path, legacy_dir: Path) -> dict[str, Any
             copied: tuple[int, int] | None = _restore_from_disk(legacy_dir, target)
         except RestoreIncomplete as exc:
             print(f"[bench migrate] {exc}", file=sys.stderr)
-            return _incomplete(target)
+            return _incomplete(target, "working tree")
         if copied is None:
             return _failed(
                 target,
@@ -851,7 +840,7 @@ def _migrate_locked(root: Path, target: Path, legacy_dir: Path) -> dict[str, Any
         return _timed_out(target, exc)
     except RestoreIncomplete as exc:
         print(f"[bench migrate] {exc}", file=sys.stderr)
-        return _incomplete(target)
+        return _incomplete(target, f"git history at {ref[:12]}")
     if restored is None:
         return _failed(
             target,
