@@ -43,6 +43,30 @@ class ConstitutionFloorError(ConstitutionError):
 _REQUIRED_TOP_LEVEL: tuple[str, ...] = ("constitution", "version", "constraints")
 _REQUIRED_CONSTRAINT_FIELDS: tuple[str, ...] = ("id", "name", "rule", "severity")
 
+# A constraint's `rule` is its binding text. `commentary` is optional prose
+# for the human reader: procedure, history, worked examples. It must be a
+# string when present, and it never reaches a model (see prompt_view).
+_OPTIONAL_TEXT_FIELDS: tuple[str, ...] = ("commentary",)
+
+# What the models read. Every stage prompt carries the constitution, so each
+# field listed here is paid for three times per governed edit. `rationale`
+# and `commentary` explain a rule to a person and are deliberately absent;
+# the rule itself is what a constraint forbids. `severity_raised_by_project`
+# is kept so a judge can see a project layer tightened a core constraint.
+_PROMPT_TOP_LEVEL_FIELDS: tuple[str, ...] = (
+    "constitution",
+    "version",
+    "project_version",
+)
+_PROMPT_CONSTRAINT_FIELDS: tuple[str, ...] = (
+    "id",
+    "name",
+    "scope",
+    "rule",
+    "severity",
+    "severity_raised_by_project",
+)
+
 
 # Bench's own constitution, resolved absolutely from this file's location.
 # A cwd-relative default would let `python -m cli constitution`, run from a
@@ -164,6 +188,44 @@ def _validate_constraint_entry(index: int, constraint: object) -> None:
             raise ConstitutionSchemaError(
                 f"constraints[{index}].{field} must be a non-empty string"
             )
+    for field in _OPTIONAL_TEXT_FIELDS:
+        if field in constraint and not isinstance(constraint[field], str):
+            raise ConstitutionSchemaError(
+                f"constraints[{index}].{field} must be a string when present"
+            )
+
+
+def prompt_view(constitution: dict) -> dict:
+    """Return the constitution as the models read it: rules, not commentary.
+
+    The three stage prompts each carry the constitution, so every byte of it is
+    paid for three times per governed edit. A constraint's `rule` is the
+    binding text. Its `rationale` and `commentary` explain that text to a
+    person and record its history; they belong to the file and to
+    `python -m cli constitution`, not to the prompt. Only the fields in
+    `_PROMPT_CONSTRAINT_FIELDS` survive, so the operative test of a constraint
+    must live in `rule`: text anywhere else is invisible to a judge.
+
+    The view is derived, never authoritative. The ledger's constitution_hash
+    is taken over the authored file, commentary included, so an entry still
+    attests to the full text even though the judges read the rule alone.
+    """
+    raw_constraints: object = constitution.get("constraints", [])
+    constraints: list[dict] = (
+        [c for c in raw_constraints if isinstance(c, dict)]
+        if isinstance(raw_constraints, list)
+        else []
+    )
+    view: dict = {
+        field: constitution[field]
+        for field in _PROMPT_TOP_LEVEL_FIELDS
+        if field in constitution
+    }
+    view["constraints"] = [
+        {field: c[field] for field in _PROMPT_CONSTRAINT_FIELDS if field in c}
+        for c in constraints
+    ]
+    return view
 
 
 def merge_constitutions(core: dict, project: dict) -> dict:

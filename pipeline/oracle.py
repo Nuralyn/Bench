@@ -20,6 +20,7 @@ import json
 import sys
 from typing import Any
 
+from pipeline.constitution import prompt_view
 from utils.api import ORACLE_MODEL, call_model
 
 
@@ -184,13 +185,21 @@ def _build_user_content(
     defender_result: dict,
     file_context: str,
 ) -> str:
-    """Assemble the labeled user-content payload sent to the Oracle."""
+    """Assemble the labeled user-content payload sent to the Oracle.
+
+    The constitution goes in as its prompt view, the same rendering the
+    Challenger and Defender received: every constraint's id, name, scope,
+    rule, and severity, without the rationale and commentary written for a
+    human reader. The rule is sent whole, so the Oracle rules on the full
+    binding text of every constraint, and the entry's constitution_hash still
+    covers the authored file in its entirety.
+    """
     sections: list[str] = [
         "PROPOSED CHANGE:",
         json.dumps(diff_info, indent=2),
         "",
         "CONSTITUTION:",
-        json.dumps(constitution, indent=2),
+        json.dumps(prompt_view(constitution), indent=2),
         "",
         "CHALLENGER FINDINGS:",
         json.dumps(challenger_result, indent=2),

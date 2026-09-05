@@ -38,8 +38,12 @@ Proposed Change -> Challenger -> Defender -> Oracle -> Ledger
 ## The Constitution
 
 Bench enforces a declared set of constraints (bench.json). Each constraint
-has a severity level (veto or warning) and a rationale. Users can add their
-own constraints. The constitution is law. The Oracle enforces it.
+has a severity level (veto or warning), a `rule`, and a `rationale`, and may
+carry `commentary`: procedure, history, and worked examples for the human
+reader. The models read the rule. The rationale and commentary stay in the
+file, where `python -m cli constitution` shows them apart from the rule and
+the ledger's constitution hash still covers them. Users can add their own
+constraints. The constitution is law. The Oracle enforces it.
 
 See [bench.json](bench.json) for the current constraints.
 
@@ -298,7 +302,7 @@ Wall time, recorded per stage from v2.1 onward. The first 78 timed entries, all 
 
 The Defender median is low because a CLEAR challenge skips it and records zero seconds. The direct API providers avoid the process start but not the sequential three-call shape. Both tables will drift as the ledger grows; run `python -m cli stats` for the current figures on your own chain, and `python -m cli viewer` for the per-week view.
 
-Roadmap v2.1 targets a median under 20,000 tokens by sending each constraint's rule without its commentary and caching the prompt prefix on the API path. Until then, this is the price.
+Roadmap v2.1 targets a median under 20,000 tokens. The first step is in: each stage now receives every constraint's rule without its rationale and commentary (`pipeline.constitution.prompt_view`), and constitution v7 moved procedure and history out of the rules into commentary. Caching the prompt prefix on the API path comes next. The figures above predate both; the ledger will show the difference.
 
 ## Design Decisions
 
@@ -435,6 +439,11 @@ A project layer looks like this:
   "severity_overrides": { "C-005": "veto" }
 }
 ```
+
+A constraint needs `id`, `name`, `rule`, and `severity`. It may also carry
+`scope`, `rationale`, and `commentary`. Only the first five reach the models:
+put the operative test in `rule`, because text in `rationale` or `commentary`
+is for the reader and the auditor and is invisible to a judge.
 
 Project constraints live in the reserved `P-` namespace; `C-` belongs to the
 core and cannot be redefined. `severity_overrides` may only move a core

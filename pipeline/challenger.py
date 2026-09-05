@@ -18,6 +18,7 @@ import json
 import sys
 from typing import Any
 
+from pipeline.constitution import prompt_view
 from utils.api import CHALLENGER_MODEL, call_model
 
 
@@ -151,13 +152,19 @@ def _build_user_content(
     constitution: dict,
     file_context: str,
 ) -> str:
-    """Assemble the labeled user-content payload sent to the Challenger."""
+    """Assemble the labeled user-content payload sent to the Challenger.
+
+    The constitution goes in as its prompt view: every constraint, with its
+    id, name, scope, rule, and severity, but without the rationale and
+    commentary written for a human reader. The rule is the binding text and
+    is sent whole; nothing a constraint forbids is dropped.
+    """
     sections: list[str] = [
         "PROPOSED CHANGE:",
         json.dumps(diff_info, indent=2),
         "",
         "CONSTITUTION:",
-        json.dumps(constitution, indent=2),
+        json.dumps(prompt_view(constitution), indent=2),
     ]
     if file_context:
         sections.extend(["", "FILE CONTEXT:", file_context])

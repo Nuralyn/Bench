@@ -262,6 +262,51 @@ class CmdConstitutionTests(unittest.TestCase):
         self.assertIn("[VETO", text)
         self.assertIn("core", text)
 
+    def test_constitution_shows_rationale_and_commentary_apart_from_rule(
+        self,
+    ) -> None:
+        """The auditor sees which text binds and which the models never read."""
+        out = io.StringIO()
+        constitution: dict = {
+            "constitution": "Bench",
+            "version": "7",
+            "constraints": [
+                {
+                    "id": "C-008",
+                    "name": "Ledger Immutability",
+                    "severity": "veto",
+                    "rule": "Append only.",
+                    "rationale": "Evidence must not be tampered with.",
+                    "commentary": "An auditor runs verify_chain. " * 10,
+                },
+                {
+                    "id": "C-001",
+                    "name": "No silent errors",
+                    "severity": "veto",
+                    "rule": "Catch blocks must log, re-throw, or return.",
+                },
+            ],
+        }
+        with patch(
+            "cli.commands.load_governing_constitution",
+            return_value=(constitution, "deadbeef", []),
+        ):
+            with redirect_stdout(out):
+                code: int = cmd_constitution()
+        self.assertEqual(code, 0)
+        text: str = out.getvalue()
+        self.assertIn("rule: Append only.", text)
+        self.assertIn(
+            "rationale (not sent to models): Evidence must not be tampered with.",
+            text,
+        )
+        self.assertIn(
+            "commentary (not sent to models): An auditor runs verify_chain.", text
+        )
+        self.assertIn("...", text)  # long commentary is cut to a preview
+        # The constraint without either field prints neither label.
+        self.assertEqual(text.count("(not sent to models)"), 2)
+
     def test_constitution_shows_project_layer_and_raised_severity(self) -> None:
         """The auditor must surface what a project layer added or raised.
 
