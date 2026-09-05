@@ -413,6 +413,28 @@ class GitHistorySourceTests(_MigrateTestCase):
             migrate_ledger(self.repo)
         self.assertEqual((custom / ".gitignore").read_text(encoding="utf-8"), before)
 
+    def test_non_utf8_ignore_file_is_preserved_byte_for_byte(self) -> None:
+        """An ignore file Bench did not write may be in any encoding.
+
+        A strict UTF-8 read would raise UnicodeDecodeError past the lock's
+        OSError handling and end the command in a traceback; the bytes are
+        kept as they were, a missing final newline is supplied, and the
+        ASCII patterns follow.
+        """
+        custom: Path = self.repo / "custom-ledger"
+        os.environ["BENCH_LEDGER_PATH"] = str(custom / "bench-ledger.json")
+        custom.mkdir(parents=True)
+        original: bytes = "café.html\r\n.migrate.lock\r\nnotes".encode("latin-1")
+        (custom / ".gitignore").write_bytes(original)
+        self._commit_valid_chain_then_untrack()
+        with redirect_stderr(io.StringIO()):
+            result = migrate_ledger(self.repo)
+        self.assertEqual(result["status"], "migrated")
+        written: bytes = (custom / ".gitignore").read_bytes()
+        self.assertTrue(written.startswith(original + b"\n"))
+        appended: list[bytes] = written[len(original) + 1 :].splitlines()
+        self.assertEqual(appended, [b"restore-incomplete", b".restoring-*/", b".gitignore"])
+
     def test_a_directory_bench_did_not_create_is_never_removed(self) -> None:
         """Only a staging directory carrying the ownership marker is cleared."""
         self._commit_valid_chain_then_untrack()

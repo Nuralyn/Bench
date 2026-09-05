@@ -440,7 +440,8 @@ def _remove_marker(marker: Path) -> bool:
     except OSError as exc:
         print(
             f"[bench migrate] could not remove {marker}: {exc}; the next "
-            f"migration will refuse until it is removed by hand after "
+            f"migration will refuse until it is removed by hand, once the "
+            f"target's files match the commit's listing and "
             f"`python -m cli verify` passes",
             file=sys.stderr,
         )
@@ -564,9 +565,12 @@ def _incomplete(target: Path) -> dict[str, Any]:
         f"{target / _INCOMPLETE_MARKER} exists: a restore was interrupted "
         "while publishing, or published fewer files than the commit held, "
         "or could not remove its marker after publishing, and the target "
-        "must not be taken for a complete chain. Inspect the target, "
-        "remove what the interrupted restore left, and retry; or, if "
-        "`python -m cli verify` passes on it, remove the marker by hand.",
+        "must not be taken for a complete chain. Remove what the "
+        "interrupted restore left and retry: a retry restores the full "
+        "set from history. A passing `python -m cli verify` is not enough "
+        "on its own to clear the marker by hand, because a prefix of the "
+        "commit verifies; the target's files must first match the commit's "
+        "listing (`git ls-tree -r --name-only <commit> -- ledger/`).",
     )
 
 
@@ -604,20 +608,24 @@ def _ensure_runtime_ignore(target: Path) -> None:
     """Make sure the target's .gitignore covers Bench's runtime files.
 
     Creates the file if absent and appends any missing pattern otherwise;
-    a .gitignore inside an already-ignored .bench/ is harmless. Raises
-    OSError to the caller, which is about to create the lock in the same
-    directory and reports both failures the same way.
+    a .gitignore inside an already-ignored .bench/ is harmless. The file is
+    read and appended as bytes, so an existing file in any encoding is
+    kept as it was and cannot raise a decode error; the patterns Bench
+    adds are ASCII. Raises OSError to the caller, which is about to create
+    the lock in the same directory and reports both failures the same way.
     """
     ignore: Path = target / ".gitignore"
-    text: str = ignore.read_text(encoding="utf-8") if ignore.exists() else ""
-    present: set[str] = {line.strip() for line in text.splitlines()}
-    missing: list[str] = [p for p in _RUNTIME_IGNORES if p not in present]
+    raw: bytes = ignore.read_bytes() if ignore.exists() else b""
+    present: set[bytes] = {line.strip() for line in raw.splitlines()}
+    missing: list[bytes] = [
+        p.encode("ascii") for p in _RUNTIME_IGNORES if p.encode("ascii") not in present
+    ]
     if not missing:
         return
-    with ignore.open("a", encoding="utf-8") as handle:
-        if text and not text.endswith("\n"):
-            handle.write("\n")
-        handle.write("\n".join(missing) + "\n")
+    with ignore.open("ab") as handle:
+        if raw and not raw.endswith(b"\n"):
+            handle.write(b"\n")
+        handle.write(b"\n".join(missing) + b"\n")
 
 
 def _acquire_lock(target: Path) -> Path | None:
