@@ -48,6 +48,7 @@ def run_isolated(
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        shell=False,
         text=True,
         encoding=encoding,
         errors=errors,

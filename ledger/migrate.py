@@ -635,11 +635,18 @@ def _runtime_dir(target: Path) -> Path:
     runtime: Path = target / _RUNTIME_DIRNAME
     runtime.mkdir(parents=True, exist_ok=True)
     ignore: Path = runtime / ".gitignore"
-    if ignore.exists():
-        # Only an effective "*" line: Bench writes "*\n" with newline="\n"
-        # and a checkout may have turned that into CRLF, but git reads a
-        # leading space as part of the pattern, so " *" ignores nothing.
-        if ignore.read_bytes() not in (b"*", b"*\n", b"*\r\n"):
+    if ignore.is_symlink() or ignore.exists():
+        # Only a regular file holding an effective "*" line. Git does not
+        # read a symlinked .gitignore at all. Bench writes "*\n" with
+        # newline="\n" and a checkout may have turned that into CRLF, but
+        # git reads a leading space as part of the pattern, so " *"
+        # ignores nothing.
+        owned: bool = (
+            not ignore.is_symlink()
+            and ignore.is_file()
+            and ignore.read_bytes() in (b"*", b"*\n", b"*\r\n")
+        )
+        if not owned:
             raise OSError(
                 f"{ignore} is not Bench's own ignore file (a single '*' line), "
                 f"so {runtime} was not created by Bench and is left alone"

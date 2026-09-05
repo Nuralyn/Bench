@@ -536,11 +536,19 @@ class GitHistorySourceTests(_MigrateTestCase):
         (theirs / ".gitignore").write_text("cache\n", encoding="utf-8")
         (theirs / "keep.txt").write_text("mine", encoding="utf-8")
         self._commit_valid_chain_then_untrack()
-        # A leading space is part of a git pattern, so " *" ignores nothing.
-        for ignore_text in ("cache\n", " *\n", "*\n!*\n", None):
-            if ignore_text is None:
-                (theirs / ".gitignore").unlink()
-            else:
+        # A leading space is part of a git pattern, so " *" ignores nothing,
+        # and git does not read a symlinked .gitignore at all, whatever it
+        # points at.
+        (custom / "real-ignore").write_text("*\n", encoding="utf-8")
+        # The symlink case is last: where it must be skipped, the rest ran.
+        for ignore_text in ("cache\n", " *\n", "*\n!*\n", None, "symlink"):
+            (theirs / ".gitignore").unlink(missing_ok=True)
+            if ignore_text == "symlink":
+                try:
+                    os.symlink(custom / "real-ignore", theirs / ".gitignore")
+                except OSError as exc:  # symlinks need a privilege on some Windows setups
+                    self.skipTest(f"cannot create a symlink here: {exc}")
+            elif ignore_text is not None:
                 (theirs / ".gitignore").write_text(ignore_text, encoding="utf-8")
             with self.subTest(ignore=ignore_text):
                 with redirect_stderr(io.StringIO()):

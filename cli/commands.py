@@ -576,6 +576,33 @@ def cmd_verify_purge(
     return 0
 
 
+def _binding_argument_error(
+    record_hash: str | None, mirror: str | None, repository: str | None
+) -> str | None:
+    """Why verify-sanitation-binding's arguments cannot be used, or None.
+
+    --mirror and --repository both reach git as arguments, so only an
+    owner/name repository and an existing mirror directory are probed;
+    anything else is refused before a process is started with it.
+    """
+    missing: list[str] = [
+        name
+        for name, value in (
+            ("--record", record_hash),
+            ("--mirror", mirror),
+            ("--repository", repository),
+        )
+        if not value
+    ]
+    if missing:
+        return f"verify-sanitation-binding requires {', '.join(missing)}."
+    if not _REPOSITORY_PATTERN.fullmatch(repository or ""):
+        return f"--repository must be owner/name, got {repository!r}."
+    if not Path(mirror or "").is_dir():
+        return f"--mirror is not a directory: {mirror!r}."
+    return None
+
+
 def cmd_verify_sanitation_binding(
     record_hash: str | None = None,
     mirror: str | None = None,
@@ -593,33 +620,9 @@ def cmd_verify_sanitation_binding(
     different rewrite, a record for another repository, or a warrant already
     spent by an earlier push.
     """
-    missing: list[str] = [
-        name
-        for name, value in (
-            ("--record", record_hash),
-            ("--mirror", mirror),
-            ("--repository", repository),
-        )
-        if not value
-    ]
-    if missing:
-        print(
-            f"[bench cli] verify-sanitation-binding requires "
-            f"{', '.join(missing)}.",
-            file=sys.stderr,
-        )
-        return 1
-    # Both reach git as arguments. Only an owner/name repository and an
-    # existing mirror directory are probed; anything else is refused here,
-    # before a process is started with it.
-    if not _REPOSITORY_PATTERN.fullmatch(repository or ""):
-        print(
-            f"[bench cli] --repository must be owner/name, got {repository!r}.",
-            file=sys.stderr,
-        )
-        return 1
-    if not Path(mirror or "").is_dir():
-        print(f"[bench cli] --mirror is not a directory: {mirror!r}.", file=sys.stderr)
+    problem: str | None = _binding_argument_error(record_hash, mirror, repository)
+    if problem:
+        print(f"[bench cli] {problem}", file=sys.stderr)
         return 1
 
     chain: dict[str, Any] = verify_chain()

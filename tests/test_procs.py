@@ -79,25 +79,28 @@ class RunIsolatedTests(unittest.TestCase):
         real_communicate = subprocess.Popen.communicate
         calls: list[int] = [0]
 
-        def interrupt_first_wait(self_proc, *args, **kwargs):  # type: ignore[no-untyped-def]
-            calls[0] += 1
-            if calls[0] == 1:
-                raise KeyboardInterrupt
-            return real_communicate(self_proc, *args, **kwargs)
-
         with tempfile.TemporaryDirectory() as tmp:
             pid_file: Path = Path(tmp) / "grandchild.pid"
+
+            def interrupt_first_wait(self_proc, *args, **kwargs):  # type: ignore[no-untyped-def]
+                calls[0] += 1
+                if calls[0] == 1:
+                    # The interrupt lands once the grandchild exists, so the
+                    # test exercises a tree, not a child killed at startup.
+                    ready: float = time.monotonic() + 10
+                    while not pid_file.exists() and time.monotonic() < ready:
+                        time.sleep(0.05)
+                    raise KeyboardInterrupt
+                return real_communicate(self_proc, *args, **kwargs)
+
             with patch("subprocess.Popen.communicate", new=interrupt_first_wait):
                 with self.assertRaises(KeyboardInterrupt):
                     run_isolated(
                         [sys.executable, "-c", _CHILD, str(pid_file), _GRANDCHILD],
                         timeout=60,
                     )
-            deadline: float = time.monotonic() + 10
-            while not pid_file.exists() and time.monotonic() < deadline:
-                time.sleep(0.1)
             pid: int = int(pid_file.read_text(encoding="utf-8"))
-        deadline = time.monotonic() + 10
+        deadline: float = time.monotonic() + 10
         while _alive(pid) and time.monotonic() < deadline:
             time.sleep(0.2)
         self.assertFalse(_alive(pid), f"grandchild {pid} outlived the interrupt")
