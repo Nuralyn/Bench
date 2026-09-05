@@ -221,6 +221,46 @@ class GitHistorySourceTests(_MigrateTestCase):
         self.assertEqual(result["status"], "failed")
         self.assertEqual(result["failure_type"], "GIT_TIMEOUT")
 
+    def test_timeout_mid_restore_leaves_no_partial_chain_behind(self) -> None:
+        """Files written before the hang are removed, so a retry can succeed.
+
+        Left in place, they would satisfy the already_started guard and the
+        retry would report already_migrated over a truncated chain. A
+        fully valid chain is committed here (the shared fixture carries a
+        deliberately broken entry so partial restores stay partial), so
+        the retry can be asserted as a complete, verified migration.
+        """
+        legacy: Path = self.repo / "ledger"
+        _write_chain(legacy, count=3, dag_entries=2)
+        self._git("add", "-A")
+        self._git("commit", "-q", "-m", "chain")
+        self._git("rm", "-r", "-q", "--cached", "ledger")
+        shutil.rmtree(legacy)
+        self._git("commit", "-q", "-m", "untrack")
+        real = subprocess.run
+        shows: list[int] = [0]
+
+        def hang_on_second_show(args, **kwargs):  # type: ignore[no-untyped-def]
+            if "show" in args:
+                shows[0] += 1
+                if shows[0] == 2:
+                    raise subprocess.TimeoutExpired(args, 60)
+            return real(args, **kwargs)
+
+        with patch("ledger.migrate.subprocess.run", side_effect=hang_on_second_show):
+            with redirect_stderr(io.StringIO()):
+                first = migrate_ledger(self.repo)
+        self.assertEqual(first["status"], "failed")
+        self.assertEqual(first["failure_type"], "GIT_TIMEOUT")
+        self.assertFalse((self.target / "bench-ledger.json").exists())
+        self.assertEqual(list((self.target / "entries").glob("*.json")), [])
+
+        # git is answering again: the retry restores the whole chain.
+        with redirect_stderr(io.StringIO()):
+            second = migrate_ledger(self.repo)
+        self.assertEqual(second["status"], "migrated")
+        self.assertTrue((self.target / "bench-ledger.json").exists())
+
     def test_git_calls_carry_a_timeout_and_detach_stdin(self) -> None:
         with patch("ledger.migrate.subprocess.run") as run:
             run.return_value = subprocess.CompletedProcess([], 0, "", "")

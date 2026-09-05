@@ -175,8 +175,26 @@ def _restore_from_git(
 
     expected: int = len(wanted)
     written: int = 0
+    written_paths: list[Path] = []
     for path in wanted:
-        code, blob = _run_git(["show", f"{ref}:{path}"], repo_root)
+        try:
+            code, blob = _run_git(["show", f"{ref}:{path}"], repo_root)
+        except GitTimeout:
+            # Undo this attempt's writes before the timeout propagates. A
+            # half-restored chain left in place would satisfy the
+            # already_started guard on the next run and pass for a complete
+            # one, possibly without its tips, and every append after that
+            # would extend a silently truncated history.
+            for written_path in written_paths:
+                try:
+                    written_path.unlink()
+                except OSError as cleanup_exc:
+                    print(
+                        f"[bench migrate] could not remove {written_path} "
+                        f"after the timeout: {cleanup_exc}",
+                        file=sys.stderr,
+                    )
+            raise
         if code != 0:
             print(
                 f"[bench migrate] could not read {path} at {ref[:12]}; "
@@ -190,7 +208,12 @@ def _restore_from_git(
             if Path(path).parent.name == ENTRIES_DIRNAME
             else target_dir / name
         )
+        # Only a path this attempt created is eligible for rollback; a file
+        # that was already there is never removed by the rollback (C-008).
+        created: bool = not destination.exists()
         destination.write_text(blob, encoding="utf-8")
+        if created:
+            written_paths.append(destination)
         written += 1
     return written, expected
 
