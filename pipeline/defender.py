@@ -158,7 +158,22 @@ def run_defender(
     # otherwise it would reach the ledger and count as a repair.
     # The ledger's raw_response on a failure is what the model wrote, not
     # the repaired copy, so an invalid response can still be diagnosed.
-    original: dict[str, Any] = copy.deepcopy(response)
+    try:
+        original: dict[str, Any] = copy.deepcopy(response)
+    except RecursionError:
+        # Nested too deep to copy, which also means too deep to serialize
+        # into the ledger. Fail closed with a note in place of the payload
+        # rather than let the exception escape the stage.
+        print(
+            "[bench defender] response nested too deep to record; failing closed",
+            file=sys.stderr,
+        )
+        return {
+            "status": "PIPELINE_ERROR",
+            "error": "INVALID_DEFENDER_RESPONSE",
+            "raw_response": "omitted: response nested too deep to copy or record",
+            "_tokens": tokens,
+        }
     response.pop("_normalized", None)
     notes: list[str] = _normalize_defender_response(response)
     if notes:
