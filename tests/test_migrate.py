@@ -518,6 +518,24 @@ class GitHistorySourceTests(_MigrateTestCase):
         self.assertTrue((self.target / ".migrate.lock").exists())
         self.assertTrue((self.target / "bench-ledger.json").exists())
 
+    def test_stuck_lock_after_a_failed_run_is_the_headline(self) -> None:
+        """A retry note is useless if every retry is refused by the lock."""
+        self._commit_valid_chain_then_untrack()
+        real_unlink = Path.unlink
+
+        def refuse_lock(self_path, *args, **kwargs):  # type: ignore[no-untyped-def]
+            if self_path.name == ".migrate.lock":
+                raise OSError("filesystem went away")
+            return real_unlink(self_path, *args, **kwargs)
+
+        with patch("ledger.migrate.subprocess.run", side_effect=_hang_on_show(1)):
+            with patch("ledger.migrate.Path.unlink", new=refuse_lock):
+                with redirect_stderr(io.StringIO()):
+                    result = migrate_ledger(self.repo)
+        self.assertEqual(result["failure_type"], "LOCK_NOT_RELEASED")
+        self.assertIn("GIT_TIMEOUT", result["detail"])
+        self.assertIn("removed by hand", result["detail"])
+
     def test_lock_is_released_after_a_failed_run(self) -> None:
         self._commit_valid_chain_then_untrack()
         with patch("ledger.migrate.subprocess.run", side_effect=_hang_on_show(1)):

@@ -636,20 +636,23 @@ def migrate_ledger(repo_root: Path | None = None) -> dict[str, Any]:
         result: dict[str, Any] = _migrate_locked(root, target, legacy_dir)
     finally:
         released: bool = _release_lock(lock)
-    if released or result.get("status") not in (
-        "migrated",
-        "already_migrated",
-        "nothing_to_migrate",
-    ):
+    if released:
         return result
+    # Whatever the run's own outcome, a lock that stays would make every
+    # retry refuse with MIGRATION_IN_PROGRESS and no explanation, so the
+    # stuck lock is the headline and the run's own result rides in the
+    # detail, where a retry note or a chain status is still readable.
+    own: str = str(result.get("status", ""))
+    if result.get("failure_type"):
+        own += f" ({result.get('failure_type')}): {result.get('detail', '')}"
     return _failed(
         target,
         str(result.get("source", "none")),
         "LOCK_NOT_RELEASED",
-        f"The migration ended {result.get('status')} but {lock} could not be "
-        "removed, so every later run would refuse with MIGRATION_IN_PROGRESS. "
-        "The chain is as that status says; remove the lock by hand once no "
-        "migration is running, then `python -m cli verify`.",
+        f"{lock} could not be removed, so every later run would refuse with "
+        "MIGRATION_IN_PROGRESS until it is removed by hand once no migration "
+        f"is running. This run's own result: {own}. If a chain is in place, "
+        "`python -m cli verify` checks it.",
     )
 
 
