@@ -149,8 +149,9 @@ class CommentarySchemaTests(unittest.TestCase):
     def test_non_string_commentary_is_rejected(self) -> None:
         doc: dict = _constitution()
         doc["constraints"][0]["commentary"] = ["a", "list"]
+        path: str = self._write(doc)
         with self.assertRaises(ConstitutionSchemaError):
-            load_constitution_snapshot(self._write(doc))
+            load_constitution_snapshot(path)
 
 
 class StagePromptTests(unittest.TestCase):

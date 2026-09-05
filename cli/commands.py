@@ -70,6 +70,37 @@ _DEFAULT_LEDGER_TAIL: int = 10
 _RULE_PREVIEW_LEN: int = 100
 
 
+def _preview(text: str) -> str:
+    """Truncate constraint prose to one terminal line."""
+    if len(text) > _RULE_PREVIEW_LEN:
+        return text[: _RULE_PREVIEW_LEN - 3] + "..."
+    return text
+
+
+def _print_constraint(constraint: dict) -> None:
+    """Print one constraint: header, rule, then the text the models never see.
+
+    Rationale and commentary are stripped before a constraint reaches a
+    stage prompt (see pipeline.constitution.prompt_view). Showing each apart
+    from the rule lets an auditor check which text actually binds.
+    """
+    cid: str = str(constraint.get("id", "-"))
+    cname: str = str(constraint.get("name", "-"))
+    severity: str = str(constraint.get("severity", "-")).upper()
+    origin: str = ""
+    if constraint.get("severity_raised_by_project"):
+        origin = "  (severity raised by project layer)"
+    elif cid.startswith("P-"):
+        origin = "  (project layer)"
+    print()
+    print(f"  {cid}  [{severity:7}]  {cname}{origin}")
+    print(f"           rule: {_preview(str(constraint.get('rule', '')))}")
+    for field in ("rationale", "commentary"):
+        text: str = _preview(str(constraint.get(field, "")))
+        if text:
+            print(f"           {field} (not sent to models): {text}")
+
+
 def _display_path(raw: str) -> str:
     """Render a ledger path for terminal output, preferring a relative form.
 
@@ -946,30 +977,8 @@ def cmd_constitution() -> int:
     print("=" * 40)
 
     for constraint in constraint_list:
-        if not isinstance(constraint, dict):
-            continue
-        cid: str = str(constraint.get("id", "-"))
-        cname: str = str(constraint.get("name", "-"))
-        severity: str = str(constraint.get("severity", "-")).upper()
-        rule: str = str(constraint.get("rule", ""))
-        if len(rule) > _RULE_PREVIEW_LEN:
-            rule = rule[: _RULE_PREVIEW_LEN - 3] + "..."
-        # Commentary is the part of a constraint the models never see (see
-        # pipeline.constitution.prompt_view). Showing it apart from the rule
-        # lets an auditor check which text actually binds.
-        commentary: str = str(constraint.get("commentary", ""))
-        if len(commentary) > _RULE_PREVIEW_LEN:
-            commentary = commentary[: _RULE_PREVIEW_LEN - 3] + "..."
-        origin: str = ""
-        if constraint.get("severity_raised_by_project"):
-            origin = "  (severity raised by project layer)"
-        elif cid.startswith("P-"):
-            origin = "  (project layer)"
-        print()
-        print(f"  {cid}  [{severity:7}]  {cname}{origin}")
-        print(f"           rule: {rule}")
-        if commentary:
-            print(f"           commentary (not sent to models): {commentary}")
+        if isinstance(constraint, dict):
+            _print_constraint(constraint)
 
     return 0
 
