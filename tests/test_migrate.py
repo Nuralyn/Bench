@@ -504,6 +504,22 @@ class GitHistorySourceTests(_MigrateTestCase):
             retry = migrate_ledger(self.repo)
         self.assertEqual(retry["status"], "migrated")
 
+    def test_a_file_where_the_runtime_directory_should_be_is_a_collision(self) -> None:
+        """A plain `.migrate` file is not a held lock.
+
+        mkdir raises FileExistsError for it, which must not be read as the
+        exclusive lock create finding a lock: that would report a
+        migration in progress and point at a lock file that does not exist.
+        """
+        self._commit_valid_chain_then_untrack()
+        self.target.mkdir(parents=True, exist_ok=True)
+        (self.target / ".migrate").write_text("not a directory", encoding="utf-8")
+        with redirect_stderr(io.StringIO()):
+            result = migrate_ledger(self.repo)
+        self.assertEqual(result["failure_type"], "LOCK_FAILED")
+        self.assertIn("could not prepare", result["detail"])
+        self.assertEqual((self.target / ".migrate").read_text(encoding="utf-8"), "not a directory")
+
     def test_a_runtime_directory_bench_did_not_create_is_refused(self) -> None:
         """A .migrate/ that is not self-ignored is not Bench's, and not used.
 

@@ -677,8 +677,14 @@ def _acquire_lock(target: Path) -> Path | None:
     not clear another attempt's staging.
     """
     lock: Path = target / _RUNTIME_DIRNAME / _LOCK_FILENAME
+    # Prepared in its own block: a FileExistsError here is a collision
+    # (a plain file or a dangling link where the directory should be),
+    # not a held lock, and must not be reported as one.
     try:
         _runtime_dir(target)
+    except OSError as exc:
+        raise LockError(f"could not prepare {target / _RUNTIME_DIRNAME}: {exc}") from exc
+    try:
         descriptor: int = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
     except FileExistsError:
         return None
