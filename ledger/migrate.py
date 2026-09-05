@@ -582,6 +582,19 @@ def _incomplete(target: Path, source: str) -> dict[str, Any]:
     )
 
 
+def _in_progress(target: Path) -> dict[str, Any]:
+    """The failed result for a target whose migration lock is held."""
+    return _failed(
+        target,
+        "none",
+        "MIGRATION_IN_PROGRESS",
+        f"{target / _RUNTIME_DIRNAME / _LOCK_FILENAME} is held: another "
+        "migration is running, or one ended without releasing it. Nothing "
+        "was touched. Wait for it, or if no migration is running, remove "
+        "the lock file and retry.",
+    )
+
+
 def _timed_out(target: Path, exc: GitTimeout) -> dict[str, Any]:
     """The failed result for a git call that did not finish."""
     return _failed(
@@ -717,7 +730,7 @@ def migrate_ledger(repo_root: Path | None = None) -> dict[str, Any]:
     # still report already_migrated rather than fail to create a lock.
     # The same check runs again under the lock before anything is written,
     # so a chain that appears in between is not restored over.
-    existing: dict[str, Any] | None = _existing_chain(target)
+    existing: dict[str, Any] | None = _existing_chain(target, under_lock=False)
     if existing is not None:
         return existing
 
@@ -744,15 +757,7 @@ def migrate_ledger(repo_root: Path | None = None) -> dict[str, Any]:
             "then retry.",
         )
     if lock is None:
-        return _failed(
-            target,
-            "none",
-            "MIGRATION_IN_PROGRESS",
-            f"{target / _RUNTIME_DIRNAME / _LOCK_FILENAME} is held: another "
-            "migration is running, "
-            "or one ended without releasing it. Nothing was touched. Wait for "
-            "it, or if no migration is running, remove the lock file and retry.",
-        )
+        return _in_progress(target)
     try:
         result: dict[str, Any] = _migrate_locked(root, target, legacy_dir)
     finally:
@@ -777,19 +782,26 @@ def migrate_ledger(repo_root: Path | None = None) -> dict[str, Any]:
     )
 
 
-def _existing_chain(target: Path) -> dict[str, Any] | None:
+def _existing_chain(target: Path, under_lock: bool) -> dict[str, Any] | None:
     """The result for a target that must not be restored into, or None.
 
     Reads only, so it can answer before the lock is taken. A marker left by
     an interrupted publish (see _publish) means the target may hold part of
     a chain, and is checked first: the started check below would take the
-    part for the whole and report already_migrated. A chain opened after
-    the switch has no legacy segment at all, its entries live only in
-    entries/, so a non-empty entries/ counts as started too; checking for
-    bench-ledger.json alone would splice a restored history into a running
-    chain.
+    part for the whole and report already_migrated. Off the lock, a marker
+    beside a held lock is a publish in progress, not an interrupted one,
+    and is reported as MIGRATION_IN_PROGRESS: the incomplete-restore
+    recovery text tells the operator to remove what the restore left,
+    which must not be said of a live publisher's files. Under the lock
+    the lock is this run's own, so the marker stands on its own. A chain
+    opened after the switch has no legacy segment at all, its entries live
+    only in entries/, so a non-empty entries/ counts as started too;
+    checking for bench-ledger.json alone would splice a restored history
+    into a running chain.
     """
     if (target / _RUNTIME_DIRNAME / _INCOMPLETE_MARKER).exists():
+        if not under_lock and (target / _RUNTIME_DIRNAME / _LOCK_FILENAME).exists():
+            return _in_progress(target)
         return _incomplete(target, "git history or the working tree")
     entries_dir: Path = target / ENTRIES_DIRNAME
     already_started: bool = (target / _LEDGER_FILENAME).exists() or (
@@ -809,7 +821,7 @@ def _migrate_locked(root: Path, target: Path, legacy_dir: Path) -> dict[str, Any
     """The migration proper, run while the target's lock is held."""
     # Re-checked under the lock: a chain that appeared between the
     # lock-free check and here must not be restored over.
-    existing: dict[str, Any] | None = _existing_chain(target)
+    existing: dict[str, Any] | None = _existing_chain(target, under_lock=True)
     if existing is not None:
         return existing
 

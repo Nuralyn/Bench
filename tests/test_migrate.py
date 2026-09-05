@@ -438,6 +438,32 @@ class GitHistorySourceTests(_MigrateTestCase):
             timeout=60,
         ).stdout
 
+    def test_a_marker_beside_a_held_lock_is_a_migration_in_progress(self) -> None:
+        """While a publish is live, both the lock and the marker exist.
+
+        A second run must not read that as an interrupted restore: the
+        incomplete-restore recovery text says to remove what the restore
+        left, which would be a live publisher's files. Once the lock is
+        gone the marker stands on its own.
+        """
+        self._commit_valid_chain_then_untrack()
+        runtime: Path = self.target / ".migrate"
+        runtime.mkdir(parents=True, exist_ok=True)
+        (runtime / ".gitignore").write_text("*\n", encoding="utf-8")
+        (runtime / ".migrate.lock").write_text("12345", encoding="utf-8")
+        (runtime / "restore-incomplete").write_text("", encoding="utf-8")
+        with redirect_stderr(io.StringIO()):
+            result = migrate_ledger(self.repo)
+        self.assertEqual(result["failure_type"], "MIGRATION_IN_PROGRESS")
+        self.assertTrue((runtime / "restore-incomplete").exists())
+        self.assertTrue((runtime / ".migrate.lock").exists())
+        self.assertFalse((self.target / "bench-ledger.json").exists())
+
+        (runtime / ".migrate.lock").unlink()
+        with redirect_stderr(io.StringIO()):
+            result = migrate_ledger(self.repo)
+        self.assertEqual(result["failure_type"], "INCOMPLETE_RESTORE")
+
     def test_a_runtime_directory_bench_did_not_create_is_refused(self) -> None:
         """A .migrate/ that is not self-ignored is not Bench's, and not used.
 
