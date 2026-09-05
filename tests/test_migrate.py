@@ -452,6 +452,35 @@ class GitHistorySourceTests(_MigrateTestCase):
         self.assertFalse(lock.exists())
         self.assertFalse(live.exists())
 
+    def test_existing_chain_is_reported_without_needing_a_lock(self) -> None:
+        """A read-only directory that already holds a chain is a no-op.
+
+        Idempotence does not depend on being able to write; the lock is
+        only needed when a restore may happen.
+        """
+        _write_chain(self.target)
+        with patch("ledger.migrate.os.open", side_effect=PermissionError("read-only")):
+            with redirect_stderr(io.StringIO()):
+                result = migrate_ledger(self.repo)
+        self.assertEqual(result["status"], "already_migrated")
+        self.assertFalse((self.target / ".migrate.lock").exists())
+
+    def test_incomplete_marker_is_reported_without_needing_a_lock(self) -> None:
+        self.target.mkdir(parents=True, exist_ok=True)
+        (self.target / "restore-incomplete").write_text("", encoding="utf-8")
+        with patch("ledger.migrate.os.open", side_effect=PermissionError("read-only")):
+            with redirect_stderr(io.StringIO()):
+                result = migrate_ledger(self.repo)
+        self.assertEqual(result["failure_type"], "INCOMPLETE_RESTORE")
+
+    def test_unwritable_target_without_a_chain_is_lock_failed(self) -> None:
+        self._commit_valid_chain_then_untrack()
+        with patch("ledger.migrate.os.open", side_effect=PermissionError("read-only")):
+            with redirect_stderr(io.StringIO()):
+                result = migrate_ledger(self.repo)
+        self.assertEqual(result["failure_type"], "LOCK_FAILED")
+        self.assertIn("writable", result["detail"])
+
     def test_lock_that_cannot_be_initialised_is_removed_not_left(self) -> None:
         """A pid write that fails must not leave a lock every retry trips on."""
         self._commit_valid_chain_then_untrack()

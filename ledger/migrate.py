@@ -602,6 +602,16 @@ def migrate_ledger(repo_root: Path | None = None) -> dict[str, Any]:
     target: Path = Path(resolve_ledger_path()).parent
     legacy_dir: Path = root / _LEGACY_DIRNAME
 
+    # A target that already holds a chain, or the marker of an interrupted
+    # restore, is answered without taking the lock: neither answer writes
+    # anything, and a read-only directory provisioned with a chain must
+    # still report already_migrated rather than fail to create a lock.
+    # The same check runs again under the lock before anything is written,
+    # so a chain that appears in between is not restored over.
+    existing: dict[str, Any] | None = _existing_chain(target)
+    if existing is not None:
+        return existing
+
     try:
         lock: Path | None = _acquire_lock(target)
     except LockError as exc:
@@ -643,20 +653,20 @@ def migrate_ledger(repo_root: Path | None = None) -> dict[str, Any]:
     )
 
 
-def _migrate_locked(root: Path, target: Path, legacy_dir: Path) -> dict[str, Any]:
-    """The migration proper, run while the target's lock is held."""
+def _existing_chain(target: Path) -> dict[str, Any] | None:
+    """The result for a target that must not be restored into, or None.
 
-    # A chain opened after the switch has no legacy segment at all: its
-    # entries live only in entries/. Checking for bench-ledger.json alone
-    # would miss it and splice a restored history into a running chain, so
-    # a non-empty entries/ counts as started too.
-    # A marker left by an interrupted publish (see _publish) means the
-    # target may hold part of a chain. That is checked before the
-    # already_started guard, which would otherwise take the part for the
-    # whole and report already_migrated.
+    Reads only, so it can answer before the lock is taken. A marker left by
+    an interrupted publish (see _publish) means the target may hold part of
+    a chain, and is checked first: the started check below would take the
+    part for the whole and report already_migrated. A chain opened after
+    the switch has no legacy segment at all, its entries live only in
+    entries/, so a non-empty entries/ counts as started too; checking for
+    bench-ledger.json alone would splice a restored history into a running
+    chain.
+    """
     if (target / _INCOMPLETE_MARKER).exists():
         return _incomplete(target)
-
     entries_dir: Path = target / ENTRIES_DIRNAME
     already_started: bool = (target / _LEDGER_FILENAME).exists() or (
         entries_dir.is_dir() and any(entries_dir.glob(_JSON_GLOB))
@@ -668,6 +678,16 @@ def _migrate_locked(root: Path, target: Path, legacy_dir: Path) -> dict[str, Any
             "files": 0,
             "detail": "This clone already has a private chain; nothing to do.",
         }
+    return None
+
+
+def _migrate_locked(root: Path, target: Path, legacy_dir: Path) -> dict[str, Any]:
+    """The migration proper, run while the target's lock is held."""
+    # Re-checked under the lock: a chain that appeared between the
+    # lock-free check and here must not be restored over.
+    existing: dict[str, Any] | None = _existing_chain(target)
+    if existing is not None:
+        return existing
 
     if (legacy_dir / _LEDGER_FILENAME).exists():
         written, expected = _copy_from_disk(legacy_dir, target)
