@@ -38,13 +38,24 @@ _LEGACY_DIRNAME: str = "ledger"
 _LEDGER_FILENAME: str = "bench-ledger.json"
 
 
+# Ceiling on each git call. Migration reads local history, which is fast,
+# but a repository on a stalled network mount or a hung credential helper
+# must end as a failed step, not a command that never returns; every
+# subprocess in this tree carries a timeout (tests/test_subprocess_timeouts.py
+# scans for it).
+_GIT_TIMEOUT_SECONDS: float = 60.0
+
+
 def _run_git(args: list[str], cwd: Path) -> tuple[int, str]:
     """Run a git command, returning (returncode, stdout).
 
     Failures are logged and returned rather than raised, so callers degrade
-    with a typed result instead of a traceback (C-001).
+    with a typed result instead of a traceback (C-001). A timeout is
+    reported the same way, as a non-zero code with empty output.
     """
     try:
+        # stdin is detached so a prompt of any kind fails at once instead
+        # of waiting on a terminal until the timeout fires.
         result = subprocess.run(
             ["git", *args],
             cwd=str(cwd),
@@ -52,7 +63,16 @@ def _run_git(args: list[str], cwd: Path) -> tuple[int, str]:
             text=True,
             encoding="utf-8",
             errors="replace",
+            stdin=subprocess.DEVNULL,
+            timeout=_GIT_TIMEOUT_SECONDS,
         )
+    except subprocess.TimeoutExpired:
+        print(
+            f"[bench migrate] git {' '.join(args)} did not finish within "
+            f"{_GIT_TIMEOUT_SECONDS:g}s",
+            file=sys.stderr,
+        )
+        return 1, ""
     except OSError as exc:
         print(f"[bench migrate] git unavailable: {exc}", file=sys.stderr)
         return 1, ""

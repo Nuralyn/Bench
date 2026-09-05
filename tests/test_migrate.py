@@ -11,6 +11,7 @@ impossible.
 Run: python -m unittest tests.test_migrate -v
 """
 
+import io
 import json
 import os
 import shutil
@@ -18,6 +19,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stderr
 from pathlib import Path
 from unittest.mock import patch
 
@@ -25,7 +27,7 @@ _REPO_ROOT: Path = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from ledger.migrate import migrate_ledger  # noqa: E402
+from ledger.migrate import _run_git, migrate_ledger  # noqa: E402
 from tests._ledger_fixtures import build_valid_chain  # noqa: E402
 
 
@@ -177,6 +179,25 @@ class GitHistorySourceTests(_MigrateTestCase):
         self._git("rm", "-r", "-q", "--cached", "ledger")
         shutil.rmtree(legacy)
         self._git("commit", "-q", "-m", "untrack")
+
+    def test_git_timeout_is_a_failed_step_not_a_hang(self) -> None:
+        """A git call that never returns ends as (1, "") with a stderr line."""
+        err = io.StringIO()
+        with patch(
+            "ledger.migrate.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(["git", "log"], 60),
+        ):
+            with redirect_stderr(err):
+                code, out = _run_git(["log", "-1"], self.repo)
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn("did not finish within", err.getvalue())
+
+    def test_git_calls_carry_a_timeout_and_detach_stdin(self) -> None:
+        with patch("ledger.migrate.subprocess.run") as run:
+            run.return_value = subprocess.CompletedProcess([], 0, "", "")
+            _run_git(["status"], self.repo)
+        self.assertGreater(run.call_args.kwargs.get("timeout", 0), 0)
+        self.assertEqual(run.call_args.kwargs.get("stdin"), subprocess.DEVNULL)
 
     def test_partial_restore_is_not_reported_as_migrated(self) -> None:
         """A read failure must not satisfy written == expected."""

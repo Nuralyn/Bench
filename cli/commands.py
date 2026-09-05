@@ -354,17 +354,38 @@ def cmd_record_sanitation(
     return 0
 
 
+# Ceiling on the git and gh probes below. Both talk to a remote, and a hung
+# remote must surface as a failed probe, not a CLI that never returns; every
+# subprocess in this tree carries a timeout (tests/test_subprocess_timeouts.py
+# scans for it). Generous, because a slow ref listing is still an answer.
+_SUBPROCESS_TIMEOUT_SECONDS: float = 60.0
+
+
 def _git_refs(args: list[str]) -> dict[str, str] | None:
     """Run a git ref-listing command into a {refname: sha} map.
 
     Returns None on failure rather than an empty map, because "no refs" and
     "could not read refs" must not look alike to a gate that refuses on
-    mismatch.
+    mismatch. A timeout is a failure of the same kind.
     """
     try:
+        # stdin is detached so a credential prompt fails at once instead of
+        # waiting on a terminal nobody is watching until the timeout fires.
         proc = subprocess.run(
-            args, capture_output=True, text=True, encoding="utf-8"
+            args,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            stdin=subprocess.DEVNULL,
+            timeout=_SUBPROCESS_TIMEOUT_SECONDS,
         )
+    except subprocess.TimeoutExpired:
+        print(
+            f"[bench cli] git did not answer within "
+            f"{_SUBPROCESS_TIMEOUT_SECONDS:g}s: {' '.join(args)}",
+            file=sys.stderr,
+        )
+        return None
     except OSError as exc:
         print(f"[bench cli] cannot run git: {exc}", file=sys.stderr)
         return None
@@ -393,12 +414,25 @@ def _gh_status(endpoint: str) -> int:
     (C-001: the failure is surfaced, not swallowed into a pass).
     """
     try:
+        # stdin is detached so an auth prompt fails at once instead of
+        # waiting on a terminal nobody is watching until the timeout fires.
         proc = subprocess.run(
             ["gh", "api", "-i", endpoint],
             capture_output=True,
             text=True,
             encoding="utf-8",
+            stdin=subprocess.DEVNULL,
+            timeout=_SUBPROCESS_TIMEOUT_SECONDS,
         )
+    except subprocess.TimeoutExpired:
+        # Unanswered, so inconclusive: 0 is the value classify_removal
+        # treats as "could not tell", never as a removal.
+        print(
+            f"[bench cli] gh did not answer within "
+            f"{_SUBPROCESS_TIMEOUT_SECONDS:g}s for {endpoint}",
+            file=sys.stderr,
+        )
+        return 0
     except OSError as exc:
         print(f"[bench cli] cannot run gh: {exc}", file=sys.stderr)
         return 0
