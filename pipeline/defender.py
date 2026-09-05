@@ -150,9 +150,11 @@ def run_defender(
     # Repair cosmetic drift before validating and record what was repaired
     # on the result, so the ledger entry shows it. _normalize_defender_
     # response (below) makes two repairs and no others: a digit-string
-    # finding_index becomes the integer, and a position that is an alias of
-    # CONCEDE (CONFIRM, AGREE) becomes CONCEDE. Every other position, index,
-    # or missing field still fails closed in the validator.
+    # finding_index becomes the integer, and only when it names one of the
+    # Challenger's findings, which is why the Challenger result is passed
+    # in; and a position that is an alias of CONCEDE (CONFIRM, AGREE)
+    # becomes CONCEDE. Every other position, index, or missing field still
+    # fails closed in the validator.
     # "_normalized" is reserved for this stage's own record. The validator
     # tolerates unknown keys, so a model-authored one is dropped first;
     # otherwise it would reach the ledger and count as a repair.
@@ -175,7 +177,7 @@ def run_defender(
             "_tokens": tokens,
         }
     response.pop("_normalized", None)
-    notes: list[str] = _normalize_defender_response(response)
+    notes: list[str] = _normalize_defender_response(response, challenger_result)
     if notes:
         response["_normalized"] = notes
 
@@ -226,14 +228,18 @@ _POSITION_ALIASES: dict[str, str] = {
 }
 
 
-def _normalize_defender_response(response: dict[str, Any]) -> list[str]:
+def _normalize_defender_response(
+    response: dict[str, Any], challenger_result: dict[str, Any]
+) -> list[str]:
     """Repair cosmetic drift in a Defender response in place; return notes.
 
     Two repairs, neither changing the argument made: a ``finding_index``
-    given as a digit string becomes the integer, and a position in
-    _POSITION_ALIASES becomes CONCEDE. Any other position, a non-numeric
-    or negative index, and a missing argument or summary are left for
-    _validate_defender_response to fail closed, exactly as before.
+    given as a digit string becomes the integer, but only when that integer
+    names one of the Challenger's findings, so a rebuttal to a finding that
+    does not exist fails closed as it always has; and a position in
+    _POSITION_ALIASES becomes CONCEDE. Any other position, a non-numeric,
+    negative, or out-of-range index, and a missing argument or summary are
+    left for _validate_defender_response to fail closed, exactly as before.
 
     This does not weaken enforcement. A rebuttal's position is an input to
     the Oracle, which reads the argument text and rules on the merits; a
