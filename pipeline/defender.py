@@ -13,6 +13,7 @@ Invariants:
     response preserved under "raw_response".
 """
 
+import copy
 import json
 import sys
 from typing import Any
@@ -146,11 +147,45 @@ def run_defender(
             "_tokens": tokens,
         }
 
+    # Repair cosmetic drift before validating and record what was repaired
+    # on the result, so the ledger entry shows it. _normalize_defender_
+    # response (below) makes two repairs and no others: a digit-string
+    # finding_index becomes the integer, and only when it names one of the
+    # Challenger's findings, which is why the Challenger result is passed
+    # in; and a position that is an alias of CONCEDE (CONFIRM, AGREE)
+    # becomes CONCEDE. Every other position, index, or missing field still
+    # fails closed in the validator.
+    # "_normalized" is reserved for this stage's own record. The validator
+    # tolerates unknown keys, so a model-authored one is dropped first;
+    # otherwise it would reach the ledger and count as a repair.
+    # The ledger's raw_response on a failure is what the model wrote, not
+    # the repaired copy, so an invalid response can still be diagnosed.
+    try:
+        original: dict[str, Any] = copy.deepcopy(response)
+    except RecursionError:
+        # Nested too deep to copy, which also means too deep to serialize
+        # into the ledger. Fail closed with a note in place of the payload
+        # rather than let the exception escape the stage.
+        print(
+            "[bench defender] response nested too deep to record; failing closed",
+            file=sys.stderr,
+        )
+        return {
+            "status": "PIPELINE_ERROR",
+            "error": "INVALID_DEFENDER_RESPONSE",
+            "raw_response": "omitted: response nested too deep to copy or record",
+            "_tokens": tokens,
+        }
+    response.pop("_normalized", None)
+    notes: list[str] = _normalize_defender_response(response, challenger_result)
+    if notes:
+        response["_normalized"] = notes
+
     if not _validate_defender_response(response):
         return {
             "status": "PIPELINE_ERROR",
             "error": "INVALID_DEFENDER_RESPONSE",
-            "raw_response": response,
+            "raw_response": original,
             "_tokens": tokens,
         }
 
@@ -175,6 +210,94 @@ def _build_user_content(diff_info: dict, challenger_result: dict) -> str:
             json.dumps(challenger_result, indent=2),
         ]
     )
+
+
+# Cosmetic drift the operational ledger has recorded in otherwise sound
+# Defender responses (INVALID_DEFENDER_RESPONSE on 2026-07-31, twice, and
+# 2026-08-04, twice), each a fail-closed VETO recorded as a pipeline error,
+# not a ruling. The positions here are the two the system prompt above
+# names as the mistakes to avoid, and each is a plain word for agreeing
+# with a finding, which is what CONCEDE means. No alias maps to REBUT or
+# MITIGATE, and a word that could mean disagreement is never guessed at:
+# CONFIRM_CLEAR, which the ledger also recorded, is the schema's top-level
+# status for a clear assessment and inside a rebuttal can mean the code is
+# clear of the finding, so it stays fail-closed.
+_POSITION_ALIASES: dict[str, str] = {
+    "CONFIRM": "CONCEDE",
+    "AGREE": "CONCEDE",
+}
+
+
+def _normalize_defender_response(
+    response: dict[str, Any], challenger_result: dict[str, Any]
+) -> list[str]:
+    """Repair cosmetic drift in a Defender response in place; return notes.
+
+    Two repairs, neither changing the argument made: a ``finding_index``
+    given as a digit string becomes the integer, but only when that integer
+    names one of the Challenger's findings, so a rebuttal to a finding that
+    does not exist fails closed as it always has; and a position in
+    _POSITION_ALIASES becomes CONCEDE. Any other position, a non-numeric,
+    negative, or out-of-range index, and a missing argument or summary are
+    left for _validate_defender_response to fail closed, exactly as before.
+
+    This does not weaken enforcement. A rebuttal's position is an input to
+    the Oracle, which reads the argument text and rules on the merits; a
+    response the validator rejected for spelling CONCEDE as CONFIRM was
+    never adjudicated at all, and the VETO it produced was a pipeline
+    error. Mapping an agreement word to CONCEDE sends the Oracle the same
+    argument with the position the schema meant, whether the response also
+    carries a genuine REBUT or not.
+
+    run_defender records the returned notes on the result as
+    ``_normalized`` (the same pattern run_challenger and run_oracle use) so
+    the ledger entry shows what was repaired. tests/test_defender.py
+    NormalizeDefenderResponseTests covers each repair, the untouched clean
+    response, and the fail-closed cases (CONFIRM_CLEAR, REFUTE, REJECT,
+    DISPUTE, PARTIAL, a non-numeric index, a missing argument) end to end
+    through run_defender.
+    """
+    notes: list[str] = []
+    # Only a REBUTTAL response has its rebuttals validated; a stray list on
+    # CONCEDE_ALL or CONFIRM_CLEAR is ignored downstream and is not counted
+    # as a repair.
+    if response.get("status") != "REBUTTAL":
+        return notes
+    rebuttals: Any = response.get("rebuttals")
+    if not isinstance(rebuttals, list):
+        return notes
+    findings: Any = challenger_result.get("findings")
+    finding_count: int = len(findings) if isinstance(findings, list) else 0
+    for index, rebuttal in enumerate(rebuttals):
+        if not isinstance(rebuttal, dict):
+            continue
+        finding_index: Any = rebuttal.get("finding_index")
+        # ASCII decimal digits only, short, and naming a finding the
+        # Challenger actually reported: str.isdigit() is also true of
+        # superscripts and circled digits that int() rejects, int() refuses
+        # very long digit strings, and an exception here would skip the
+        # PIPELINE_ERROR receipt the validator writes. An index past the
+        # findings list stays a string and fails closed as it always has.
+        if (
+            isinstance(finding_index, str)
+            and finding_index.strip().isascii()
+            and finding_index.strip().isdecimal()
+            and len(finding_index.strip()) <= 9
+            and int(finding_index.strip()) < finding_count
+        ):
+            rebuttal["finding_index"] = int(finding_index.strip())
+            notes.append(
+                f"rebuttal {index}: finding_index {finding_index!r} recorded as "
+                f"{rebuttal['finding_index']}"
+            )
+        position: Any = rebuttal.get("position")
+        if isinstance(position, str) and position.upper() in _POSITION_ALIASES:
+            rebuttal["position"] = _POSITION_ALIASES[position.upper()]
+            notes.append(
+                f"rebuttal {index}: position {position!r} recorded as "
+                f"{rebuttal['position']!r}"
+            )
+    return notes
 
 
 def _validate_defender_response(response: dict[str, Any]) -> bool:

@@ -23,6 +23,7 @@ from pipeline.constitution import (  # noqa: E402
 )
 from pipeline.oracle import (  # noqa: E402
     _build_user_content,
+    _normalize_oracle_response,
     _validate_oracle_response,
     run_oracle,
 )
@@ -158,6 +159,214 @@ class ValidateOracleResponseTests(unittest.TestCase):
         resp: dict = _valid_pass()
         del resp["remediation"]
         self.assertFalse(_validate_oracle_response(resp))
+
+
+class NormalizeOracleResponseTests(unittest.TestCase):
+    """One test per repair, and the fail-closed line it never crosses.
+
+    A missing confidence is the shape the operational ledger recorded as
+    INVALID_ORACLE_RESPONSE, four times on 2026-08-22 and 2026-08-23, each a
+    fail-closed VETO on a change the Oracle had in fact ruled on. The
+    remediation and advisory cases are the drift the schema invites.
+    """
+
+    def test_missing_confidence_is_recorded_as_low_with_a_note(self) -> None:
+        for resp in (_valid_pass(), _valid_veto()):
+            del resp["confidence"]
+            notes: list[str] = _normalize_oracle_response(resp)
+            self.assertEqual(resp["confidence"], "LOW")
+            self.assertEqual(len(notes), 1)
+            self.assertTrue(_validate_oracle_response(resp), resp["verdict"])
+
+    def test_null_confidence_is_recorded_as_low(self) -> None:
+        resp: dict = _valid_pass()
+        resp["confidence"] = None
+        _normalize_oracle_response(resp)
+        self.assertEqual(resp["confidence"], "LOW")
+        self.assertTrue(_validate_oracle_response(resp))
+
+    def test_placeholder_remediation_on_pass_becomes_null(self) -> None:
+        for placeholder in ("", "  ", "null", "None", "N/A", "not applicable"):
+            resp: dict = _valid_pass()
+            resp["remediation"] = placeholder
+            notes: list[str] = _normalize_oracle_response(resp)
+            self.assertIsNone(resp["remediation"], repr(placeholder))
+            self.assertEqual(len(notes), 1, repr(placeholder))
+            self.assertTrue(_validate_oracle_response(resp), repr(placeholder))
+
+    def test_blank_advisory_strings_are_dropped(self) -> None:
+        resp: dict = _valid_pass()
+        resp["advisories"] = ["", "Keep an eye on the retry path.", "   "]
+        notes: list[str] = _normalize_oracle_response(resp)
+        self.assertEqual(resp["advisories"], ["Keep an eye on the retry path."])
+        self.assertEqual(len(notes), 1)
+        self.assertIn("2", notes[0])
+        self.assertTrue(_validate_oracle_response(resp))
+
+    def test_missing_advisories_becomes_empty_list(self) -> None:
+        resp: dict = _valid_pass()
+        del resp["advisories"]
+        _normalize_oracle_response(resp)
+        self.assertEqual(resp["advisories"], [])
+        self.assertTrue(_validate_oracle_response(resp))
+
+    def test_clean_response_is_untouched_and_unnoted(self) -> None:
+        for resp in (_valid_pass(), _valid_veto()):
+            expected: dict = _valid_pass() if resp["verdict"] == "PASS" else _valid_veto()
+            self.assertEqual(_normalize_oracle_response(resp), [])
+            self.assertEqual(resp, expected)
+
+    def test_veto_remediation_is_never_touched(self) -> None:
+        # A VETO must say what would pass. The normalizer only nulls a
+        # placeholder on a PASS; on a VETO it leaves the field exactly as
+        # the Oracle wrote it, and an empty one still fails closed.
+        for placeholder in ("", "null", "N/A"):
+            resp: dict = _valid_veto()
+            resp["remediation"] = placeholder
+            self.assertEqual(_normalize_oracle_response(resp), [], repr(placeholder))
+            self.assertEqual(resp["remediation"], placeholder)
+        resp = _valid_veto()
+        resp["remediation"] = ""
+        self.assertFalse(_validate_oracle_response(resp))
+
+    def test_pass_with_real_remediation_text_still_fails_closed(self) -> None:
+        resp: dict = _valid_pass()
+        resp["remediation"] = "Rename the helper."
+        self.assertEqual(_normalize_oracle_response(resp), [])
+        self.assertFalse(_validate_oracle_response(resp))
+
+    def test_verdict_reasoning_and_citations_still_fail_closed(self) -> None:
+        broken: list[dict] = []
+        resp: dict = _valid_pass()
+        resp["verdict"] = "ALLOW"
+        broken.append(resp)
+        resp = _valid_pass()
+        del resp["verdict"]
+        broken.append(resp)
+        resp = _valid_pass()
+        resp["reasoning"] = ""
+        broken.append(resp)
+        resp = _valid_veto()
+        resp["constraint_citations"] = []
+        broken.append(resp)
+        resp = _valid_veto()
+        resp["constraint_citations"][0]["disposition"] = "BREACHED"
+        broken.append(resp)
+        resp = _valid_veto()
+        del resp["constraint_citations"][0]["note"]
+        broken.append(resp)
+        resp = _valid_pass()
+        resp["confidence"] = "VERY_HIGH"
+        broken.append(resp)
+        for candidate in broken:
+            _normalize_oracle_response(candidate)
+            self.assertFalse(_validate_oracle_response(candidate), candidate)
+
+    def test_non_string_advisory_entries_are_not_dropped(self) -> None:
+        # Dropping a non-string entry would hide a malformed advisory; the
+        # validator still rejects it.
+        resp: dict = _valid_pass()
+        resp["advisories"] = [{"text": "structured"}]
+        _normalize_oracle_response(resp)
+        self.assertEqual(resp["advisories"], [{"text": "structured"}])
+        self.assertFalse(_validate_oracle_response(resp))
+
+    @patch("pipeline.oracle.call_model")
+    def test_run_oracle_records_repairs_on_the_result(
+        self, mock_call: MagicMock
+    ) -> None:
+        resp: dict = _valid_veto()
+        del resp["confidence"]
+        resp["_tokens"] = {"input": 10, "output": 20}
+        mock_call.return_value = resp
+        result: dict = run_oracle(
+            _valid_diff(), _valid_constitution(), "hash",
+            _valid_challenger(), _valid_defender(),
+        )
+        self.assertEqual(result["verdict"], "VETO")
+        self.assertEqual(result["confidence"], "LOW")
+        self.assertEqual(len(result["_normalized"]), 1)
+
+    @patch("pipeline.oracle.call_model")
+    def test_run_oracle_leaves_no_note_when_nothing_repaired(
+        self, mock_call: MagicMock
+    ) -> None:
+        resp: dict = _valid_pass()
+        resp["_tokens"] = {"input": 10, "output": 20}
+        mock_call.return_value = resp
+        result: dict = run_oracle(
+            _valid_diff(), _valid_constitution(), "hash",
+            _valid_challenger(), _valid_defender(),
+        )
+        self.assertNotIn("_normalized", result)
+
+    @patch("pipeline.oracle.call_model")
+    def test_raw_response_on_failure_is_the_model_output_not_the_repair(
+        self, mock_call: MagicMock
+    ) -> None:
+        resp: dict = _valid_pass()
+        del resp["confidence"]
+        resp["constraint_citations"][0]["disposition"] = "BREACHED"
+        resp["_tokens"] = {"input": 10, "output": 20}
+        mock_call.return_value = resp
+        result: dict = run_oracle(
+            _valid_diff(), _valid_constitution(), "hash",
+            _valid_challenger(), _valid_defender(),
+        )
+        self.assertEqual(result["status"], "PIPELINE_ERROR")
+        raw: dict = result["raw_response"]
+        self.assertNotIn("confidence", raw)
+        self.assertNotIn("_normalized", raw)
+
+    @patch("pipeline.oracle.call_model")
+    def test_response_nested_too_deep_fails_closed_without_raising(
+        self, mock_call: MagicMock
+    ) -> None:
+        nested: dict = {}
+        for _ in range(5000):
+            nested = {"n": nested}
+        resp: dict = _valid_pass()
+        resp["extra"] = nested
+        resp["_tokens"] = {"input": 10, "output": 20}
+        mock_call.return_value = resp
+        result: dict = run_oracle(
+            _valid_diff(), _valid_constitution(), "hash",
+            _valid_challenger(), _valid_defender(),
+        )
+        self.assertEqual(result["status"], "PIPELINE_ERROR")
+        self.assertEqual(result["error"], "INVALID_ORACLE_RESPONSE")
+        self.assertIsInstance(result["raw_response"], str)
+
+    @patch("pipeline.oracle.call_model")
+    def test_model_authored_normalized_key_does_not_survive(
+        self, mock_call: MagicMock
+    ) -> None:
+        resp: dict = _valid_pass()
+        resp["_normalized"] = ["fake"]
+        resp["_tokens"] = {"input": 10, "output": 20}
+        mock_call.return_value = resp
+        result: dict = run_oracle(
+            _valid_diff(), _valid_constitution(), "hash",
+            _valid_challenger(), _valid_defender(),
+        )
+        self.assertEqual(result["verdict"], "PASS")
+        self.assertNotIn("_normalized", result)
+
+    @patch("pipeline.oracle.call_model")
+    def test_run_oracle_still_fails_closed_on_unknown_verdict(
+        self, mock_call: MagicMock
+    ) -> None:
+        resp: dict = _valid_pass()
+        resp["verdict"] = "ALLOW"
+        del resp["confidence"]
+        resp["_tokens"] = {"input": 10, "output": 20}
+        mock_call.return_value = resp
+        result: dict = run_oracle(
+            _valid_diff(), _valid_constitution(), "hash",
+            _valid_challenger(), _valid_defender(),
+        )
+        self.assertEqual(result["status"], "PIPELINE_ERROR")
+        self.assertEqual(result["error"], "INVALID_ORACLE_RESPONSE")
 
 
 class BuildUserContentTests(unittest.TestCase):

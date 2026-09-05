@@ -31,6 +31,7 @@ from utils.stats import (  # noqa: E402
     tokens_per_entry,
     billed_input,
     billed_tokens_per_entry,
+    normalized_entries,
     CACHE_READ_RATE,
     CACHE_WRITE_RATE,
     week_of,
@@ -502,6 +503,22 @@ class TokensByStageTests(unittest.TestCase):
             {"oracle": {"_tokens": {"input": 10, "output": 1, "cache_read": "lots"}}}
         ]
         self.assertEqual(tokens_by_stage(entries)["oracle"], _figures(10, 1, 1))
+
+
+class NormalizedEntriesTests(unittest.TestCase):
+    def test_counts_entries_with_a_repaired_stage_once(self) -> None:
+        entries: list[dict] = [
+            {"challenger": {"_normalized": ["a"]}, "oracle": {"_normalized": ["b"]}},
+            {"defender": {"_normalized": ["c"]}},
+            {"oracle": {"_normalized": []}},
+            {"oracle": {"verdict": "PASS"}},
+            {"verdict": "VETO", "pipeline_error": True},
+            {"challenger": "not a dict"},
+        ]
+        self.assertEqual(normalized_entries(entries), 2)
+
+    def test_empty_ledger(self) -> None:
+        self.assertEqual(normalized_entries([]), 0)
 
 
 class BilledInputTests(unittest.TestCase):

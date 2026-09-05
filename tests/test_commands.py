@@ -186,6 +186,9 @@ class CmdStatsTests(unittest.TestCase):
         self.assertIn("Vetoed                 : 1 (50.0%)", text)
         self.assertIn("C-001", text)
         self.assertIn("Ledger integrity       : VALID", text)
+        # Repaired responses print beside pipeline errors, since each would
+        # otherwise have been one.
+        self.assertIn("Normalized responses   : 0", text)
         # The cost lines the README quotes are always printed, as a figure
         # or as an explicit n/a, so a reader can reproduce or rule out each.
         self.assertIn("Tokens per edit        : ", text)

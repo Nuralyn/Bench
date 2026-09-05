@@ -23,6 +23,7 @@ from pipeline.constitution import (  # noqa: E402
 )
 from pipeline.defender import (  # noqa: E402
     _build_user_content,
+    _normalize_defender_response,
     _validate_defender_response,
     run_defender,
 )
@@ -51,6 +52,22 @@ def _valid_constitution() -> dict:
 
 def _valid_challenger() -> dict:
     return {"status": "FINDINGS", "findings": []}
+
+
+def _one_finding() -> dict:
+    """A Challenger result with exactly one finding, so index 0 is real."""
+    return {
+        "status": "FINDINGS",
+        "findings": [
+            {
+                "constraint_id": "C-001",
+                "severity": "CONCERN",
+                "location": "x.py:1",
+                "evidence": "except Exception: pass",
+                "reasoning": "Swallowed.",
+            }
+        ],
+    }
 
 
 class ValidateDefenderResponseTests(unittest.TestCase):
@@ -138,6 +155,223 @@ class ValidateDefenderResponseTests(unittest.TestCase):
                 {"status": "REBUTTAL", "summary": "x", "rebuttals": [r]}
             )
         )
+
+
+class NormalizeDefenderResponseTests(unittest.TestCase):
+    """One test per repair the ledger has recorded, and the fail-closed line.
+
+    The operational ledger recorded these exact shapes as
+    INVALID_DEFENDER_RESPONSE on 2026-07-31 (twice) and 2026-08-04 (twice):
+    finding_index as a digit string, and the positions CONFIRM and
+    CONFIRM_CLEAR, each a fail-closed VETO on an edit the Defender had
+    argued for. The system prompt already names CONFIRM and AGREE as the
+    mistakes to avoid and says they mean CONCEDE.
+    """
+
+    def _resp(self, rebuttal: dict) -> dict:
+        return {"status": "REBUTTAL", "summary": "Sound.", "rebuttals": [rebuttal]}
+
+    def test_digit_string_finding_index_becomes_int_with_a_note(self) -> None:
+        rebuttal: dict = _valid_rebuttal()
+        rebuttal["finding_index"] = "0"
+        resp: dict = self._resp(rebuttal)
+        notes: list[str] = _normalize_defender_response(resp, _one_finding())
+        self.assertEqual(resp["rebuttals"][0]["finding_index"], 0)
+        self.assertEqual(len(notes), 1)
+        self.assertTrue(_validate_defender_response(resp))
+
+    def test_concede_aliases_become_concede_with_a_note(self) -> None:
+        for alias in ("CONFIRM", "AGREE", "confirm", "Agree"):
+            rebuttal: dict = _valid_rebuttal()
+            rebuttal["position"] = alias
+            resp: dict = self._resp(rebuttal)
+            notes: list[str] = _normalize_defender_response(resp, _one_finding())
+            self.assertEqual(resp["rebuttals"][0]["position"], "CONCEDE", alias)
+            self.assertEqual(len(notes), 1, alias)
+            self.assertTrue(_validate_defender_response(resp), alias)
+
+    def test_clean_response_is_untouched_and_unnoted(self) -> None:
+        resp: dict = self._resp(_valid_rebuttal())
+        self.assertEqual(_normalize_defender_response(resp, _one_finding()), [])
+        self.assertEqual(resp["rebuttals"][0], _valid_rebuttal())
+
+    def test_stray_rebuttals_on_a_non_rebuttal_status_are_not_a_repair(
+        self,
+    ) -> None:
+        # The validator reads rebuttals only on REBUTTAL; a stray list on
+        # CONCEDE_ALL or CONFIRM_CLEAR is ignored, so rewriting it would
+        # only inflate the repair count.
+        for status in ("CONCEDE_ALL", "CONFIRM_CLEAR"):
+            rebuttal: dict = _valid_rebuttal()
+            rebuttal["finding_index"] = "0"
+            rebuttal["position"] = "CONFIRM"
+            resp: dict = {"status": status, "summary": "Sound.", "rebuttals": [rebuttal]}
+            self.assertEqual(_normalize_defender_response(resp, _one_finding()), [], status)
+            self.assertEqual(resp["rebuttals"][0]["position"], "CONFIRM", status)
+            self.assertTrue(_validate_defender_response(resp), status)
+
+    def test_unknown_position_still_fails_closed(self) -> None:
+        # Only plain agreement words are aliased. A position that could mean
+        # disagreement is not guessed at, and that includes CONFIRM_CLEAR:
+        # the schema's top-level status for a clear assessment, which inside
+        # a rebuttal can mean the code is clear of the finding.
+        for position in ("CONFIRM_CLEAR", "REFUTE", "REJECT", "DISPUTE", "PARTIAL"):
+            rebuttal: dict = _valid_rebuttal()
+            rebuttal["position"] = position
+            resp: dict = self._resp(rebuttal)
+            self.assertEqual(_normalize_defender_response(resp, _one_finding()), [], position)
+            self.assertFalse(_validate_defender_response(resp), position)
+
+    def test_non_numeric_or_negative_index_still_fails_closed(self) -> None:
+        # "²" and "①" satisfy str.isdigit() but int() rejects them, and a
+        # 5,000-digit string exceeds int()'s conversion limit: each must
+        # reach the validator's fail-closed path, never raise.
+        for index in ("first", "-1", "1.5", None, "²", "①", "9" * 5000):
+            rebuttal: dict = _valid_rebuttal()
+            rebuttal["finding_index"] = index
+            resp: dict = self._resp(rebuttal)
+            _normalize_defender_response(resp, _one_finding())
+            self.assertFalse(_validate_defender_response(resp), repr(index))
+
+    def test_missing_argument_or_summary_still_fails_closed(self) -> None:
+        rebuttal: dict = _valid_rebuttal()
+        del rebuttal["argument"]
+        resp: dict = self._resp(rebuttal)
+        _normalize_defender_response(resp, _one_finding())
+        self.assertFalse(_validate_defender_response(resp))
+        resp = self._resp(_valid_rebuttal())
+        del resp["summary"]
+        _normalize_defender_response(resp, _one_finding())
+        self.assertFalse(_validate_defender_response(resp))
+
+    @patch("pipeline.defender.call_model")
+    def test_run_defender_records_repairs_on_the_result(
+        self, mock_call: MagicMock
+    ) -> None:
+        rebuttal: dict = _valid_rebuttal()
+        rebuttal["finding_index"] = "0"
+        rebuttal["position"] = "CONFIRM"
+        mock_call.return_value = {
+            "status": "REBUTTAL",
+            "summary": "Sound.",
+            "rebuttals": [rebuttal],
+            "_tokens": {"input": 10, "output": 20},
+        }
+        result: dict = run_defender(
+            _valid_diff(), _valid_constitution(), "hash", _one_finding()
+        )
+        self.assertEqual(result["status"], "REBUTTAL")
+        self.assertEqual(result["rebuttals"][0]["finding_index"], 0)
+        self.assertEqual(result["rebuttals"][0]["position"], "CONCEDE")
+        self.assertEqual(len(result["_normalized"]), 2)
+
+    def test_index_past_the_findings_list_still_fails_closed(self) -> None:
+        # "1" against one finding names nothing. It stays a string, so the
+        # validator rejects it as it always did; the same digit string
+        # against two findings is a real index and is coerced.
+        rebuttal: dict = _valid_rebuttal()
+        rebuttal["finding_index"] = "1"
+        resp: dict = self._resp(rebuttal)
+        self.assertEqual(_normalize_defender_response(resp, _one_finding()), [])
+        self.assertEqual(resp["rebuttals"][0]["finding_index"], "1")
+        self.assertFalse(_validate_defender_response(resp))
+        two: dict = _one_finding()
+        two["findings"].append(dict(two["findings"][0]))
+        resp = self._resp(dict(rebuttal, finding_index="1"))
+        self.assertEqual(len(_normalize_defender_response(resp, two)), 1)
+        self.assertEqual(resp["rebuttals"][0]["finding_index"], 1)
+        self.assertTrue(_validate_defender_response(resp))
+
+    @patch("pipeline.defender.call_model")
+    def test_run_defender_leaves_no_note_when_nothing_repaired(
+        self, mock_call: MagicMock
+    ) -> None:
+        mock_call.return_value = {
+            "status": "REBUTTAL",
+            "summary": "Sound.",
+            "rebuttals": [_valid_rebuttal()],
+            "_tokens": {"input": 10, "output": 20},
+        }
+        result: dict = run_defender(
+            _valid_diff(), _valid_constitution(), "hash", _valid_challenger()
+        )
+        self.assertNotIn("_normalized", result)
+
+    @patch("pipeline.defender.call_model")
+    def test_raw_response_on_failure_is_the_model_output_not_the_repair(
+        self, mock_call: MagicMock
+    ) -> None:
+        rebuttal: dict = _valid_rebuttal()
+        rebuttal["finding_index"] = "0"
+        rebuttal["position"] = "REFUTE"
+        mock_call.return_value = {
+            "status": "REBUTTAL",
+            "summary": "Sound.",
+            "rebuttals": [rebuttal],
+            "_tokens": {"input": 10, "output": 20},
+        }
+        result: dict = run_defender(
+            _valid_diff(), _valid_constitution(), "hash", _valid_challenger()
+        )
+        self.assertEqual(result["status"], "PIPELINE_ERROR")
+        raw: dict = result["raw_response"]
+        self.assertEqual(raw["rebuttals"][0]["finding_index"], "0")
+        self.assertNotIn("_normalized", raw)
+
+    @patch("pipeline.defender.call_model")
+    def test_response_nested_too_deep_fails_closed_without_raising(
+        self, mock_call: MagicMock
+    ) -> None:
+        nested: dict = {}
+        for _ in range(5000):
+            nested = {"n": nested}
+        mock_call.return_value = {
+            "status": "CONCEDE_ALL",
+            "summary": "Conceded.",
+            "extra": nested,
+            "_tokens": {"input": 10, "output": 20},
+        }
+        result: dict = run_defender(
+            _valid_diff(), _valid_constitution(), "hash", _valid_challenger()
+        )
+        self.assertEqual(result["status"], "PIPELINE_ERROR")
+        self.assertEqual(result["error"], "INVALID_DEFENDER_RESPONSE")
+        self.assertIsInstance(result["raw_response"], str)
+
+    @patch("pipeline.defender.call_model")
+    def test_model_authored_normalized_key_does_not_survive(
+        self, mock_call: MagicMock
+    ) -> None:
+        mock_call.return_value = {
+            "status": "REBUTTAL",
+            "summary": "Sound.",
+            "rebuttals": [_valid_rebuttal()],
+            "_normalized": ["fake"],
+            "_tokens": {"input": 10, "output": 20},
+        }
+        result: dict = run_defender(
+            _valid_diff(), _valid_constitution(), "hash", _valid_challenger()
+        )
+        self.assertEqual(result["status"], "REBUTTAL")
+        self.assertNotIn("_normalized", result)
+
+    @patch("pipeline.defender.call_model")
+    def test_run_defender_still_fails_closed_on_unknown_position(
+        self, mock_call: MagicMock
+    ) -> None:
+        rebuttal: dict = _valid_rebuttal()
+        rebuttal["position"] = "REFUTE"
+        mock_call.return_value = {
+            "status": "REBUTTAL",
+            "summary": "Sound.",
+            "rebuttals": [rebuttal],
+            "_tokens": {"input": 10, "output": 20},
+        }
+        result: dict = run_defender(
+            _valid_diff(), _valid_constitution(), "hash", _valid_challenger()
+        )
+        self.assertEqual(result["status"], "PIPELINE_ERROR")
+        self.assertEqual(result["error"], "INVALID_DEFENDER_RESPONSE")
 
 
 class BuildUserContentTests(unittest.TestCase):
