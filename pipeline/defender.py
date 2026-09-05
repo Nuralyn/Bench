@@ -17,6 +17,7 @@ import json
 import sys
 from typing import Any
 
+from pipeline.constitution import prompt_view
 from utils.api import DEFENDER_MODEL, call_model
 
 
@@ -153,13 +154,19 @@ def _build_user_content(
     challenger_result: dict,
     file_context: str,
 ) -> str:
-    """Assemble the labeled user-content payload sent to the Defender."""
+    """Assemble the labeled user-content payload sent to the Defender.
+
+    The constitution goes in as its prompt view, the same rendering the
+    Challenger and Oracle receive: every constraint's id, name, scope, rule,
+    and severity, without the rationale and commentary written for a human
+    reader. All three stages argue from identical constitutional text.
+    """
     sections: list[str] = [
         "PROPOSED CHANGE:",
         json.dumps(diff_info, indent=2),
         "",
         "CONSTITUTION:",
-        json.dumps(constitution, indent=2),
+        json.dumps(prompt_view(constitution), indent=2),
         "",
         "CHALLENGER FINDINGS:",
         json.dumps(challenger_result, indent=2),

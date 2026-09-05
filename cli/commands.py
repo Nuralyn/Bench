@@ -954,6 +954,12 @@ def cmd_constitution() -> int:
         rule: str = str(constraint.get("rule", ""))
         if len(rule) > _RULE_PREVIEW_LEN:
             rule = rule[: _RULE_PREVIEW_LEN - 3] + "..."
+        # Commentary is the part of a constraint the models never see (see
+        # pipeline.constitution.prompt_view). Showing it apart from the rule
+        # lets an auditor check which text actually binds.
+        commentary: str = str(constraint.get("commentary", ""))
+        if len(commentary) > _RULE_PREVIEW_LEN:
+            commentary = commentary[: _RULE_PREVIEW_LEN - 3] + "..."
         origin: str = ""
         if constraint.get("severity_raised_by_project"):
             origin = "  (severity raised by project layer)"
@@ -961,7 +967,9 @@ def cmd_constitution() -> int:
             origin = "  (project layer)"
         print()
         print(f"  {cid}  [{severity:7}]  {cname}{origin}")
-        print(f"           {rule}")
+        print(f"           rule: {rule}")
+        if commentary:
+            print(f"           commentary (not sent to models): {commentary}")
 
     return 0
 
