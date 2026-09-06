@@ -69,6 +69,7 @@ from utils.stats import (
     seconds_by_stage,
     tokens_per_entry,
 )
+from utils.owneronly import open_owner_only
 from utils.viewer import generate_viewer_html
 
 _HASH_PREFIX_LEN: int = 12
@@ -1065,8 +1066,10 @@ def cmd_viewer() -> int:
     The page embeds every entry, diff bodies included, so it is written next
     to the chain it renders (``<ledger dir>/viewer.html``, inside the
     gitignored ``.bench/`` directory) rather than to the system temp
-    directory, where it outlived the session with no cleanup and no
-    protection beyond a chmod that Windows ignores.
+    directory, where it outlived the session with no cleanup, and it is
+    created readable by the current user only on every platform, from its
+    first byte: a 0600 mode on POSIX, a one-entry DACL on Windows
+    (utils.owneronly).
     """
     try:
         html_content: str = generate_viewer_html()
@@ -1078,20 +1081,37 @@ def cmd_viewer() -> int:
         return 1
 
     target: Path = Path(resolve_ledger_path()).parent / "viewer.html"
+    linked: Path | None = next(
+        (p for p in (target, target.parent) if p.is_symlink()), None
+    )
+    if linked is not None:
+        # os.open would follow the link, writing every diff body and then
+        # the owner-only restriction to wherever it points.
+        print(
+            f"[bench cli] {linked} is a symlink; refusing to write the viewer "
+            f"through it. Remove the link and retry.",
+            file=sys.stderr,
+        )
+        return 1
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
-        # Owner-only from creation, matching the ledger's own entry files,
-        # since the page embeds every diff body the chain holds. O_TRUNC
-        # keeps an existing file's mode, so the chmod covers a rewrite too.
-        # Windows honours only the read-only bit; both calls are no-ops there.
-        fd: int = os.open(
-            target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600
-        )
+        # Owner-only from the first byte, since the page embeds every diff
+        # body the chain holds: the previous page is removed and a new file
+        # is created exclusively with the restriction already in place
+        # (mode 0600 on POSIX, a one-entry DACL on Windows). Restricting
+        # after the write would leave a window in which the page could be
+        # opened and a readable handle kept.
+        if target.exists():
+            target.unlink()
+        fd: int = open_owner_only(target)
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(html_content)
-        os.chmod(target, 0o600)
     except OSError as e:
-        print(f"[bench cli] viewer write failed: {e}", file=sys.stderr)
+        print(
+            f"[bench cli] viewer write failed: {e}. Nothing readable was left "
+            f"behind: the page is created owner-only or not at all.",
+            file=sys.stderr,
+        )
         return 1
 
     print(f"Bench viewer written to: {target}")
