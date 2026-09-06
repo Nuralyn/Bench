@@ -287,8 +287,8 @@ class TestInstall(_ScratchCase):
         self.assertEqual(receipt["gitignore_appended"], f"{IGNORE_LINE}\n")
         # Relative to the project, so a moved repository still finds it.
         self.assertEqual(
-            receipt["guard"],
-            {"path": ".git/hooks/pre-commit", "sha256": hashlib.sha256(_GUARD_BYTES).hexdigest()},
+            receipt["guards"],
+            [{"path": ".git/hooks/pre-commit", "sha256": hashlib.sha256(_GUARD_BYTES).hexdigest()}],
         )
 
     def test_second_run_changes_nothing_but_the_receipt_timestamp(self) -> None:
@@ -438,7 +438,7 @@ class TestInstall(_ScratchCase):
         self.assertEqual(statuses["hook"], "written")
         self.assertTrue(self.settings_path.exists())
         self.assertTrue((self.project / ".gitignore").exists())
-        self.assertIsNone(self._receipt()["guard"])
+        self.assertEqual(self._receipt()["guards"], [])
 
     def test_existing_foreign_pre_commit_hook_is_left_alone_and_not_claimed(self) -> None:
         self._init_repo()
@@ -449,7 +449,7 @@ class TestInstall(_ScratchCase):
         self.assertEqual(status, "skipped")
         self.assertIn(self.resources.guard.as_posix(), detail)
         self.assertEqual(self.guard_path.read_bytes(), b"#!/bin/sh\nnpm test\n")
-        self.assertIsNone(self._receipt()["guard"])
+        self.assertEqual(self._receipt()["guards"], [])
 
     def test_a_dangling_symlink_at_the_guard_target_is_not_written_through(self) -> None:
         self._init_repo()
@@ -465,7 +465,7 @@ class TestInstall(_ScratchCase):
         self.assertEqual(status, "skipped")
         self.assertIn("symlink", detail)
         self.assertFalse(destination.exists())
-        self.assertIsNone(self._receipt()["guard"])
+        self.assertEqual(self._receipt()["guards"], [])
 
     def test_an_identical_unclaimed_guard_is_not_claimed(self) -> None:
         # Same bytes as Bench's guard but no receipt says install wrote it:
@@ -475,7 +475,7 @@ class TestInstall(_ScratchCase):
         self.guard_path.write_bytes(_GUARD_BYTES)
         report: Report = self._install()
         self.assertEqual(_statuses(report)["guard"], "unchanged")
-        self.assertIsNone(self._receipt()["guard"])
+        self.assertEqual(self._receipt()["guards"], [])
 
     def test_guard_follows_a_project_local_hooks_path(self) -> None:
         self._init_repo()
@@ -525,6 +525,20 @@ class TestInstall(_ScratchCase):
         report: Report = self._uninstall()
         self.assertEqual(_statuses(report)["gitignore"], "kept")
         self.assertEqual(gitignore.read_bytes(), f"{IGNORE_LINE}\ncoverage/\n".encode())
+
+    def test_a_leading_space_pattern_does_not_count_as_present(self) -> None:
+        # git keeps a leading space as part of the pattern, so " .bench/"
+        # ignores nothing Bench writes; install must still append its line.
+        (self.project / ".gitignore").write_bytes(b" .bench/\n")
+        report: Report = self._install()
+        self.assertEqual(_statuses(report)["gitignore"], "written")
+        self.assertEqual((self.project / ".gitignore").read_bytes(), f" .bench/\n{IGNORE_LINE}\n".encode())
+        # Trailing spaces are trimmed by git, so that variant does count.
+        other: Path = self.tmp / "other"
+        other.mkdir()
+        (other / ".gitignore").write_bytes(b".bench/   \n")
+        second: Report = install(other, resources=self.resources, interpreter=self.interpreter)
+        self.assertEqual(_statuses(second)["gitignore"], "unchanged")
 
     def test_gitignore_directory_is_refused_before_any_write(self) -> None:
         (self.project / ".gitignore").mkdir()
@@ -738,11 +752,46 @@ class TestUninstall(_ScratchCase):
         self._git("config", "core.hooksPath", elsewhere.as_posix())
         report: Report = self._install()
         self.assertEqual(_statuses(report)["guard"], "skipped")
-        self.assertEqual(self._receipt()["guard"]["path"], ".git/hooks/pre-commit")
+        self.assertEqual([g["path"] for g in self._receipt()["guards"]], [".git/hooks/pre-commit"])
         self._git("config", "--unset", "core.hooksPath")
         removal: Report = self._uninstall()
         self.assertEqual(_statuses(removal)["guard"], "removed")
         self.assertFalse(self.guard_path.exists())
+
+    def test_every_guard_written_across_hooks_path_changes_is_removed(self) -> None:
+        # First install writes .git/hooks/pre-commit; the project then points
+        # core.hooksPath at .githooks and reinstalls, which writes a second
+        # guard. Both are Bench's and both must come out.
+        self._init_repo()
+        self._install()
+        self._git("config", "core.hooksPath", ".githooks")
+        report: Report = self._install()
+        self.assertEqual(_statuses(report)["guard"], "written")
+        self.assertEqual(
+            sorted(g["path"] for g in self._receipt()["guards"]),
+            [".git/hooks/pre-commit", ".githooks/pre-commit"],
+        )
+        removal: Report = self._uninstall()
+        self.assertEqual(_statuses(removal)["guard"], "removed")
+        self.assertFalse(self.guard_path.exists())
+        self.assertFalse((self.project / ".githooks" / "pre-commit").exists())
+
+    def test_env_claim_is_dropped_once_the_project_removed_the_key(self) -> None:
+        # Install added BENCH_PROVIDER; the project deleted it; a reinstall
+        # without --provider must not keep claiming it, so a value the
+        # project later sets itself survives uninstall.
+        self._install(provider="claude_code")
+        settings: dict = self._settings()
+        del settings["env"]["BENCH_PROVIDER"]
+        self._write_settings(settings)
+        self._install()
+        self.assertEqual(self._receipt()["env_added"], {})
+        settings = self._settings()
+        settings["env"] = {"BENCH_PROVIDER": "claude_code"}
+        self._write_settings(settings)
+        removal: Report = self._uninstall()
+        self.assertEqual(_statuses(removal)["env"], "unchanged")
+        self.assertEqual(self._settings()["env"], {"BENCH_PROVIDER": "claude_code"})
 
     def test_a_guard_replaced_by_a_symlink_is_kept_and_its_target_survives(self) -> None:
         self._init_repo()
@@ -775,7 +824,7 @@ class TestUninstall(_ScratchCase):
         elsewhere.write_bytes(_GUARD_BYTES)
         receipt: dict = self._receipt()
         # A recorded path that climbs out of the project with ".." is refused.
-        receipt["guard"] = {"path": "../elsewhere/pre-commit", "sha256": hashlib.sha256(_GUARD_BYTES).hexdigest()}
+        receipt["guards"] = [{"path": "../elsewhere/pre-commit", "sha256": hashlib.sha256(_GUARD_BYTES).hexdigest()}]
         self.receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
         report: Report = self._uninstall()
         self.assertEqual(_statuses(report)["guard"], "kept")

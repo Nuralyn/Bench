@@ -345,7 +345,10 @@ def _ignore_plan(
         and bool(previous_appended)
         and existing.endswith(previous_appended)
     )
-    if any(line.strip() in _IGNORE_EQUIVALENTS for line in existing.splitlines()):
+    # git trims only unescaped trailing spaces from a pattern; a leading space
+    # is part of it, so " .bench/" ignores nothing Bench writes and must not
+    # count as present.
+    if any(line.rstrip(" ") in _IGNORE_EQUIVALENTS for line in existing.splitlines()):
         return "unchanged", None, False, continuous
     newline: str = "\r\n" if "\r\n" in existing else "\n"
     separator: str = "" if not existing or existing.endswith("\n") else newline
@@ -507,7 +510,7 @@ def _guard_receipt(
     previous: dict[str, Any],
     project: Path,
     source: bytes,
-) -> dict[str, str] | None:
+) -> list[dict[str, str]]:
     """The receipt's guard record: a guard install wrote now, or one an
     earlier receipt already claimed. An identical file nobody claimed stays
     unclaimed, since ownership is recorded, never inferred from content.
@@ -515,20 +518,33 @@ def _guard_receipt(
     The path is recorded relative to the project, so a repository that is
     moved or renamed before ``bench uninstall`` still finds its guard.
     """
-    previous_guard: Any = previous.get("guard")
+    # Every guard an earlier run installed is still Bench's, whether this
+    # run's guard step was skipped (the hooks directory moved, or holds
+    # another tool's hook) or wrote a second guard at a new hooks path, so
+    # earlier records are kept and this run's is added beside them.
+    records: list[dict[str, str]] = [
+        dict(record)
+        for record in _guard_record_list(previous)
+        if isinstance(record.get("path"), str)
+    ]
     if guard_target is None:
-        # The guard step was skipped this run (the hooks directory moved, or
-        # holds another tool's hook). A guard an earlier run installed is
-        # still Bench's, so its record is kept for uninstall to act on.
-        return dict(previous_guard) if isinstance(previous_guard, dict) else None
-    if guard_status != "written" and not isinstance(previous_guard, dict):
-        return None
+        return records
+    path: str = guard_target.relative_to(project).as_posix()
+    claimed_before: bool = any(record.get("path") == path for record in records)
+    if guard_status != "written" and not claimed_before:
+        return records
     # The digest is of the bytes install writes (or found identical), so the
     # record is correct even though the receipt is written before the guard.
-    return {
-        "path": guard_target.relative_to(project).as_posix(),
-        "sha256": _sha256(source),
-    }
+    current: dict[str, str] = {"path": path, "sha256": _sha256(source)}
+    return [record for record in records if record.get("path") != path] + [current]
+
+
+def _guard_record_list(receipt: dict[str, Any]) -> list[dict[str, Any]]:
+    """The receipt's guard records as a list, whatever shape was recorded."""
+    recorded: Any = receipt.get("guards")
+    if isinstance(recorded, list):
+        return [record for record in recorded if isinstance(record, dict)]
+    return []
 
 
 def _carry(previous: dict[str, Any], key: str, now: bool, continuous: bool) -> bool:
@@ -590,7 +606,7 @@ def _build_receipt(plan: _Plan, previous: dict[str, Any], project: Path) -> dict
             previous, "gitignore_created", plan.ignore_created, plan.ignore_continuous
         ),
         "gitignore_appended": appended,
-        "guard": _guard_receipt(
+        "guards": _guard_receipt(
             plan.guard_target, plan.guard_status, previous, project, plan.guard_source
         ),
     }
@@ -635,7 +651,15 @@ def install(
     before: str = json.dumps(settings, sort_keys=True)
     command: str = hook_command(found.hook_script, python)
     hook_status: str = _register_hook(settings, command, settings_path)
-    env_added: dict[str, str] = _str_mapping(previous.get("env_added"))
+    # A key an earlier run added but the project has since removed is no
+    # longer install's: if the project later sets the same value itself,
+    # uninstall must not take it. Only keys still present carry over.
+    current_env: Any = settings.get("env")
+    env_added: dict[str, str] = {
+        key: value
+        for key, value in _str_mapping(previous.get("env_added")).items()
+        if isinstance(current_env, dict) and key in current_env
+    }
     provider_status: str | None = None
     if provider is not None:
         provider_status = _apply_provider(settings, provider, env_added, settings_path)
@@ -838,6 +862,23 @@ def _remove_recorded_guard(project: Path, record: Any) -> tuple[str, str]:
     return "removed", str(target)
 
 
+def _remove_recorded_guards(project: Path, receipt: dict[str, Any]) -> tuple[str, str]:
+    """Apply ``_remove_recorded_guard`` to every recorded guard. The step is
+    "removed" when at least one came out; every other outcome is listed."""
+    records: list[dict[str, Any]] = _guard_record_list(receipt)
+    if not records:
+        return "unchanged", "none recorded by install"
+    outcomes: list[tuple[str, str]] = [
+        _remove_recorded_guard(project, record) for record in records
+    ]
+    removed: list[str] = [detail for status, detail in outcomes if status == "removed"]
+    others: list[str] = [
+        f"{status}: {detail}" for status, detail in outcomes if status != "removed"
+    ]
+    detail: str = "; ".join(removed + others)
+    return ("removed" if removed else outcomes[0][0]), detail
+
+
 def uninstall(
     project: Path,
     environ: Mapping[str, str] | None = None,
@@ -895,7 +936,7 @@ def uninstall(
     ignore_status, ignore_detail = _remove_ignore_suffix(target, receipt, receipt_path)
     report.add("gitignore", ignore_status, ignore_detail)
 
-    guard_status, guard_detail = _remove_recorded_guard(target, receipt.get("guard"))
+    guard_status, guard_detail = _remove_recorded_guards(target, receipt)
     report.add("guard", guard_status, guard_detail)
 
     try:
