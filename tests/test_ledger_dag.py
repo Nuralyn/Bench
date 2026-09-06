@@ -8,13 +8,21 @@ conflict-free and the next governed edit reconciles the fork.
 Run: python -m unittest tests.test_ledger_dag -v
 """
 
+import contextlib
+import io
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
+import textwrap
+import threading
+import time
+import traceback
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 _REPO_ROOT: Path = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
@@ -23,7 +31,9 @@ if str(_REPO_ROOT) not in sys.path:
 import ledger.verify as verify_module  # noqa: E402
 from ledger.chain import (  # noqa: E402
     ENTRIES_DIRNAME,
+    LOCK_FILENAME,
     LedgerReadError,
+    _append_lock,
     append_entry,
     compute_entry_hash,
     compute_tips,
@@ -312,6 +322,253 @@ class ConstantAgreementTests(unittest.TestCase):
         writer's definitions — so this test is what keeps the two in step.
         """
         self.assertEqual(ENTRIES_DIRNAME, verify_module._ENTRIES_DIRNAME)
+
+
+# A real second process, not a thread: the lock is a file lock, and the race
+# it closes is between two Claude Code sessions on one machine.
+_APPENDER: str = textwrap.dedent(
+    """
+    import sys
+    sys.path.insert(0, sys.argv[1])
+    from ledger.chain import append_entry
+    for index in range(int(sys.argv[4])):
+        append_entry(
+            {
+                "verdict": "PASS",
+                "constitution_hash": "abc123",
+                "change": {
+                    "file": f"{sys.argv[3]}-{index}.py",
+                    "tool": "Write",
+                    "diff_summary": {},
+                },
+            },
+            path=sys.argv[2],
+        )
+    """
+)
+
+
+# Holds the chain's lock from a second process until told to let go.
+_HOLDER: str = textwrap.dedent(
+    """
+    import sys
+    import time
+    from pathlib import Path
+    sys.path.insert(0, sys.argv[1])
+    from ledger.chain import _append_lock
+    held, release = Path(sys.argv[3]), Path(sys.argv[4])
+    with _append_lock(Path(sys.argv[2])):
+        held.write_text("x", encoding="utf-8")
+        deadline = time.monotonic() + 30
+        while not release.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+    """
+)
+
+
+class AppendLockTests(unittest.TestCase):
+    """Two sessions appending to one chain at once must not fork it.
+
+    Without the lock, both read the same tips and both write, and the chain
+    ends with two tips that the next append has to reconcile. With it, the
+    appends serialise: one tip, every entry present, and every append after
+    the first finds the cache the one before it wrote.
+    """
+
+    def setUp(self) -> None:
+        self._tmp: str = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self._tmp, True)
+        self._ledger: str = os.path.join(self._tmp, "bench-ledger.json")
+        self._dir: Path = Path(self._tmp)
+
+    def test_two_processes_appending_fifty_each_end_with_one_tip(
+        self,
+    ) -> None:
+        procs: list[subprocess.Popen[str]] = [
+            subprocess.Popen(
+                [
+                    sys.executable,
+                    "-c",
+                    _APPENDER,
+                    str(_REPO_ROOT),
+                    self._ledger,
+                    tag,
+                    "50",
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            for tag in ("a", "b")
+        ]
+        outputs: list[tuple[str, str]] = [
+            proc.communicate(timeout=180) for proc in procs
+        ]
+        for proc, (_, err) in zip(procs, outputs, strict=True):
+            self.assertEqual(proc.returncode, 0, err)
+
+        result: dict = verify_chain(self._ledger)
+        self.assertTrue(result["valid"], result.get("message"))
+        self.assertEqual(result["entries"], 100)
+        self.assertEqual(len(result["tips"]), 1)
+        # Serialised appends never see a stale cache: the listing and the
+        # cache are always read together under the lock.
+        for _, err in outputs:
+            self.assertNotIn("rescanning", err)
+        self.assertTrue((self._dir / LOCK_FILENAME).is_file())
+
+    def _start_holder(self) -> tuple[subprocess.Popen[str], Path]:
+        """Start a process holding the chain's lock; return it and the file
+        whose creation tells it to let go. Blocks until the lock is held."""
+        held: Path = self._dir / "held"
+        release: Path = self._dir / "release"
+        holder: subprocess.Popen[str] = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                _HOLDER,
+                str(_REPO_ROOT),
+                str(self._dir),
+                str(held),
+                str(release),
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        deadline: float = time.monotonic() + 30
+        while not held.exists():
+            if holder.poll() is not None or time.monotonic() >= deadline:
+                release.write_text("x", encoding="utf-8")
+                _, err = holder.communicate(timeout=60)
+                self.fail(f"holder never locked: {err}")
+            time.sleep(0.01)
+        return holder, release
+
+    def test_an_append_waits_for_a_lock_held_by_another_process(self) -> None:
+        """A governed edit's receipt is delayed, not lost. While it waits it
+        says so on stderr at the heartbeat interval, naming the lock."""
+        holder, release = self._start_holder()
+        try:
+            def release_soon() -> None:
+                time.sleep(0.6)
+                release.write_text("x", encoding="utf-8")
+
+            releaser: threading.Thread = threading.Thread(target=release_soon)
+            releaser.start()
+            stderr: io.StringIO = io.StringIO()
+            started: float = time.monotonic()
+            with (
+                patch("ledger.chain._LOCK_HEARTBEAT_SECONDS", 0.1),
+                contextlib.redirect_stderr(stderr),
+            ):
+                entry: dict = append_entry(_result(), path=self._ledger)
+            waited: float = time.monotonic() - started
+            releaser.join(timeout=30)
+        finally:
+            release.write_text("x", encoding="utf-8")
+            _, err = holder.communicate(timeout=60)
+        self.assertEqual(holder.returncode, 0, err)
+
+        self.assertGreaterEqual(waited, 0.4, "the append did not wait")
+        self.assertEqual(entry["previous_hash"], "GENESIS")
+        self.assertIn("waiting for the append lock", stderr.getvalue())
+        self.assertIn(LOCK_FILENAME, stderr.getvalue())
+
+    def test_a_bounded_acquisition_is_refused_while_another_process_holds_it(
+        self,
+    ) -> None:
+        """The bounded form retirement uses: fail closed, nothing written."""
+        holder, release = self._start_holder()
+        try:
+            with self.assertRaises(LedgerReadError) as caught:
+                with _append_lock(self._dir, timeout=0.2):
+                    pass  # reaching here means a held lock was acquired
+        finally:
+            release.write_text("x", encoding="utf-8")
+            _, err = holder.communicate(timeout=60)
+        self.assertEqual(holder.returncode, 0, err)
+        self.assertIn("not acquired within 0.2s", str(caught.exception))
+
+    def test_another_thread_waits_rather_than_re_entering(self) -> None:
+        """Re-entry is per thread, so a second thread waits like a process."""
+        outcome: dict[str, object] = {}
+
+        def try_append() -> None:
+            started: float = time.monotonic()
+            outcome["entry"] = append_entry(_result(), path=self._ledger)
+            outcome["waited"] = time.monotonic() - started
+
+        with _append_lock(self._dir):
+            worker: threading.Thread = threading.Thread(target=try_append)
+            worker.start()
+            time.sleep(0.5)
+            # Still held here, so the worker must not have got through.
+            self.assertNotIn("entry", outcome)
+        worker.join(timeout=30)
+        self.assertFalse(worker.is_alive())
+
+        self.assertIn("entry", outcome)
+        self.assertGreaterEqual(float(str(outcome["waited"])), 0.4)
+
+    @unittest.skipUnless(hasattr(os, "fork"), "fork is POSIX only")
+    def test_a_forked_child_does_not_inherit_the_right_to_re_enter(
+        self,
+    ) -> None:
+        """The child shares the holder's descriptor, and with it the OS lock,
+        but it must not share the holder's re-entrancy: its first append has
+        to contend for the file like any other process, and be refused while
+        the parent holds it."""
+        with _append_lock(self._dir):
+            pid: int = os.fork()
+            if pid == 0:
+                code: int = 0
+                try:
+                    with _append_lock(self._dir, timeout=0.2):
+                        code = 5  # re-entered: the defect this test exists for
+                except LedgerReadError:
+                    code = 3
+                except BaseException:
+                    traceback.print_exc()
+                    code = 4
+                os._exit(code)
+            _, status = os.waitpid(pid, 0)
+
+        self.assertEqual(os.waitstatus_to_exitcode(status), 3)
+
+    def test_the_lock_is_re_entrant_within_a_thread(self) -> None:
+        """Retirement holds the lock and appends the anchor inside it."""
+        with _append_lock(self._dir):
+            entry: dict = append_entry(_result(), path=self._ledger)
+        self.assertEqual(entry["previous_hash"], "GENESIS")
+
+        # And the outermost exit released it: a bounded acquisition, which
+        # would be refused if the lock were still held, goes straight in.
+        with _append_lock(self._dir, timeout=0.2):
+            second: dict = append_entry(_result("two.py"), path=self._ledger)
+        self.assertEqual(second["previous_hash"], [entry["entry_hash"]])
+
+    def test_the_lock_is_released_after_a_refused_append(self) -> None:
+        Path(self._ledger).write_text("{not json", encoding="utf-8")
+        refused: dict = _result()
+        with self.assertRaises(LedgerReadError):
+            append_entry(refused, path=self._ledger)
+        os.remove(self._ledger)
+
+        # A lock left held by the refusal would make this bounded
+        # acquisition raise instead of going straight in.
+        with _append_lock(self._dir, timeout=0.2):
+            entry: dict = append_entry(_result(), path=self._ledger)
+
+        self.assertEqual(entry["previous_hash"], "GENESIS")
+
+    def test_the_lock_file_is_empty_and_survives_appends(self) -> None:
+        append_entry(_result("one.py"), path=self._ledger)
+        append_entry(_result("two.py"), path=self._ledger)
+
+        lock: Path = self._dir / LOCK_FILENAME
+        self.assertTrue(lock.is_file())
+        self.assertEqual(lock.stat().st_size, 0)
 
 
 if __name__ == "__main__":

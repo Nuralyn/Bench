@@ -27,20 +27,32 @@ Beside ``entries/`` sits ``tip-cache.json``, a derived record of the current
 tips that lets an append validate only the entries it will link to instead of
 re-reading the whole chain. It is never authoritative (see
 ``TIP_CACHE_FILENAME``): a stale, missing, or doubtful cache falls back to the
-full scan, and the auditor does not read it at all.
+full scan, and the auditor does not read it at all. ``append.lock`` beside
+them serialises appends across processes (see ``LOCK_FILENAME``), so two
+sessions on one machine cannot fork the chain by both reading the tips
+before either writes.
 
 This module only records; independent validation lives in ``verify.py``.
 """
 
+import contextlib
 import hashlib
 import json
 import os
 import sys
 import tempfile
+import threading
+import time
 import uuid
+from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+if sys.platform == "win32":
+    import msvcrt
+else:
+    import fcntl
 
 from utils.project import project_root
 
@@ -691,6 +703,143 @@ def _write_tip_cache(
         )
 
 
+LOCK_FILENAME: str = "append.lock"
+"""Lock file beside ``entries/`` that serialises appends to one chain.
+
+An append reads the tips and then writes an entry naming them. Two sessions
+on one machine that both read before either writes both name the same tips,
+and the chain forks. Forks left by a git merge are a tolerated state that
+the next append reconciles; a fork manufactured on one machine by two
+processes racing is not, so the whole append runs under this lock. The lock
+is exclusive across processes (``fcntl.flock`` on POSIX, ``msvcrt.locking``
+on Windows) and is released by the operating system when its holder exits,
+so a crashed holder cannot leave the chain locked.
+
+The file is empty and is never unlinked. Deleting a lock file that another
+process may already have opened lets two holders lock two different inodes
+under one path, which is the classic way a file lock stops locking. Like the
+tip cache it is not a ledger segment: retirement neither archives nor moves
+it, and a fresh clone has none. Retirement does hold it, across its whole
+mutation window from the archive copy through the anchor append, so a
+governed edit in another session waits for the retirement rather than
+landing inside it (see ``retire.execute_retirement``).
+"""
+_LOCK_POLL_SECONDS: float = 0.05
+_LOCK_HEARTBEAT_SECONDS: float = 30.0
+
+
+def _try_lock(fd: int) -> None:
+    """Take the exclusive lock on ``fd`` without blocking, or raise OSError."""
+    if sys.platform == "win32":
+        msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+    else:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def _unlock(fd: int) -> None:
+    """Release the lock on ``fd``; closing the descriptor would too."""
+    if sys.platform == "win32":
+        msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+    else:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+
+
+_HELD_LOCKS: set[tuple[str, int, int]] = set()
+"""``(resolved directory, process id, thread id)`` keys of locks held now.
+
+The lock is re-entrant within a thread, which retirement needs: it holds
+the lock across its whole mutation window and appends the anchor through
+``append_entry`` inside it. A nested acquisition by the thread that already
+holds the lock yields at once, and the operating-system lock is taken and
+released by the outermost holder only. The thread is part of the key so a
+second thread in the same process, if one ever appears, contends for the
+file like a second process would instead of slipping past. The process id
+is part of it so a child forked while the lock is held, which inherits this
+set and on POSIX usually the same thread id, contends too: it shares the
+holder's descriptor, not the holder's right to re-enter.
+"""
+
+
+@contextlib.contextmanager
+def _append_lock(
+    directory: Path, *, timeout: float | None = None
+) -> Iterator[None]:
+    """Hold the chain's append lock (see ``LOCK_FILENAME``) for the block.
+
+    Acquisition polls a non-blocking lock, which behaves the same on both
+    platforms. With ``timeout`` unset, the default for a governed edit's
+    append, the wait lasts as long as another process holds the lock: the
+    operating system releases a dead holder's lock at once, so the wait is
+    bounded by the holder's life, and a live holder is always making
+    progress (another append takes tens of milliseconds; a retirement of a
+    large chain can take minutes). A fixed deadline would instead refuse the
+    append and lose the receipt exactly when a retirement runs long. A wait
+    that reaches ``_LOCK_HEARTBEAT_SECONDS`` is reported to stderr and again
+    at that interval, naming the lock file, so a stall is legible (C-001).
+
+    With ``timeout`` set, the wait is bounded and ``LedgerReadError`` is
+    raised when it expires. Retirement acquires this way: a human is
+    attending it and can retry, and the only thing it ever waits on is an
+    append.
+
+    The descriptor is closed on every exit path, which releases the lock
+    even if the explicit unlock could not. Re-entry from the thread that
+    already holds the lock is a no-op (see ``_HELD_LOCKS``).
+    """
+    key: tuple[str, int, int] = (
+        str(directory.resolve()),
+        os.getpid(),
+        threading.get_ident(),
+    )
+    if key in _HELD_LOCKS:
+        yield
+        return
+
+    lock_path: Path = directory / LOCK_FILENAME
+    try:
+        fd: int = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+    except OSError as e:
+        raise LedgerReadError(f"cannot open append lock {lock_path}: {e}") from e
+    try:
+        started: float = time.monotonic()
+        next_note: float = started + _LOCK_HEARTBEAT_SECONDS
+        while True:
+            try:
+                _try_lock(fd)
+                break
+            except OSError as e:
+                waited: float = time.monotonic() - started
+                if timeout is not None and waited >= timeout:
+                    raise LedgerReadError(
+                        f"append lock {lock_path} not acquired within "
+                        f"{timeout:g}s: {e}"
+                    ) from e
+                if time.monotonic() >= next_note:
+                    print(
+                        f"[bench ledger] waiting for the append lock "
+                        f"{lock_path}, held by another process for "
+                        f"{waited:.0f}s so far",
+                        file=sys.stderr,
+                    )
+                    next_note = time.monotonic() + _LOCK_HEARTBEAT_SECONDS
+                time.sleep(_LOCK_POLL_SECONDS)
+        _HELD_LOCKS.add(key)
+        try:
+            yield
+        finally:
+            _HELD_LOCKS.discard(key)
+            try:
+                _unlock(fd)
+            except OSError as e:
+                print(
+                    f"[bench ledger] append lock {lock_path} not released "
+                    f"explicitly ({e}); closing the descriptor releases it",
+                    file=sys.stderr,
+                )
+    finally:
+        os.close(fd)
+
+
 def _order_entries(legacy: list[dict], new: list[dict]) -> list[dict]:
     """Legacy entries in stored order, then new entries topologically.
 
@@ -789,13 +938,33 @@ def append_entry(
     drift.
 
     Returns the full new entry (including its computed ``entry_hash``).
+
+    The whole append, from reading the tips through the atomic rename of
+    the entry file and the cache write, runs under the chain's lock (see
+    ``LOCK_FILENAME``), so two sessions appending to one chain at the same
+    time serialise instead of both naming the same tips and forking it. The
+    append waits for the lock as long as its holder lives, with a note to
+    stderr every ``_LOCK_HEARTBEAT_SECONDS``: a receipt delayed by a
+    retirement in another session is recorded; one refused by a deadline
+    would be lost.
     """
     # Resolve once and reuse, so the entry is read from and appended to the
     # same chain even if resolution inputs were to change mid-run.
     resolved: str = path if path is not None else resolve_ledger_path()
+    directory: Path = Path(resolved).parent
+    directory.mkdir(parents=True, exist_ok=True)
+    with _append_lock(directory):
+        return _append_under_lock(pipeline_result, resolved)
+
+
+def _append_under_lock(pipeline_result: dict, resolved: str) -> dict:
+    """The append proper; ``append_entry`` holds the chain's lock around it.
+
+    Nothing else calls this. Every read of the tips it performs, cached or
+    scanned, is made under the same lock as the write that names them.
+    """
     file_path: Path = Path(resolved)
     directory: Path = file_path.parent
-    directory.mkdir(parents=True, exist_ok=True)
 
     # Strict on the write path: appending onto a ledger that cannot be fully
     # read risks a second genesis or a lost parent. The frozen array is

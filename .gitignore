@@ -45,6 +45,7 @@ ledger/bench-ledger.json
 ledger/ledger-meta.json
 ledger/entries/
 ledger/tip-cache.json
+ledger/append.lock
 
 # IDE / editor
 .idea/

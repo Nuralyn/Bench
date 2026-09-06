@@ -28,6 +28,7 @@ optional here for exactly that reason: the first retirement finds all three, and
 every retirement after it finds only the entries directory.
 """
 
+import contextlib
 import os
 import shutil
 import sys
@@ -40,6 +41,8 @@ from ledger.chain import (
     ANCHOR_VERDICT,
     ENTRIES_DIRNAME,
     META_FILENAME,
+    LedgerReadError,
+    _append_lock,
     append_entry,
     resolve_ledger_path,
 )
@@ -52,6 +55,17 @@ from utils.project import project_root
 
 ANCHOR_TOOL: str = "ChainRetirement"
 """``change.tool`` on an anchor entry, matching the 2026-07-24 reference."""
+
+_LOCK_WAIT_SECONDS: float = 30.0
+"""How long a retirement waits for the chain's append lock before refusing.
+
+A governed edit's append waits for the lock as long as its holder lives,
+because a refused append is a lost receipt. A retirement is different: a
+human is attending it and can retry, and the only thing it ever waits on is
+an append, which holds the lock for tens of milliseconds. A wait this long
+means something else has the file, and refusing with the lock named is more
+useful to that human than waiting.
+"""
 
 _GENESIS_MARKER: str = "GENESIS"
 """Re-declared locally rather than imported from ``chain``, as ``verify.py``
@@ -598,13 +612,16 @@ def _check_staged_matches(
 ) -> None:
     """Re-check the staged chain against the archive, restoring on drift.
 
-    A governance run in another session can append between the archive
-    verification and the segments being moved aside. Under the old sequential
-    delete that receipt was destroyed without ever appearing in the archive or
-    in the anchor's count, which is precisely the removal of an entry C-008
-    forbids without exception. Comparing the staged chain against the archive
-    turns that race into a refusal, and because the segments were moved rather
-    than deleted, the refusal restores the chain exactly as it was.
+    A governance run in another session could once append between the
+    archive verification and the segments being moved aside. Under the old
+    sequential delete that receipt was destroyed without ever appearing in
+    the archive or in the anchor's count, which is precisely the removal of
+    an entry C-008 forbids without exception. Comparing the staged chain
+    against the archive turns that race into a refusal, and because the
+    segments were moved rather than deleted, the refusal restores the chain
+    exactly as it was. The append lock now keeps another Bench process out
+    of the window altogether; this check remains for a writer that does not
+    take the lock, such as an older Bench or a hand copy.
     """
     try:
         staged: dict = verify_chain(str(staging / Path(resolved).name))
@@ -652,18 +669,29 @@ def execute_retirement(
 
     1. Verify the live chain and refuse if it is unfit (``plan_retirement``).
     2. Enforce the human gate.
-    3. Copy the segments that exist into a fresh archive directory.
-    4. Verify the archive, and require its entry count and tip to equal the
-       live chain's. C-008(b): this happens BEFORE anything is removed.
-    5. Build and validate the anchor summary, while the originals still exist.
-    6. Only now remove the live segments.
-    7. Append the anchor through ``chain.append_entry``. The location is empty,
+    3. Take the chain's append lock (``chain._append_lock``) and hold it
+       through step 8. A governed edit in another session then waits for
+       the retirement to finish instead of landing inside it. The lock is
+       taken after the human gate, not before, because holding it through a
+       prompt would starve every other session's receipts for as long as
+       the human takes to answer. The wait for the lock is bounded by
+       ``_LOCK_WAIT_SECONDS`` and refuses beyond it, the chain untouched.
+    4. Copy the segments that exist into a fresh archive directory.
+    5. Verify the archive, and require its entry count and tip to equal the
+       live chain's as confirmed by the human. C-008(b): this happens BEFORE
+       anything is removed, and it is also what refuses a chain that changed
+       between the confirmation and the lock.
+    6. Build and validate the anchor summary, while the originals still exist.
+    7. Only now remove the live segments.
+    8. Append the anchor through ``chain.append_entry``. The location is empty,
        so ``previous_hash`` becomes GENESIS and the successor chain opens
-       through the audited write path with no second writer.
-    8. Validate the written entry and verify the successor chain.
+       through the audited write path with no second writer. The lock is
+       re-entrant within the process, so the append does not wait on the
+       retirement that holds it.
+    9. Validate the written entry and verify the successor chain.
 
-    Any failure in steps 1 through 5 leaves the live chain byte-identical. A
-    failure after step 6 cannot lose data, because the archive is already
+    Any failure in steps 1 through 6 leaves the live chain byte-identical. A
+    failure after step 7 cannot lose data, because the archive is already
     verified on disk, which is why the error names it.
     """
     clock: Callable[[], datetime] = now if now is not None else _utc_now
@@ -710,97 +738,117 @@ def execute_retirement(
 
     constitution_hash, sources, version = _load_constitution()
 
-    try:
-        _copy_segments(resolved, archive_root, segments)
-    except OSError as exc:
-        raise RetirementError(
-            f"refusing to retire: archiving to {archive_root} failed ({exc}). "
-            f"The live chain was not touched."
-        ) from exc
+    # Everything from the archive copy to the successor's verification runs
+    # under the chain's append lock, so no other process can append into the
+    # window. The checks below that detect an interleaved entry stay as
+    # defence in depth for a writer that does not take the lock.
+    with contextlib.ExitStack() as held:
+        try:
+            held.enter_context(
+                _append_lock(ledger_dir, timeout=_LOCK_WAIT_SECONDS)
+            )
+        except LedgerReadError as exc:
+            raise RetirementError(
+                f"refusing to retire: another process holds the chain's "
+                f"append lock ({exc}). Wait for it to finish and retry. The "
+                f"live chain was not touched."
+            ) from exc
 
-    archive_ledger: str = str(archive_root / Path(resolved).name)
-    archive_result: dict = verify_chain(archive_ledger)
-    _check_archive_matches(archive_result, facts, archive_root)
+        try:
+            _copy_segments(resolved, archive_root, segments)
+        except OSError as exc:
+            raise RetirementError(
+                f"refusing to retire: archiving to {archive_root} failed "
+                f"({exc}). The live chain was not touched."
+            ) from exc
 
-    summary: dict = build_anchor_summary(
-        facts,
-        archive_path=str(archive_root),
-        reason=stripped_reason,
-        human_decision=human_decision,
-        constitution_version=version,
-        remediation=remediation,
-        retired_at=clock().isoformat(),
-    )
-    defects: list[str] = validate_anchor_summary(summary)
-    if defects:
-        raise RetirementError(
-            "refusing to retire: the anchor would not conform to C-008(c): "
-            + "; ".join(defects)
-            + ". The live chain was not touched."
+        archive_ledger: str = str(archive_root / Path(resolved).name)
+        archive_result: dict = verify_chain(archive_ledger)
+        _check_archive_matches(archive_result, facts, archive_root)
+
+        summary: dict = build_anchor_summary(
+            facts,
+            archive_path=str(archive_root),
+            reason=stripped_reason,
+            human_decision=human_decision,
+            constitution_version=version,
+            remediation=remediation,
+            retired_at=clock().isoformat(),
         )
+        defects: list[str] = validate_anchor_summary(summary)
+        if defects:
+            raise RetirementError(
+                "refusing to retire: the anchor would not conform to "
+                "C-008(c): " + "; ".join(defects)
+                + ". The live chain was not touched."
+            )
 
-    # Move the live chain aside rather than deleting it, then re-check it
-    # against the archive now that nothing can be appended to it.
-    # _check_staged_matches restores the moved segments and refuses if an
-    # entry landed in between, so the race is a refusal rather than a loss.
-    staging: Path = ledger_dir / f".retiring-{started.strftime('%Y-%m-%dT%H%M%SZ')}"
-    moved: list[str] = _stage_segments(resolved, segments, staging)
-    _check_staged_matches(staging, resolved, moved, facts, archive_root)
+        # Move the live chain aside rather than deleting it, then re-check it
+        # against the archive now that nothing can be appended to it.
+        # _check_staged_matches restores the moved segments and refuses if an
+        # entry landed in between, so the race is a refusal rather than a
+        # loss.
+        staging: Path = (
+            ledger_dir / f".retiring-{started.strftime('%Y-%m-%dT%H%M%SZ')}"
+        )
+        moved: list[str] = _stage_segments(resolved, segments, staging)
+        _check_staged_matches(staging, resolved, moved, facts, archive_root)
 
-    anchor: dict = append_entry(
-        {
-            "verdict": ANCHOR_VERDICT,
-            "pipeline_error": False,
-            "constitution_hash": constitution_hash,
-            "constitution_sources": sources,
-            "change": {
-                "file": _project_relative(resolved),
-                "tool": ANCHOR_TOOL,
-                "diff_summary": summary,
+        anchor: dict = append_entry(
+            {
+                "verdict": ANCHOR_VERDICT,
+                "pipeline_error": False,
+                "constitution_hash": constitution_hash,
+                "constitution_sources": sources,
+                "change": {
+                    "file": _project_relative(resolved),
+                    "tool": ANCHOR_TOOL,
+                    "diff_summary": summary,
+                },
+                "challenger": {},
+                "defender": {},
+                "oracle": {},
             },
-            "challenger": {},
-            "defender": {},
-            "oracle": {},
-        },
-        path=resolved,
-    )
-
-    if anchor.get("previous_hash") != _GENESIS_MARKER:
-        # An entry landed between the chain being moved aside and the anchor
-        # being written, so that entry is the successor's genesis and the anchor
-        # merely links to it. verify_chain still passes on such a chain, and
-        # audit-retirement reads the first entry, so this would silently produce
-        # a successor whose opening record is not the retirement. Nothing is
-        # lost, but it must not pass unnoticed.
-        raise RetirementError(
-            f"the anchor did not open the successor chain: its previous_hash "
-            f"is {anchor.get('previous_hash')!r} rather than "
-            f"{_GENESIS_MARKER}, so another entry was appended first. The "
-            f"verified archive is at {archive_root} and the retired chain is "
-            f"staged at {staging}. Stop the concurrent writer before "
-            f"continuing."
+            path=resolved,
         )
 
-    entry_defects: list[str] = validate_anchor(anchor)
-    if entry_defects:
-        raise RetirementError(
-            f"the anchor was written but does not conform: "
-            f"{'; '.join(entry_defects)}. The verified archive is at "
-            f"{archive_root}."
-        )
+        if anchor.get("previous_hash") != _GENESIS_MARKER:
+            # An entry landed between the chain being moved aside and the
+            # anchor being written, so that entry is the successor's genesis
+            # and the anchor merely links to it. verify_chain still passes on
+            # such a chain, and audit-retirement reads the first entry, so
+            # this would silently produce a successor whose opening record is
+            # not the retirement. Nothing is lost, but it must not pass
+            # unnoticed.
+            raise RetirementError(
+                f"the anchor did not open the successor chain: its "
+                f"previous_hash is {anchor.get('previous_hash')!r} rather "
+                f"than {_GENESIS_MARKER}, so another entry was appended "
+                f"first. The verified archive is at {archive_root} and the "
+                f"retired chain is staged at {staging}. Stop the concurrent "
+                f"writer before continuing."
+            )
 
-    successor: dict = verify_chain(resolved)
-    if not successor.get("valid"):
-        raise RetirementError(
-            f"the anchor was written but the successor chain does not verify "
-            f"({successor.get('failure_type', 'unknown')}: "
-            f"{successor.get('message', 'no detail')}). The verified archive "
-            f"is at {archive_root}."
-        )
+        entry_defects: list[str] = validate_anchor(anchor)
+        if entry_defects:
+            raise RetirementError(
+                f"the anchor was written but does not conform: "
+                f"{'; '.join(entry_defects)}. The verified archive is at "
+                f"{archive_root}."
+            )
 
-    # Everything is verified and the anchor is in place, so the staged copy is
-    # now redundant with the archive and can go.
-    _discard_staging(staging)
+        successor: dict = verify_chain(resolved)
+        if not successor.get("valid"):
+            raise RetirementError(
+                f"the anchor was written but the successor chain does not "
+                f"verify ({successor.get('failure_type', 'unknown')}: "
+                f"{successor.get('message', 'no detail')}). The verified "
+                f"archive is at {archive_root}."
+            )
+
+        # Everything is verified and the anchor is in place, so the staged
+        # copy is now redundant with the archive and can go.
+        _discard_staging(staging)
 
     return {
         "archive_path": str(archive_root),

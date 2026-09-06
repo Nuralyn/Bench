@@ -12,8 +12,11 @@ Run: python -m unittest tests.test_retire -v
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
+import textwrap
+import time
 import unittest
 from pathlib import Path
 from typing import Any
@@ -26,9 +29,11 @@ if str(_REPO_ROOT) not in sys.path:
 from ledger import retire  # noqa: E402
 from ledger.chain import (  # noqa: E402
     ANCHOR_VERDICT,
+    LOCK_FILENAME,
     META_FILENAME,
     TIP_CACHE_FILENAME,
     append_entry,
+    load_ledger,
     resolve_entries_dir,
 )
 from ledger.retire import (  # noqa: E402
@@ -167,11 +172,12 @@ class HappyPathTests(RetirementTestCase):
         self.assertTrue(verify_chain(str(archive / "bench-ledger.json"))["valid"])
 
         # The successor chain is entries-only and opens at GENESIS.
-        # The tip cache beside entries/ is derived, not a segment: the anchor
-        # append rebuilt it for the successor, and retirement never archives it.
+        # The tip cache and the append lock beside entries/ are not segments:
+        # the anchor append rebuilt the cache for the successor and took the
+        # lock, and retirement neither archives nor moves either.
         self.assertEqual(
             sorted(p.name for p in self.ledger_dir.iterdir()),
-            ["entries", TIP_CACHE_FILENAME],
+            [LOCK_FILENAME, "entries", TIP_CACHE_FILENAME],
         )
         anchor: dict = result["anchor"]
         self.assertEqual(anchor["previous_hash"], "GENESIS")
@@ -209,11 +215,12 @@ class HappyPathTests(RetirementTestCase):
         """
         self.make_legacy_chain(legacy=3, new=1)
         self.retire()
-        # The tip cache beside entries/ is derived, not a segment: the anchor
-        # append rebuilt it for the successor, and retirement never archives it.
+        # The tip cache and the append lock beside entries/ are not segments:
+        # the anchor append rebuilt the cache for the successor and took the
+        # lock, and retirement neither archives nor moves either.
         self.assertEqual(
             sorted(p.name for p in self.ledger_dir.iterdir()),
-            ["entries", TIP_CACHE_FILENAME],
+            [LOCK_FILENAME, "entries", TIP_CACHE_FILENAME],
         )
         self.append("after.py")
 
@@ -579,7 +586,177 @@ class ProjectRelativeTests(unittest.TestCase):
         self.assertNotIn("\\", recorded)
 
 
+# A second process that waits for a signal, announces that it is about to
+# append, then appends. It is a real process because the append lock is a
+# file lock and the race it closes is between two sessions on one machine.
+_SIGNALLED_APPENDER: str = textwrap.dedent(
+    """
+    import sys
+    import time
+    from pathlib import Path
+    sys.path.insert(0, sys.argv[1])
+    from ledger.chain import append_entry
+    go, attempting = Path(sys.argv[3]), Path(sys.argv[4])
+    deadline = time.monotonic() + 60
+    while not go.exists():
+        if time.monotonic() > deadline:
+            sys.exit(3)
+        time.sleep(0.005)
+    attempting.write_text("x", encoding="utf-8")
+    for index in range(int(sys.argv[5])):
+        append_entry(
+            {
+                "verdict": "PASS",
+                "constitution_hash": "abc123",
+                "change": {
+                    "file": f"raced-{index}.py",
+                    "tool": "Write",
+                    "diff_summary": {},
+                },
+            },
+            path=sys.argv[2],
+        )
+    """
+)
+
+
+# Holds the chain's lock from a second process until told to let go.
+_LOCK_HOLDER: str = textwrap.dedent(
+    """
+    import sys
+    import time
+    from pathlib import Path
+    sys.path.insert(0, sys.argv[1])
+    from ledger.chain import _append_lock
+    held, release = Path(sys.argv[3]), Path(sys.argv[4])
+    with _append_lock(Path(sys.argv[2])):
+        held.write_text("x", encoding="utf-8")
+        deadline = time.monotonic() + 60
+        while not release.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+    """
+)
+
+
 class ConcurrencyTests(RetirementTestCase):
+    def test_retirement_refuses_while_another_process_holds_the_lock(
+        self,
+    ) -> None:
+        """Retirement's acquisition is bounded: a human is attending and can
+        retry, so a lock that stays held is a named refusal, not a wait, and
+        the chain is untouched."""
+        self.make_entries_only_chain(3)
+        before: dict[str, bytes] = self.snapshot()
+        held: Path = Path(self._tmp) / "held"
+        release: Path = Path(self._tmp) / "release"
+        holder: subprocess.Popen[str] = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                _LOCK_HOLDER,
+                str(_REPO_ROOT),
+                str(self.ledger_dir),
+                str(held),
+                str(release),
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        try:
+            deadline: float = time.monotonic() + 30
+            while not held.exists():
+                self.assertLess(time.monotonic(), deadline, "holder never locked")
+                time.sleep(0.01)
+            with mock.patch.object(retire, "_LOCK_WAIT_SECONDS", 0.2):
+                with self.assertRaises(RetirementError) as caught:
+                    self.retire()
+        finally:
+            release.write_text("x", encoding="utf-8")
+            _, err = holder.communicate(timeout=60)
+        self.assertEqual(holder.returncode, 0, err)
+
+        self.assertIn("append lock", str(caught.exception))
+        self.assertEqual(self.snapshot(), before)
+        self.assertFalse(Path(self.archive_dir).exists())
+
+    def test_an_append_from_another_process_cannot_interleave(self) -> None:
+        """The lock turns the race into a wait.
+
+        The retirement holds the append lock from the archive copy through
+        the anchor append. A second process is released into its append
+        once the lock is held and is confirmed to be attempting it while the
+        window is still open, so the only ways this passes are that the lock
+        made it wait, or that the retirement's own detection refused, and the
+        assertions below rule the second out: the retirement succeeds, the
+        archive holds exactly the entries that existed before, the anchor
+        opens the successor at GENESIS, and every raced append landed after
+        the anchor.
+        """
+        self.make_entries_only_chain(3)
+        go: Path = Path(self._tmp) / "go"
+        attempting: Path = Path(self._tmp) / "attempting"
+        child: subprocess.Popen[str] = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                _SIGNALLED_APPENDER,
+                str(_REPO_ROOT),
+                self.ledger,
+                str(go),
+                str(attempting),
+                "5",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        real_copy = retire._copy_segments
+
+        def release_then_copy(
+            ledger_path: str, destination: Path, segments: list[str]
+        ) -> None:
+            # The lock is already held here. Let the child into its append
+            # and wait until it says it is attempting one, then give it time
+            # to reach the lock, so the rest of the window runs with a
+            # writer contending for the chain.
+            go.write_text("x", encoding="utf-8")
+            deadline: float = time.monotonic() + 60
+            while not attempting.exists():
+                self.assertLess(
+                    time.monotonic(), deadline, "the child never attempted"
+                )
+                time.sleep(0.01)
+            time.sleep(0.3)
+            real_copy(ledger_path, destination, segments)
+
+        try:
+            with mock.patch.object(
+                retire, "_copy_segments", side_effect=release_then_copy
+            ):
+                result: dict = self.retire()
+        finally:
+            go.write_text("x", encoding="utf-8")
+            _, err = child.communicate(timeout=120)
+        self.assertEqual(child.returncode, 0, err)
+
+        self.assertEqual(result["archive_entries"], 3)
+        self.assertEqual(result["anchor"]["previous_hash"], "GENESIS")
+
+        after: dict = verify_chain(self.ledger)
+        self.assertTrue(after["valid"], after.get("message"))
+        self.assertEqual(after["entries"], 6)
+        self.assertEqual(len(after["tips"]), 1)
+        entries: list[dict] = load_ledger(self.ledger)
+        self.assertEqual(entries[0]["verdict"], ANCHOR_VERDICT)
+        self.assertEqual(
+            entries[1]["previous_hash"], [result["anchor"]["entry_hash"]]
+        )
+        self.assertEqual(
+            [entry["change"]["file"] for entry in entries[1:]],
+            [f"raced-{index}.py" for index in range(5)],
+        )
+
     """A governed edit landing mid-retirement must never cost an entry.
 
     Retirement reads the chain, archives it, and removes it, and those are not
@@ -707,11 +884,12 @@ class ConcurrencyTests(RetirementTestCase):
         result: dict = self.retire()
 
         self.assertEqual(self._staging_dirs(), [])
-        # The tip cache beside entries/ is derived, not a segment: the anchor
-        # append rebuilt it for the successor, and retirement never archives it.
+        # The tip cache and the append lock beside entries/ are not segments:
+        # the anchor append rebuilt the cache for the successor and took the
+        # lock, and retirement neither archives nor moves either.
         self.assertEqual(
             sorted(p.name for p in self.ledger_dir.iterdir()),
-            ["entries", TIP_CACHE_FILENAME],
+            [LOCK_FILENAME, "entries", TIP_CACHE_FILENAME],
         )
         archive_ledger: str = str(
             Path(result["archive_path"]) / "bench-ledger.json"
