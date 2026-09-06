@@ -239,11 +239,11 @@ class DashboardTests(unittest.TestCase):
         html_out: str = self._render(chain)
         # One select listing "all" first, then each Oracle model seen.
         self.assertIn('<select id="scope-model"', html_out)
-        self.assertIn('<option value="all">all models</option>', html_out)
+        self.assertIn('<option value="">all models</option>', html_out)
         self.assertIn('<option value="claude-opus-4-8">claude-opus-4-8</option>', html_out)
         self.assertIn('<option value="claude-sonnet-5">claude-sonnet-5</option>', html_out)
-        # The "all" table shows; the per-model tables are present but hidden.
-        self.assertIn('<div data-scope-model="all">', html_out)
+        # The aggregate table shows; the per-model tables are present but hidden.
+        self.assertIn('<div data-scope-model="">', html_out)
         self.assertIn('<div data-scope-model="claude-sonnet-5" hidden>', html_out)
         # The Sonnet-ruled table holds exactly the one vetoed entry.
         sonnet_table: str = html_out.split('<div data-scope-model="claude-sonnet-5" hidden>', 1)[1]

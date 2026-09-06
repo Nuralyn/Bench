@@ -400,15 +400,18 @@ _VERDICT_HEADERS: list[str] = [
 ]
 
 
+_ALL_MODELS_KEY: str = ""
+
+
 def _scope_model_select(labels: list[str]) -> str:
     """The control that switches the scope table between Oracle models.
 
-    One option per label from utils.stats.stats_by_scope_and_model, "all"
-    first; the page script shows the matching table and hides the rest.
+    One option per label, the aggregate (empty value) first; the page
+    script shows the matching table and hides the rest.
     """
     options: str = "".join(
         f'<option value="{html.escape(label)}">'
-        f'{html.escape("all models" if label == "all" else label)}</option>'
+        f'{html.escape("all models" if label == _ALL_MODELS_KEY else label)}</option>'
         for label in labels
     )
     return (
@@ -454,7 +457,7 @@ def _build_dashboard(entries: list[dict], project_root: str) -> str:
     deeper in the tree or a file outside it.
     """
     weeks: list[dict] = stats_by_week(entries)
-    scope_tables: dict[str, list[dict]] = stats_by_scope_and_model(entries, project_root)
+    all_scopes, scopes_by_model = stats_by_scope_and_model(entries, project_root)
     models: dict[str, dict[str, dict[str, int]]] = models_by_stage(entries)
     citations: list[dict] = citations_by_constraint(entries)
     tokens: dict[str, dict[str, int]] = tokens_by_stage(entries)
@@ -484,9 +487,15 @@ def _build_dashboard(entries: list[dict], project_root: str) -> str:
     week_rows: list[list[str]] = [
         [str(row.get("week", ""))] + _verdict_cells(row) for row in weeks
     ]
+    def _scope_cells(rows: list[dict]) -> list[list[str]]:
+        return [[str(row.get("scope", ""))] + _verdict_cells(row) for row in rows]
+
+    # The aggregate sits under the empty key, which no model label can be
+    # (utils.stats.stage_model_label never returns one), so a model named
+    # "all" cannot displace it.
     scope_rows_by_model: dict[str, list[list[str]]] = {
-        label: [[str(row.get("scope", ""))] + _verdict_cells(row) for row in rows]
-        for label, rows in scope_tables.items()
+        _ALL_MODELS_KEY: _scope_cells(all_scopes),
+        **{label: _scope_cells(rows) for label, rows in scopes_by_model.items()},
     }
     model_rows: list[list[str]] = [
         [stage, label, f"{figures['entries']:,}", f"{figures['overridden']:,}"]
@@ -546,7 +555,7 @@ def _build_dashboard(entries: list[dict], project_root: str) -> str:
         + "\n  "
         + "\n  ".join(
             f'<div data-scope-model="{html.escape(label)}"'
-            + ("" if label == "all" else " hidden")
+            + ("" if label == _ALL_MODELS_KEY else " hidden")
             + ">"
             + _table(["Scope"] + _VERDICT_HEADERS, rows, "No governed changes yet.")
             + "</div>"

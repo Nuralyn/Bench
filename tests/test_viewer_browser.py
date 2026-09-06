@@ -275,11 +275,11 @@ class ViewerBrowserTests(unittest.TestCase):
         # The fixture predates model recording: its adjudicated entries read
         # "unrecorded" and the anchor, which has no oracle, "not reached".
         select: Locator = self.page.locator("#scope-model")
-        self.assertEqual(select.input_value(), "all")
-        self.assertTrue(self.page.locator('[data-scope-model="all"]').is_visible())
+        self.assertEqual(select.input_value(), "")
+        self.assertTrue(self.page.locator('[data-scope-model=""]').is_visible())
         self.assertFalse(self.page.locator('[data-scope-model="unrecorded"]').is_visible())
         select.select_option("unrecorded")
-        self.assertFalse(self.page.locator('[data-scope-model="all"]').is_visible())
+        self.assertFalse(self.page.locator('[data-scope-model=""]').is_visible())
         self.assertTrue(self.page.locator('[data-scope-model="unrecorded"]').is_visible())
         cells: list[str] = self.page.locator(
             '[data-scope-model="unrecorded"] tbody td'

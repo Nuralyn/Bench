@@ -905,6 +905,20 @@ def cmd_ledger(show_all: bool = False, vetoes_only: bool = False) -> int:
     return 0
 
 
+def _models_line(entries: list[dict]) -> str:
+    """``stage label (entries[, n overridden])`` for every model a stage
+    recorded, semicolon-separated, stages in pipeline order."""
+    models: dict[str, dict[str, dict[str, int]]] = models_by_stage(entries)
+    parts: list[str] = []
+    for stage in ("challenger", "defender", "oracle"):
+        for label, figures in sorted(models[stage].items()):
+            overridden: str = (
+                f", {figures['overridden']} overridden" if figures["overridden"] else ""
+            )
+            parts.append(f"{stage} {label} ({figures['entries']}{overridden})")
+    return "; ".join(parts)
+
+
 def cmd_stats() -> int:
     """Print a governance summary: counts, top citation, integrity."""
     entries: list[dict] = load_ledger()
@@ -992,15 +1006,7 @@ def cmd_stats() -> int:
     # Which model each stage ran on, as the stages recorded it, with how
     # many entries came from a BENCH_<STAGE>_MODEL override. An override
     # is never silent: it is on the entry and it is here.
-    models: dict[str, dict[str, dict[str, int]]] = models_by_stage(entries)
-    parts: list[str] = []
-    for stage in ("challenger", "defender", "oracle"):
-        for label, figures in sorted(models[stage].items()):
-            overridden: str = (
-                f", {figures['overridden']} overridden" if figures["overridden"] else ""
-            )
-            parts.append(f"{stage} {label} ({figures['entries']}{overridden})")
-    print(f"Models by stage        : {'; '.join(parts)}")
+    print(f"Models by stage        : {_models_line(entries)}")
     print(f"Constitution hash      : {_short_hash(latest_cons_hash, 16)}")
     print(f"Ledger integrity       : {integrity}")
 

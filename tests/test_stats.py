@@ -17,7 +17,6 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from utils.stats import (  # noqa: E402
-    ALL_MODELS,
     MODEL_NOT_REACHED,
     MODEL_SKIPPED,
     MODEL_UNRECORDED,
@@ -740,16 +739,30 @@ class StageModelStatsTests(unittest.TestCase):
         entries[1]["change"] = {"file": "pipeline/oracle.py"}
         entries[1]["verdict"] = "VETO"
         entries[1]["oracle"]["verdict"] = "VETO"
-        tables = stats_by_scope_and_model(entries, "/proj")
-        self.assertEqual(list(tables), [ALL_MODELS, "claude-opus-4-8", "claude-sonnet-5"])
-        by_scope = {row["scope"]: row for row in tables["claude-sonnet-5"]}
+        aggregate, per_model = stats_by_scope_and_model(entries, "/proj")
+        self.assertEqual(list(per_model), ["claude-opus-4-8", "claude-sonnet-5"])
+        by_scope = {row["scope"]: row for row in per_model["claude-sonnet-5"]}
         self.assertEqual(by_scope["governance"]["vetoed"], 1)
         self.assertEqual(by_scope["other"]["adjudicated"], 0)
-        all_rows = {row["scope"]: row for row in tables[ALL_MODELS]}
+        all_rows = {row["scope"]: row for row in aggregate}
         self.assertEqual(all_rows["other"]["passed"], 1)
+        self.assertEqual(all_rows["governance"]["vetoed"], 1)
 
-    def test_empty_ledger_has_all_models_only(self) -> None:
-        self.assertEqual(list(stats_by_scope_and_model([], "/proj")), [ALL_MODELS])
+    def test_a_model_named_all_cannot_displace_the_aggregate(self) -> None:
+        # The resolver accepts any non-blank id, so "all" is a possible
+        # (if perverse) override; the aggregate must still cover every entry.
+        entries: list[dict] = [self._entry(), self._entry("all", override=True)]
+        aggregate, per_model = stats_by_scope_and_model(entries, "/proj")
+        self.assertEqual({row["scope"]: row["adjudicated"] for row in aggregate}, {"governance": 0, "other": 2})
+        self.assertEqual({row["scope"]: row["adjudicated"] for row in per_model["all"]}, {"governance": 0, "other": 1})
+
+    def test_an_empty_recorded_model_reads_as_unrecorded(self) -> None:
+        self.assertEqual(stage_model_label({"oracle": {"_model": ""}}, "oracle"), MODEL_UNRECORDED)
+
+    def test_empty_ledger_has_an_empty_aggregate_and_no_models(self) -> None:
+        aggregate, per_model = stats_by_scope_and_model([], "/proj")
+        self.assertEqual([row["scope"] for row in aggregate], ["governance", "other"])
+        self.assertEqual(per_model, {})
         self.assertEqual(models_by_stage([]), {"challenger": {}, "defender": {}, "oracle": {}})
 
 

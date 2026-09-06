@@ -192,18 +192,23 @@ def stats_by_scope(entries: list[dict], project_root: str) -> list[dict]:
 MODEL_UNRECORDED: str = "unrecorded"
 MODEL_SKIPPED: str = "no call"
 MODEL_NOT_REACHED: str = "not reached"
-ALL_MODELS: str = "all"
 
 
 def stage_model_label(entry: dict, stage: str) -> str:
-    """The model ``stage`` of ``entry`` ran on, as the stage recorded it."""
+    """The model ``stage`` of ``entry`` ran on, as the stage recorded it.
+
+    Never empty: a stage records a non-blank id or None, so an empty string
+    can only come from a hand-edited entry and is read as unrecorded.
+    """
     result: Any = entry.get(stage)
     if not isinstance(result, dict):
         return MODEL_NOT_REACHED
     if "_model" not in result:
         return MODEL_UNRECORDED
     model: Any = result["_model"]
-    return MODEL_SKIPPED if model is None else str(model)
+    if model is None:
+        return MODEL_SKIPPED
+    return str(model) or MODEL_UNRECORDED
 
 
 def models_by_stage(entries: list[dict]) -> dict[str, dict[str, dict[str, int]]]:
@@ -229,19 +234,22 @@ def models_by_stage(entries: list[dict]) -> dict[str, dict[str, dict[str, int]]]
 
 def stats_by_scope_and_model(
     entries: list[dict], project_root: str
-) -> dict[str, list[dict]]:
-    """``stats_by_scope`` for every Oracle model label seen, plus ALL_MODELS.
+) -> tuple[list[dict], dict[str, list[dict]]]:
+    """(``stats_by_scope`` over every entry, the same per Oracle model label).
 
     The Oracle is the stage that rules, so its model is the one a verdict
-    rate is attributed to. Keys are ALL_MODELS first, then labels sorted.
+    rate is attributed to. The aggregate travels beside the per-model map
+    rather than under a reserved key: a label is whatever string a stage
+    recorded, so any key chosen for the aggregate could be a model's name.
+    Labels are sorted.
     """
     groups: dict[str, list[dict]] = {}
     for entry in entries:
         groups.setdefault(stage_model_label(entry, "oracle"), []).append(entry)
-    tables: dict[str, list[dict]] = {ALL_MODELS: stats_by_scope(entries, project_root)}
-    for label in sorted(groups):
-        tables[label] = stats_by_scope(groups[label], project_root)
-    return tables
+    per_model: dict[str, list[dict]] = {
+        label: stats_by_scope(groups[label], project_root) for label in sorted(groups)
+    }
+    return stats_by_scope(entries, project_root), per_model
 
 
 def _parse_citation(citation: Any) -> tuple[str, bool] | None:
