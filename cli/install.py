@@ -42,6 +42,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -208,18 +209,38 @@ def _load_json_object(path: Path, what: str) -> dict[str, Any] | None:
     return data
 
 
+def _refuse_symlink(path: Path, what: str) -> None:
+    """Refuse to write through a symlink. A governed project is untrusted
+    input, and a link at any output path would redirect the write outside
+    the project the user named."""
+    if path.is_symlink():
+        raise InstallError(f"{what} {path} is a symlink; refusing to write through it")
+
+
 def _write_json(path: Path, data: dict[str, Any], what: str) -> None:
-    """Write via a sibling temp file and rename, so a crash mid-write cannot
-    leave a truncated file behind."""
+    """Write via an exclusively created sibling temp file and rename.
+
+    A crash mid-write cannot leave a truncated file, and because the temp
+    name is random and created with O_EXCL, a link planted at a predictable
+    name is never followed. Neither the file nor its directory may be a
+    symlink. A file install creates is owner-only; one it rewrites keeps its
+    mode, so a 0600 settings file does not come back 0644.
+    """
+    _refuse_symlink(path.parent, f"the directory holding {what}")
+    _refuse_symlink(path, what)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        tmp: Path = path.with_name(path.name + ".tmp")
-        tmp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-        if path.exists():
-            # Keep the original's mode: a 0600 settings file must not come
-            # back 0644 because it was rewritten through a temp file.
-            shutil.copymode(path, tmp)
-        os.replace(tmp, path)
+        fd, tmp_name = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=path.parent)
+        tmp: Path = Path(tmp_name)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(json.dumps(data, indent=2) + "\n")
+            if path.exists():
+                shutil.copymode(path, tmp)
+            os.replace(tmp, path)
+        except OSError:
+            tmp.unlink(missing_ok=True)
+            raise
     except OSError as exc:
         raise InstallError(f"cannot write {what} {path}: {exc}") from exc
 
@@ -494,6 +515,8 @@ def install(
     target: Path = _resolve_project(project)
     # Checked before anything is written, so a refusal leaves no half-install.
     _refuse_symlinked_gitignore(target / _GITIGNORE_NAME)
+    _refuse_symlink(target / ".claude", "the settings directory")
+    _refuse_symlink(target / ".bench", "the ledger directory")
     python: Path = interpreter if interpreter is not None else Path(sys.executable)
     report: Report = Report()
     receipt_path: Path = target / RECEIPT_RELPATH
@@ -503,7 +526,14 @@ def install(
     settings: dict[str, Any] = _load_json_object(settings_path, "settings") or {}
     before: str = json.dumps(settings, sort_keys=True)
     command: str = hook_command(found.hook_script, python)
-    report.add("hook", _register_hook(settings, command, settings_path), command)
+    hook_status: str = _register_hook(settings, command, settings_path)
+    report.add("hook", hook_status, command)
+    # Ownership is recorded, never inferred: a hook that already matched the
+    # generated command (a project wired by hand) is not claimed, so a later
+    # uninstall leaves it. A hook install wrote or rewrote is its own.
+    hook_record: dict[str, str] | None = None
+    if hook_status != "unchanged" or isinstance(previous.get("hook"), dict):
+        hook_record = {"command": command, "matcher": HOOK_MATCHER}
 
     env_added: dict[str, str] = _str_mapping(previous.get("env_added"))
     if provider is not None:
@@ -530,7 +560,7 @@ def install(
     receipt: dict[str, Any] = {
         "bench_version": _bench_version(),
         "installed_at": datetime.now(timezone.utc).isoformat(),
-        "hook": {"command": command, "matcher": HOOK_MATCHER},
+        "hook": hook_record,
         "env_added": env_added,
         "gitignore_line_added": line_added,
         "guard": guard_record,
@@ -696,14 +726,19 @@ def uninstall(
         )
     report: Report = Report()
 
-    hook_record: Any = receipt.get("hook")
-    command: str = (
-        str(hook_record.get("command", "")) if isinstance(hook_record, dict) else ""
-    )
     settings_path: Path = target / ".claude" / "settings.json"
     settings: dict[str, Any] = _load_json_object(settings_path, "settings") or {}
     before: str = json.dumps(settings, sort_keys=True)
-    hook_status, hook_detail = _remove_recorded_hook(settings, command)
+    hook_record: Any = receipt.get("hook")
+    if isinstance(hook_record, dict):
+        hook_status, hook_detail = _remove_recorded_hook(
+            settings, str(hook_record.get("command", ""))
+        )
+    else:
+        hook_status, hook_detail = (
+            "kept",
+            "the hook was present before install and was not written by it",
+        )
     report.add("hook", hook_status, hook_detail)
     env_status, env_detail = _remove_added_env(settings, _str_mapping(receipt.get("env_added")))
     report.add("env", env_status, env_detail)

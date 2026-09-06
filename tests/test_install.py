@@ -357,6 +357,46 @@ class TestInstall(_ScratchCase):
         self.assertEqual(pre[0]["hooks"], [{"type": "command", "command": "prettier --check"}])
         self.assertEqual(pre[1], {"matcher": HOOK_MATCHER, "hooks": [{"type": "command", "command": self.command}]})
 
+    def test_a_pre_existing_identical_hook_is_not_claimed(self) -> None:
+        # A project wired by hand to the exact command install would write:
+        # install changes nothing, so the receipt must not claim the hook and
+        # uninstall must leave it in place.
+        self._write_settings(
+            {"hooks": {"PreToolUse": [{"matcher": HOOK_MATCHER, "hooks": [{"type": "command", "command": self.command}]}]}}
+        )
+        report: Report = self._install()
+        self.assertEqual(_statuses(report)["hook"], "unchanged")
+        self.assertIsNone(self._receipt()["hook"])
+        removal: Report = self._uninstall()
+        self.assertEqual(_statuses(removal)["hook"], "kept")
+        self.assertEqual(self._settings()["hooks"]["PreToolUse"][0]["hooks"][0]["command"], self.command)
+
+    def test_a_planted_temp_symlink_is_not_followed(self) -> None:
+        victim: Path = self.tmp / "victim.txt"
+        victim.write_text("keep me", encoding="utf-8")
+        self.settings_path.parent.mkdir()
+        try:
+            (self.settings_path.parent / "settings.json.tmp").symlink_to(victim)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"symlinks unavailable here: {exc}")
+        self._install()
+        self.assertEqual(victim.read_text(encoding="utf-8"), "keep me")
+        self.assertTrue(self.settings_path.is_file())
+        self.assertFalse(self.settings_path.is_symlink())
+
+    def test_a_symlinked_settings_directory_is_refused_before_any_write(self) -> None:
+        outside: Path = self.tmp / "outside"
+        outside.mkdir()
+        try:
+            (self.project / ".claude").symlink_to(outside, target_is_directory=True)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"symlinks unavailable here: {exc}")
+        with self.assertRaises(InstallError) as ctx:
+            self._install()
+        self.assertIn("symlink", str(ctx.exception))
+        self.assertEqual(list(outside.iterdir()), [])
+        self.assertFalse((self.project / ".gitignore").exists())
+
     def test_several_bench_hooks_are_consolidated_into_one(self) -> None:
         self._write_settings(
             {
