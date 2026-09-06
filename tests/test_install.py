@@ -966,8 +966,8 @@ class TestDispatch(unittest.TestCase):
         text: str = out.getvalue()
         self.assertIn("bench <command>", text)
         self.assertIn("python -m cli <command>", text)
-        self.assertIn("install --project PATH", text)
-        self.assertIn("uninstall --project PATH", text)
+        self.assertIn("install [--project PATH]", text)
+        self.assertIn("uninstall [--project PATH]", text)
 
     def test_run_exits_with_main_result(self) -> None:
         with patch("cli.__main__.main", return_value=3):
