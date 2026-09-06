@@ -524,6 +524,54 @@ def _carry(previous: dict[str, Any], key: str, now: bool) -> bool:
     return now or bool(previous.get(key))
 
 
+@dataclass(frozen=True)
+class _Plan:
+    """Everything install decided before writing anything."""
+
+    hook_status: str
+    command: str
+    env_added: dict[str, str]
+    settings_existed: bool
+    claude_dir_existed: bool
+    ignore_text: str | None
+    ignore_created: bool
+    guard_status: str
+    guard_target: Path | None
+    guard_source: bytes
+
+
+def _build_receipt(plan: _Plan, previous: dict[str, Any], project: Path) -> dict[str, Any]:
+    """The receipt for ``plan``, carrying forward what earlier runs recorded.
+
+    Ownership is recorded, never inferred: a hook that already matched the
+    generated command (a project wired by hand) is not claimed, so a later
+    uninstall leaves it; a hook install wrote or rewrote is its own. The
+    appended .gitignore text is kept from the run that appended it.
+    """
+    hook_record: dict[str, str] | None = None
+    if plan.hook_status != "unchanged" or isinstance(previous.get("hook"), dict):
+        hook_record = {"command": plan.command, "matcher": HOOK_MATCHER}
+    appended: str | None = plan.ignore_text
+    if appended is None:
+        previous_appended: Any = previous.get("gitignore_appended")
+        appended = previous_appended if isinstance(previous_appended, str) else None
+    return {
+        "bench_version": _bench_version(),
+        "installed_at": datetime.now(timezone.utc).isoformat(),
+        "hook": hook_record,
+        "env_added": plan.env_added,
+        "settings_created": _carry(previous, "settings_created", not plan.settings_existed),
+        "claude_dir_created": _carry(
+            previous, "claude_dir_created", not plan.claude_dir_existed
+        ),
+        "gitignore_created": _carry(previous, "gitignore_created", plan.ignore_created),
+        "gitignore_appended": appended,
+        "guard": _guard_receipt(
+            plan.guard_target, plan.guard_status, previous, project, plan.guard_source
+        ),
+    }
+
+
 def install(
     project: Path,
     resources: Resources | None = None,
@@ -563,12 +611,6 @@ def install(
     before: str = json.dumps(settings, sort_keys=True)
     command: str = hook_command(found.hook_script, python)
     hook_status: str = _register_hook(settings, command, settings_path)
-    # Ownership is recorded, never inferred: a hook that already matched the
-    # generated command (a project wired by hand) is not claimed, so a later
-    # uninstall leaves it. A hook install wrote or rewrote is its own.
-    hook_record: dict[str, str] | None = None
-    if hook_status != "unchanged" or isinstance(previous.get("hook"), dict):
-        hook_record = {"command": command, "matcher": HOOK_MATCHER}
     env_added: dict[str, str] = _str_mapping(previous.get("env_added"))
     provider_status: str | None = None
     if provider is not None:
@@ -579,24 +621,19 @@ def install(
     ignore_status, ignore_text, ignore_created = _ignore_plan(gitignore)
     guard_source: bytes = _read_bytes(found.guard, "the commit guard")
     guard_status, guard_detail, guard_target = _guard_plan(target, found.guard, guard_source)
-
-    previous_appended: Any = previous.get("gitignore_appended")
-    receipt: dict[str, Any] = {
-        "bench_version": _bench_version(),
-        "installed_at": datetime.now(timezone.utc).isoformat(),
-        "hook": hook_record,
-        "env_added": env_added,
-        "settings_created": _carry(previous, "settings_created", not settings_existed),
-        "claude_dir_created": _carry(previous, "claude_dir_created", not claude_dir_existed),
-        "gitignore_created": _carry(previous, "gitignore_created", ignore_created),
-        "gitignore_appended": (
-            ignore_text
-            if ignore_text is not None
-            else (previous_appended if isinstance(previous_appended, str) else None)
-        ),
-        "guard": _guard_receipt(guard_target, guard_status, previous, target, guard_source),
-    }
-    _write_json(receipt_path, receipt, _RECEIPT_WHAT)
+    plan: _Plan = _Plan(
+        hook_status=hook_status,
+        command=command,
+        env_added=env_added,
+        settings_existed=settings_existed,
+        claude_dir_existed=claude_dir_existed,
+        ignore_text=ignore_text,
+        ignore_created=ignore_created,
+        guard_status=guard_status,
+        guard_target=guard_target,
+        guard_source=guard_source,
+    )
+    _write_json(receipt_path, _build_receipt(plan, previous, target), _RECEIPT_WHAT)
 
     report.add("hook", hook_status, command)
     if provider_status is not None:
