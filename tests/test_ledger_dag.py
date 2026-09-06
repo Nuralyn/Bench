@@ -483,7 +483,7 @@ class AppendLockTests(unittest.TestCase):
         try:
             with self.assertRaises(LedgerReadError) as caught:
                 with _append_lock(self._dir, timeout=0.2):
-                    self.fail("acquired a lock another process holds")
+                    pass  # reaching here means a held lock was acquired
         finally:
             release.write_text("x", encoding="utf-8")
             _, err = holder.communicate(timeout=60)
@@ -550,8 +550,9 @@ class AppendLockTests(unittest.TestCase):
 
     def test_the_lock_is_released_after_a_refused_append(self) -> None:
         Path(self._ledger).write_text("{not json", encoding="utf-8")
+        refused: dict = _result()
         with self.assertRaises(LedgerReadError):
-            append_entry(_result(), path=self._ledger)
+            append_entry(refused, path=self._ledger)
         os.remove(self._ledger)
 
         # A lock left held by the refusal would make this bounded
