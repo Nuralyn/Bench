@@ -27,6 +27,7 @@ from ledger import retire  # noqa: E402
 from ledger.chain import (  # noqa: E402
     ANCHOR_VERDICT,
     META_FILENAME,
+    TIP_CACHE_FILENAME,
     append_entry,
     resolve_entries_dir,
 )
@@ -166,8 +167,11 @@ class HappyPathTests(RetirementTestCase):
         self.assertTrue(verify_chain(str(archive / "bench-ledger.json"))["valid"])
 
         # The successor chain is entries-only and opens at GENESIS.
+        # The tip cache beside entries/ is derived, not a segment: the anchor
+        # append rebuilt it for the successor, and retirement never archives it.
         self.assertEqual(
-            sorted(p.name for p in self.ledger_dir.iterdir()), ["entries"]
+            sorted(p.name for p in self.ledger_dir.iterdir()),
+            ["entries", TIP_CACHE_FILENAME],
         )
         anchor: dict = result["anchor"]
         self.assertEqual(anchor["previous_hash"], "GENESIS")
@@ -205,8 +209,11 @@ class HappyPathTests(RetirementTestCase):
         """
         self.make_legacy_chain(legacy=3, new=1)
         self.retire()
+        # The tip cache beside entries/ is derived, not a segment: the anchor
+        # append rebuilt it for the successor, and retirement never archives it.
         self.assertEqual(
-            sorted(p.name for p in self.ledger_dir.iterdir()), ["entries"]
+            sorted(p.name for p in self.ledger_dir.iterdir()),
+            ["entries", TIP_CACHE_FILENAME],
         )
         self.append("after.py")
 
@@ -700,8 +707,11 @@ class ConcurrencyTests(RetirementTestCase):
         result: dict = self.retire()
 
         self.assertEqual(self._staging_dirs(), [])
+        # The tip cache beside entries/ is derived, not a segment: the anchor
+        # append rebuilt it for the successor, and retirement never archives it.
         self.assertEqual(
-            sorted(p.name for p in self.ledger_dir.iterdir()), ["entries"]
+            sorted(p.name for p in self.ledger_dir.iterdir()),
+            ["entries", TIP_CACHE_FILENAME],
         )
         archive_ledger: str = str(
             Path(result["archive_path"]) / "bench-ledger.json"
