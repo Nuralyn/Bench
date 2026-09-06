@@ -319,11 +319,14 @@ def _refuse_symlinked_gitignore(gitignore: Path) -> None:
         )
 
 
-def _ignore_plan(gitignore: Path) -> tuple[str, str | None, bool]:
+def _ignore_plan(
+    gitignore: Path, previous_appended: Any
+) -> tuple[str, str | None, bool, bool]:
     """Decide the .gitignore step without writing.
 
     Returns (status, the exact text to append or None, whether the file will
-    be created). The appended text follows the file's own line endings and
+    be created, whether the file still ends with what an earlier run
+    appended). The appended text follows the file's own line endings and
     supplies a separator only when the file lacks a final newline, so
     uninstall can remove precisely those bytes and leave the rest untouched.
     """
@@ -337,11 +340,16 @@ def _ignore_plan(gitignore: Path) -> tuple[str, str | None, bool]:
             existing = gitignore.read_bytes().decode("utf-8")
         except (OSError, UnicodeDecodeError) as exc:
             raise InstallError(f"cannot read {gitignore}: {exc}") from exc
+    continuous: bool = (
+        isinstance(previous_appended, str)
+        and bool(previous_appended)
+        and existing.endswith(previous_appended)
+    )
     if any(line.strip() in _IGNORE_EQUIVALENTS for line in existing.splitlines()):
-        return "unchanged", None, False
+        return "unchanged", None, False, continuous
     newline: str = "\r\n" if "\r\n" in existing else "\n"
     separator: str = "" if not existing or existing.endswith("\n") else newline
-    return "written", f"{separator}{IGNORE_LINE}{newline}", created
+    return "written", f"{separator}{IGNORE_LINE}{newline}", created, continuous
 
 
 def _append_text(path: Path, text: str) -> None:
@@ -507,9 +515,13 @@ def _guard_receipt(
     The path is recorded relative to the project, so a repository that is
     moved or renamed before ``bench uninstall`` still finds its guard.
     """
+    previous_guard: Any = previous.get("guard")
     if guard_target is None:
-        return None
-    if guard_status != "written" and not isinstance(previous.get("guard"), dict):
+        # The guard step was skipped this run (the hooks directory moved, or
+        # holds another tool's hook). A guard an earlier run installed is
+        # still Bench's, so its record is kept for uninstall to act on.
+        return dict(previous_guard) if isinstance(previous_guard, dict) else None
+    if guard_status != "written" and not isinstance(previous_guard, dict):
         return None
     # The digest is of the bytes install writes (or found identical), so the
     # record is correct even though the receipt is written before the guard.
@@ -519,9 +531,12 @@ def _guard_receipt(
     }
 
 
-def _carry(previous: dict[str, Any], key: str, now: bool) -> bool:
-    """A creation flag stays true once any install run recorded it."""
-    return now or bool(previous.get(key))
+def _carry(previous: dict[str, Any], key: str, now: bool, continuous: bool) -> bool:
+    """A creation flag is true when this run creates the artifact, or when an
+    earlier run recorded creating it AND the artifact is still the one that
+    run left behind (``continuous``). An artifact the project deleted and
+    recreated in between is the project's, whatever an old receipt said."""
+    return now or (bool(previous.get(key)) and continuous)
 
 
 @dataclass(frozen=True)
@@ -535,6 +550,7 @@ class _Plan:
     claude_dir_existed: bool
     ignore_text: str | None
     ignore_created: bool
+    ignore_continuous: bool
     guard_status: str
     guard_target: Path | None
     guard_source: bytes
@@ -551,8 +567,12 @@ def _build_receipt(plan: _Plan, previous: dict[str, Any], project: Path) -> dict
     hook_record: dict[str, str] | None = None
     if plan.hook_status != "unchanged" or isinstance(previous.get("hook"), dict):
         hook_record = {"command": plan.command, "matcher": HOOK_MATCHER}
+    # A settings file still holding a Bench hook is the one an earlier run
+    # wrote into; one with no Bench hook was replaced since, and is the
+    # project's now along with its directory.
+    settings_continuous: bool = plan.hook_status != "written"
     appended: str | None = plan.ignore_text
-    if appended is None:
+    if appended is None and plan.ignore_continuous:
         previous_appended: Any = previous.get("gitignore_appended")
         appended = previous_appended if isinstance(previous_appended, str) else None
     return {
@@ -560,11 +580,15 @@ def _build_receipt(plan: _Plan, previous: dict[str, Any], project: Path) -> dict
         "installed_at": datetime.now(timezone.utc).isoformat(),
         "hook": hook_record,
         "env_added": plan.env_added,
-        "settings_created": _carry(previous, "settings_created", not plan.settings_existed),
-        "claude_dir_created": _carry(
-            previous, "claude_dir_created", not plan.claude_dir_existed
+        "settings_created": _carry(
+            previous, "settings_created", not plan.settings_existed, settings_continuous
         ),
-        "gitignore_created": _carry(previous, "gitignore_created", plan.ignore_created),
+        "claude_dir_created": _carry(
+            previous, "claude_dir_created", not plan.claude_dir_existed, settings_continuous
+        ),
+        "gitignore_created": _carry(
+            previous, "gitignore_created", plan.ignore_created, plan.ignore_continuous
+        ),
         "gitignore_appended": appended,
         "guard": _guard_receipt(
             plan.guard_target, plan.guard_status, previous, project, plan.guard_source
@@ -618,7 +642,9 @@ def install(
     settings_changed: bool = json.dumps(settings, sort_keys=True) != before
 
     gitignore: Path = target / _GITIGNORE_NAME
-    ignore_status, ignore_text, ignore_created = _ignore_plan(gitignore)
+    ignore_status, ignore_text, ignore_created, ignore_continuous = _ignore_plan(
+        gitignore, previous.get("gitignore_appended")
+    )
     guard_source: bytes = _read_bytes(found.guard, "the commit guard")
     guard_status, guard_detail, guard_target = _guard_plan(target, found.guard, guard_source)
     plan: _Plan = _Plan(
@@ -629,6 +655,7 @@ def install(
         claude_dir_existed=claude_dir_existed,
         ignore_text=ignore_text,
         ignore_created=ignore_created,
+        ignore_continuous=ignore_continuous,
         guard_status=guard_status,
         guard_target=guard_target,
         guard_source=guard_source,
@@ -789,9 +816,15 @@ def _remove_recorded_guard(project: Path, record: Any) -> tuple[str, str]:
     digest, so a hook the project edited since is kept."""
     if not isinstance(record, dict) or not isinstance(record.get("path"), str):
         return "unchanged", "none recorded by install"
+    recorded: Path = project / record["path"]
+    if recorded.is_symlink():
+        # Checked on the unresolved path: a link planted at the recorded
+        # location would otherwise have the digest check and the unlink land
+        # on whatever it points at, even a same-content file elsewhere.
+        return "kept", f"{recorded} is a symlink; not following it"
     # Recorded relative to the project; resolving after the join means a
     # record that climbs out with ".." fails the containment check below.
-    target: Path = (project / record["path"]).resolve()
+    target: Path = recorded.resolve()
     if project not in target.parents:
         return "kept", f"{target} is outside the project"
     if not target.exists():

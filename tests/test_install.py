@@ -694,6 +694,71 @@ class TestUninstall(_ScratchCase):
         self.assertFalse(self.settings_path.exists())
         self.assertTrue(self.settings_path.parent.is_dir())
 
+    def test_settings_replaced_between_installs_are_not_claimed(self) -> None:
+        # Install created .claude/settings.json; the project then deleted and
+        # recreated both. The reinstall finds no Bench hook in the new file,
+        # so the old creation flags must not carry over.
+        self._install()
+        shutil.rmtree(self.settings_path.parent)
+        self._write_settings({})
+        report: Report = self._install()
+        self.assertEqual(_statuses(report)["hook"], "written")
+        self.assertFalse(self._receipt()["settings_created"])
+        self.assertFalse(self._receipt()["claude_dir_created"])
+        removal: Report = self._uninstall()
+        self.assertEqual(_statuses(removal)["settings"], "written")
+        self.assertEqual(self._settings(), {})
+        self.assertTrue(self.settings_path.parent.is_dir())
+
+    def test_settings_continuous_across_reinstall_stay_claimed(self) -> None:
+        self._install()
+        self._install(provider="anthropic")
+        self.assertTrue(self._receipt()["settings_created"])
+        self.assertTrue(self._receipt()["claude_dir_created"])
+        self._uninstall()
+        self.assertFalse(self.settings_path.parent.exists())
+
+    def test_gitignore_replaced_between_installs_is_not_claimed(self) -> None:
+        self._install()
+        gitignore: Path = self.project / ".gitignore"
+        gitignore.write_bytes(b".bench/\n")
+        report: Report = self._install()
+        self.assertEqual(_statuses(report)["gitignore"], "unchanged")
+        self.assertIsNone(self._receipt()["gitignore_appended"])
+        self.assertFalse(self._receipt()["gitignore_created"])
+        removal: Report = self._uninstall()
+        self.assertEqual(_statuses(removal)["gitignore"], "kept")
+        self.assertEqual(gitignore.read_bytes(), b".bench/\n")
+
+    def test_guard_record_survives_a_reinstall_that_skips_the_guard(self) -> None:
+        self._init_repo()
+        self._install()
+        elsewhere: Path = self.tmp / "global-hooks"
+        elsewhere.mkdir()
+        self._git("config", "core.hooksPath", elsewhere.as_posix())
+        report: Report = self._install()
+        self.assertEqual(_statuses(report)["guard"], "skipped")
+        self.assertEqual(self._receipt()["guard"]["path"], ".git/hooks/pre-commit")
+        self._git("config", "--unset", "core.hooksPath")
+        removal: Report = self._uninstall()
+        self.assertEqual(_statuses(removal)["guard"], "removed")
+        self.assertFalse(self.guard_path.exists())
+
+    def test_a_guard_replaced_by_a_symlink_is_kept_and_its_target_survives(self) -> None:
+        self._init_repo()
+        self._install()
+        same_content: Path = self.project / "tracked-guard"
+        same_content.write_bytes(_GUARD_BYTES)
+        self.guard_path.unlink()
+        try:
+            self.guard_path.symlink_to(same_content)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"symlinks unavailable here: {exc}")
+        report: Report = self._uninstall()
+        self.assertEqual(_statuses(report)["guard"], "kept")
+        self.assertTrue(same_content.is_file())
+        self.assertTrue(self.guard_path.is_symlink())
+
     def test_ignore_line_stays_while_a_chain_exists(self) -> None:
         self._install()
         (self.project / ".bench" / "entries").mkdir()
