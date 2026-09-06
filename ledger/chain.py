@@ -623,13 +623,15 @@ def _cached_tips(
     # already descends from it, which is the one way a cache could
     # manufacture a fork. It is rescanned instead; tests/test_chain.py
     # (TipCacheTests) pins that.
-    # Membership under the same case rule as the listing, so a tip filed
-    # with a folded suffix on Windows still resolves and is read below
-    # through the case-insensitive filesystem that admitted it.
-    present: set[str] = {os.path.normcase(name) for name in names}
+    # Resolution is one stat per tip rather than a membership set over the
+    # listing: the set would cost a normalisation per name and grow with the
+    # chain, while the filesystem answers in constant time under the same
+    # case rule the listing applies (a tip filed with a folded suffix on
+    # Windows resolves through the case-insensitive filesystem that admitted
+    # it). The listing itself is consulted only through its digest.
     for tip in tips:
         entry_file: Path = entries_dir / f"{tip}.json"
-        if os.path.normcase(entry_file.name) not in present:
+        if not entry_file.is_file():
             print(
                 f"[bench ledger] tip cache names {tip[:12]}, which no longer "
                 "resolves; rescanning the chain",

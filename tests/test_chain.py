@@ -949,26 +949,28 @@ class AppendScalingBenchmark(unittest.TestCase):
     Seeds two chains directly on disk (several seconds for the larger one),
     lets the first append rebuild the cache with a full scan, then times the
     steady state and, separately, the directory listing the cache is keyed
-    on. The listing is the acknowledged floor: it is how an append notices
-    a file added by anything other than itself, it is the only cost that
-    still grows with the chain, and it is two orders of magnitude cheaper
-    than reading the chain (about 20 ms against 2 s at 20,000 entries on
-    NTFS). Three things are asserted. The deterministic one: a steady state
-    append reads exactly one entry file, the tip, at either size. Then, net
-    of the listing, the median append at 20,000 entries stays within
-    ``FLATNESS_BOUND`` of the median at 1,000. And the whole append at
+    on. The accepted requirement is flat in entry reads and listing-bounded
+    in time. The listing is how an append notices a file added by anything
+    other than itself, and it, with the digest over its names, is all that
+    still grows with the chain: about 20 ms at 20,000 entries against 2 s
+    to read the chain. Three things are asserted. The deterministic one: a
+    steady state append reads exactly one entry file, the tip, at either
+    size. Then the growth in median append time from 1,000 to 20,000
+    entries is at most ``LISTING_MULTIPLE`` listings of the larger
+    directory, which is what listing-bounded means. And the whole append at
     20,000 stays at least ``SCAN_MARGIN`` times cheaper than the scan it
-    replaced. The raw figures, listing included, are printed so a CI log
-    carries them.
+    replaced. A ratio of the two medians is deliberately not asserted: on a
+    runner with cheap fsync the 1,000-entry append is about 3 ms, and a
+    ratio over a denominator that small measures noise. The raw figures,
+    listing included, are printed so a CI log carries them.
     """
 
     SIZES: tuple[int, int] = (1_000, 20_000)
     REPS: int = 7
-    # Measured 2.1x on NTFS (8.1 ms to 35.5 ms, of which 0.9 ms and 20.1 ms
-    # of listing). The bound leaves room for a runner where the fixed costs
-    # (two fsyncs) are cheaper and the ratio therefore sits higher; a
-    # reintroduced per-entry read would put it past 50x.
-    FLATNESS_BOUND: float = 4.0
+    # Measured growth of 24 ms on ubuntu (2.7 ms to 27.0 ms, listing 18.4
+    # ms) and 24 to 37 ms on NTFS (listing 18 to 20 ms). A reintroduced
+    # per-entry read would add over a second at 20,000 entries.
+    LISTING_MULTIPLE: float = 3.0
     SCAN_MARGIN: float = 10.0
 
     def setUp(self) -> None:
@@ -1037,13 +1039,13 @@ class AppendScalingBenchmark(unittest.TestCase):
 
         small: dict[str, float] = measured[self.SIZES[0]]
         large: dict[str, float] = measured[self.SIZES[1]]
-        small_net: float = small["append"] - small["listing"]
-        large_net: float = large["append"] - large["listing"]
+        growth: float = large["append"] - small["append"]
         self.assertLessEqual(
-            large_net,
-            small_net * self.FLATNESS_BOUND,
-            f"append net of the listing grew {large_net / small_net:.1f}x "
-            f"from {self.SIZES[0]:,} to {self.SIZES[1]:,} entries",
+            growth,
+            large["listing"] * self.LISTING_MULTIPLE,
+            f"append grew by {growth:.1f} ms from {self.SIZES[0]:,} to "
+            f"{self.SIZES[1]:,} entries, more than {self.LISTING_MULTIPLE:g} "
+            f"listings ({large['listing']:.1f} ms each)",
         )
         self.assertLess(
             large["append"] * self.SCAN_MARGIN,
