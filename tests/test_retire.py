@@ -620,7 +620,66 @@ _SIGNALLED_APPENDER: str = textwrap.dedent(
 )
 
 
+# Holds the chain's lock from a second process until told to let go.
+_LOCK_HOLDER: str = textwrap.dedent(
+    """
+    import sys
+    import time
+    from pathlib import Path
+    sys.path.insert(0, sys.argv[1])
+    from ledger.chain import _append_lock
+    held, release = Path(sys.argv[3]), Path(sys.argv[4])
+    with _append_lock(Path(sys.argv[2])):
+        held.write_text("x", encoding="utf-8")
+        deadline = time.monotonic() + 60
+        while not release.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+    """
+)
+
+
 class ConcurrencyTests(RetirementTestCase):
+    def test_retirement_refuses_while_another_process_holds_the_lock(
+        self,
+    ) -> None:
+        """Retirement's acquisition is bounded: a human is attending and can
+        retry, so a lock that stays held is a named refusal, not a wait, and
+        the chain is untouched."""
+        self.make_entries_only_chain(3)
+        before: dict[str, bytes] = self.snapshot()
+        held: Path = Path(self._tmp) / "held"
+        release: Path = Path(self._tmp) / "release"
+        holder: subprocess.Popen[str] = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                _LOCK_HOLDER,
+                str(_REPO_ROOT),
+                str(self.ledger_dir),
+                str(held),
+                str(release),
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        try:
+            deadline: float = time.monotonic() + 30
+            while not held.exists():
+                self.assertLess(time.monotonic(), deadline, "holder never locked")
+                time.sleep(0.01)
+            with mock.patch.object(retire, "_LOCK_WAIT_SECONDS", 0.2):
+                with self.assertRaises(RetirementError) as caught:
+                    self.retire()
+        finally:
+            release.write_text("x", encoding="utf-8")
+            _, err = holder.communicate(timeout=60)
+        self.assertEqual(holder.returncode, 0, err)
+
+        self.assertIn("append lock", str(caught.exception))
+        self.assertEqual(self.snapshot(), before)
+        self.assertFalse(Path(self.archive_dir).exists())
+
     def test_an_append_from_another_process_cannot_interleave(self) -> None:
         """The lock turns the race into a wait.
 

@@ -28,6 +28,7 @@ optional here for exactly that reason: the first retirement finds all three, and
 every retirement after it finds only the entries directory.
 """
 
+import contextlib
 import os
 import shutil
 import sys
@@ -40,6 +41,7 @@ from ledger.chain import (
     ANCHOR_VERDICT,
     ENTRIES_DIRNAME,
     META_FILENAME,
+    LedgerReadError,
     _append_lock,
     append_entry,
     resolve_ledger_path,
@@ -53,6 +55,17 @@ from utils.project import project_root
 
 ANCHOR_TOOL: str = "ChainRetirement"
 """``change.tool`` on an anchor entry, matching the 2026-07-24 reference."""
+
+_LOCK_WAIT_SECONDS: float = 30.0
+"""How long a retirement waits for the chain's append lock before refusing.
+
+A governed edit's append waits for the lock as long as its holder lives,
+because a refused append is a lost receipt. A retirement is different: a
+human is attending it and can retry, and the only thing it ever waits on is
+an append, which holds the lock for tens of milliseconds. A wait this long
+means something else has the file, and refusing with the lock named is more
+useful to that human than waiting.
+"""
 
 _GENESIS_MARKER: str = "GENESIS"
 """Re-declared locally rather than imported from ``chain``, as ``verify.py``
@@ -661,7 +674,8 @@ def execute_retirement(
        the retirement to finish instead of landing inside it. The lock is
        taken after the human gate, not before, because holding it through a
        prompt would starve every other session's receipts for as long as
-       the human takes to answer.
+       the human takes to answer. The wait for the lock is bounded by
+       ``_LOCK_WAIT_SECONDS`` and refuses beyond it, the chain untouched.
     4. Copy the segments that exist into a fresh archive directory.
     5. Verify the archive, and require its entry count and tip to equal the
        live chain's as confirmed by the human. C-008(b): this happens BEFORE
@@ -728,7 +742,18 @@ def execute_retirement(
     # under the chain's append lock, so no other process can append into the
     # window. The checks below that detect an interleaved entry stay as
     # defence in depth for a writer that does not take the lock.
-    with _append_lock(ledger_dir):
+    with contextlib.ExitStack() as held:
+        try:
+            held.enter_context(
+                _append_lock(ledger_dir, timeout=_LOCK_WAIT_SECONDS)
+            )
+        except LedgerReadError as exc:
+            raise RetirementError(
+                f"refusing to retire: another process holds the chain's "
+                f"append lock ({exc}). Wait for it to finish and retry. The "
+                f"live chain was not touched."
+            ) from exc
+
         try:
             _copy_segments(resolved, archive_root, segments)
         except OSError as exc:

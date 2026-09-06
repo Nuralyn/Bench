@@ -724,8 +724,8 @@ mutation window from the archive copy through the anchor append, so a
 governed edit in another session waits for the retirement rather than
 landing inside it (see ``retire.execute_retirement``).
 """
-_LOCK_TIMEOUT_SECONDS: float = 30.0
 _LOCK_POLL_SECONDS: float = 0.05
+_LOCK_HEARTBEAT_SECONDS: float = 30.0
 
 
 def _try_lock(fd: int) -> None:
@@ -744,8 +744,8 @@ def _unlock(fd: int) -> None:
         fcntl.flock(fd, fcntl.LOCK_UN)
 
 
-_HELD_LOCKS: set[tuple[str, int]] = set()
-"""``(resolved directory, thread id)`` pairs whose append lock is held now.
+_HELD_LOCKS: set[tuple[str, int, int]] = set()
+"""``(resolved directory, process id, thread id)`` keys of locks held now.
 
 The lock is re-entrant within a thread, which retirement needs: it holds
 the lock across its whole mutation window and appends the anchor through
@@ -753,25 +753,44 @@ the lock across its whole mutation window and appends the anchor through
 holds the lock yields at once, and the operating-system lock is taken and
 released by the outermost holder only. The thread is part of the key so a
 second thread in the same process, if one ever appears, contends for the
-file like a second process would instead of slipping past.
+file like a second process would instead of slipping past. The process id
+is part of it so a child forked while the lock is held, which inherits this
+set and on POSIX usually the same thread id, contends too: it shares the
+holder's descriptor, not the holder's right to re-enter.
 """
 
 
 @contextlib.contextmanager
-def _append_lock(directory: Path) -> Iterator[None]:
+def _append_lock(
+    directory: Path, *, timeout: float | None = None
+) -> Iterator[None]:
     """Hold the chain's append lock (see ``LOCK_FILENAME``) for the block.
 
-    Acquisition polls a non-blocking lock rather than blocking, so the wait
-    is bounded on both platforms: after ``_LOCK_TIMEOUT_SECONDS`` the append
-    is refused with ``LedgerReadError``, which the runner logs as a verdict
-    returned without a receipt. Another append holds the lock for tens of
-    milliseconds, so a wait that long means something other than an append
-    has the file, and refusing is the fail-closed answer (C-001). The
-    descriptor is closed on every exit path, which releases the lock even
-    if the explicit unlock could not. Re-entry from the process that already
-    holds the lock is a no-op (see ``_HELD_LOCKS``).
+    Acquisition polls a non-blocking lock, which behaves the same on both
+    platforms. With ``timeout`` unset, the default for a governed edit's
+    append, the wait lasts as long as another process holds the lock: the
+    operating system releases a dead holder's lock at once, so the wait is
+    bounded by the holder's life, and a live holder is always making
+    progress (another append takes tens of milliseconds; a retirement of a
+    large chain can take minutes). A fixed deadline would instead refuse the
+    append and lose the receipt exactly when a retirement runs long. A wait
+    that reaches ``_LOCK_HEARTBEAT_SECONDS`` is reported to stderr and again
+    at that interval, naming the lock file, so a stall is legible (C-001).
+
+    With ``timeout`` set, the wait is bounded and ``LedgerReadError`` is
+    raised when it expires. Retirement acquires this way: a human is
+    attending it and can retry, and the only thing it ever waits on is an
+    append.
+
+    The descriptor is closed on every exit path, which releases the lock
+    even if the explicit unlock could not. Re-entry from the thread that
+    already holds the lock is a no-op (see ``_HELD_LOCKS``).
     """
-    key: tuple[str, int] = (str(directory.resolve()), threading.get_ident())
+    key: tuple[str, int, int] = (
+        str(directory.resolve()),
+        os.getpid(),
+        threading.get_ident(),
+    )
     if key in _HELD_LOCKS:
         yield
         return
@@ -782,17 +801,27 @@ def _append_lock(directory: Path) -> Iterator[None]:
     except OSError as e:
         raise LedgerReadError(f"cannot open append lock {lock_path}: {e}") from e
     try:
-        deadline: float = time.monotonic() + _LOCK_TIMEOUT_SECONDS
+        started: float = time.monotonic()
+        next_note: float = started + _LOCK_HEARTBEAT_SECONDS
         while True:
             try:
                 _try_lock(fd)
                 break
             except OSError as e:
-                if time.monotonic() >= deadline:
+                waited: float = time.monotonic() - started
+                if timeout is not None and waited >= timeout:
                     raise LedgerReadError(
                         f"append lock {lock_path} not acquired within "
-                        f"{_LOCK_TIMEOUT_SECONDS:g}s: {e}"
+                        f"{timeout:g}s: {e}"
                     ) from e
+                if time.monotonic() >= next_note:
+                    print(
+                        f"[bench ledger] waiting for the append lock "
+                        f"{lock_path}, held by another process for "
+                        f"{waited:.0f}s so far",
+                        file=sys.stderr,
+                    )
+                    next_note = time.monotonic() + _LOCK_HEARTBEAT_SECONDS
                 time.sleep(_LOCK_POLL_SECONDS)
         _HELD_LOCKS.add(key)
         try:
@@ -913,7 +942,11 @@ def append_entry(
     The whole append, from reading the tips through the atomic rename of
     the entry file and the cache write, runs under the chain's lock (see
     ``LOCK_FILENAME``), so two sessions appending to one chain at the same
-    time serialise instead of both naming the same tips and forking it.
+    time serialise instead of both naming the same tips and forking it. The
+    append waits for the lock as long as its holder lives, with a note to
+    stderr every ``_LOCK_HEARTBEAT_SECONDS``: a receipt delayed by a
+    retirement in another session is recorded; one refused by a deadline
+    would be lost.
     """
     # Resolve once and reuse, so the entry is read from and appended to the
     # same chain even if resolution inputs were to change mid-run.
