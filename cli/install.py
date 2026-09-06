@@ -38,6 +38,7 @@ import importlib.metadata
 import importlib.resources
 import json
 import os
+import shutil
 import stat
 import subprocess
 import sys
@@ -154,6 +155,18 @@ def locate_resources() -> Resources:
     return Resources(hook_script=hook.resolve(), guard=guard.resolve())
 
 
+def _shell_quote(text: str) -> str:
+    """Double-quote ``text`` for a POSIX shell, escaping the characters that
+    stay live inside double quotes (backslash, double quote, dollar, backtick)
+    so a path containing them is a path, not an expansion. Double quotes are
+    kept rather than shlex's single quotes so the command reads the same on
+    every shell Claude Code runs hooks through."""
+    escaped: str = text
+    for char in ("\\", '"', "$", "`"):
+        escaped = escaped.replace(char, "\\" + char)
+    return f'"{escaped}"'
+
+
 def hook_command(hook_script: Path, interpreter: Path) -> str:
     """The settings.json command line: quoted interpreter, quoted hook path.
 
@@ -163,7 +176,10 @@ def hook_command(hook_script: Path, interpreter: Path) -> str:
     ``bin/python`` is a link to the base interpreter, and following it would
     pin a Python that has none of Bench's dependencies.
     """
-    return f'"{interpreter.absolute().as_posix()}" "{hook_script.resolve().as_posix()}"'
+    return (
+        f"{_shell_quote(interpreter.absolute().as_posix())} "
+        f"{_shell_quote(hook_script.resolve().as_posix())}"
+    )
 
 
 def is_bench_hook(hook: Any) -> bool:
@@ -198,6 +214,10 @@ def _write_json(path: Path, data: dict[str, Any], what: str) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp: Path = path.with_name(path.name + ".tmp")
         tmp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+        if path.exists():
+            # Keep the original's mode: a 0600 settings file must not come
+            # back 0644 because it was rewritten through a temp file.
+            shutil.copymode(path, tmp)
         os.replace(tmp, path)
     except OSError as exc:
         raise InstallError(f"cannot write {what} {path}: {exc}") from exc
@@ -262,8 +282,21 @@ def _register_hook(settings: dict[str, Any], command: str, path: Path) -> str:
     return "updated" if ours else "written"
 
 
+def _refuse_symlinked_gitignore(gitignore: Path) -> None:
+    """A symlinked .gitignore is refused: git (2.32 and later) does not read
+    one, so an ignore line there would protect nothing, and appending would
+    write through the link to a file outside the project."""
+    if gitignore.is_symlink():
+        raise InstallError(
+            f"{gitignore} is a symlink; git does not read a symlinked "
+            f".gitignore, so {IGNORE_LINE} there would not keep the chain out "
+            f"of git. Replace it with a regular file and retry."
+        )
+
+
 def _ensure_ignored(gitignore: Path) -> str:
     """Append ``/.bench/`` unless an equivalent line is already present."""
+    _refuse_symlinked_gitignore(gitignore)
     existing: str = ""
     if gitignore.exists():
         try:
@@ -416,17 +449,24 @@ def _apply_provider(
 
 
 def _guard_receipt(
-    guard_target: Path | None, guard_status: str, previous: dict[str, Any]
+    guard_target: Path | None,
+    guard_status: str,
+    previous: dict[str, Any],
+    project: Path,
 ) -> dict[str, str] | None:
     """The receipt's guard record: a guard install wrote now, or one an
     earlier receipt already claimed. An identical file nobody claimed stays
-    unclaimed, since ownership is recorded, never inferred from content."""
+    unclaimed, since ownership is recorded, never inferred from content.
+
+    The path is recorded relative to the project, so a repository that is
+    moved or renamed before ``bench uninstall`` still finds its guard.
+    """
     if guard_target is None:
         return None
     if guard_status != "written" and not isinstance(previous.get("guard"), dict):
         return None
     return {
-        "path": str(guard_target),
+        "path": guard_target.relative_to(project).as_posix(),
         "sha256": _sha256(_read_bytes(guard_target, "the commit guard")),
     }
 
@@ -451,6 +491,8 @@ def install(
             f"unknown provider {provider!r}; expected one of {', '.join(PROVIDERS)}"
         )
     target: Path = _resolve_project(project)
+    # Checked before anything is written, so a refusal leaves no half-install.
+    _refuse_symlinked_gitignore(target / ".gitignore")
     python: Path = interpreter if interpreter is not None else Path(sys.executable)
     report: Report = Report()
     receipt_path: Path = target / RECEIPT_RELPATH
@@ -481,7 +523,7 @@ def install(
     guard_status, guard_detail, guard_target = _install_guard(target, found.guard)
     report.add("guard", guard_status, guard_detail)
     guard_record: dict[str, str] | None = _guard_receipt(
-        guard_target, guard_status, previous
+        guard_target, guard_status, previous, target
     )
 
     receipt: dict[str, Any] = {
@@ -585,6 +627,8 @@ def _remove_ignore_line(project: Path, added: bool, receipt_path: Path) -> tuple
         return "kept", f"{IGNORE_LINE} was not added by install"
     if _chain_present(project / ".bench", receipt_path):
         return "kept", f"{project / '.bench'} holds a chain that must stay out of git"
+    if gitignore.is_symlink():
+        return "kept", f"{gitignore} is a symlink; not writing through it"
     if not gitignore.exists():
         return "unchanged", IGNORE_LINE
     try:
@@ -609,7 +653,9 @@ def _remove_recorded_guard(project: Path, record: Any) -> tuple[str, str]:
     digest, so a hook the project edited since is kept."""
     if not isinstance(record, dict) or not isinstance(record.get("path"), str):
         return "unchanged", "none recorded by install"
-    target: Path = Path(record["path"])
+    # Recorded relative to the project; resolving after the join means a
+    # record that climbs out with ".." fails the containment check below.
+    target: Path = (project / record["path"]).resolve()
     if project not in target.parents:
         return "kept", f"{target} is outside the project"
     if not target.exists():

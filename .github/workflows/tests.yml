@@ -29,14 +29,9 @@ jobs:
         # The lock was added by recorded owner decision (commit 9eb1ade);
         # regenerate it per the note in requirements.txt.
         run: pip install --only-binary ':all:' --require-hashes -r requirements.lock
-      - name: Install the package (editable) and run the console script
-        # No deps and no build isolation: the runtime lock above and the
-        # build lock here supply everything, so nothing is fetched unpinned
-        # to build the package.
-        run: |
-          pip install --only-binary ':all:' --require-hashes -r requirements-build.lock
-          python -m pip install --no-deps --no-build-isolation -e .
-          bench help > /dev/null
+      # Installation of the package itself is proved by the package job below,
+      # which builds the wheel from hash-pinned inputs and runs it from a
+      # clean environment; the matrix runs the tests from the checkout.
       - name: Run tests
         run: python -m unittest discover -s tests -v
 

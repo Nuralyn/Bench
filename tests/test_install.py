@@ -198,6 +198,33 @@ class TestHookCommand(_ScratchCase):
         self.assertIn(link.absolute().as_posix(), command)
         self.assertNotIn(real.as_posix(), command)
 
+    def test_shell_metacharacters_in_paths_are_escaped(self) -> None:
+        # Claude Code hands the command to a shell. A path holding $, a
+        # backtick, a double quote, or a backslash must survive as a path.
+        odd_python: Path = self.tmp / 'venv $HOME `id` "q" back\\slash' / "bin" / "python"
+        odd_hook: Path = self.tmp / "site $x" / "hooks" / "pre-tool-use.py"
+        command: str = hook_command(odd_hook, odd_python)
+        self.assertIn("\\$HOME", command)
+        self.assertIn("\\`id\\`", command)
+        self.assertIn('\\"q\\"', command)
+        self.assertIn("\\$x", command)
+        sh: str | None = shutil.which("sh")
+        if sh is None:
+            self.skipTest("no POSIX sh available to round-trip the command")
+        proc = subprocess.run(
+            [sh, "-c", 'printf "%s\\n" ' + command],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            stdin=subprocess.DEVNULL,
+            timeout=60,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(
+            proc.stdout.splitlines(),
+            [odd_python.absolute().as_posix(), odd_hook.resolve().as_posix()],
+        )
+
     def test_template_has_the_same_shape(self) -> None:
         template: dict = json.loads(
             (_REPO_ROOT / ".claude" / "settings.template.json").read_text(encoding="utf-8")
@@ -255,9 +282,10 @@ class TestInstall(_ScratchCase):
         self.assertEqual(receipt["hook"], {"command": self.command, "matcher": HOOK_MATCHER})
         self.assertEqual(receipt["env_added"], {})
         self.assertTrue(receipt["gitignore_line_added"])
+        # Relative to the project, so a moved repository still finds it.
         self.assertEqual(
             receipt["guard"],
-            {"path": str(self.guard_path.resolve()), "sha256": hashlib.sha256(_GUARD_BYTES).hexdigest()},
+            {"path": ".git/hooks/pre-commit", "sha256": hashlib.sha256(_GUARD_BYTES).hexdigest()},
         )
 
     def test_second_run_changes_nothing_but_the_receipt_timestamp(self) -> None:
@@ -432,6 +460,28 @@ class TestInstall(_ScratchCase):
         self.assertEqual(_statuses(report)["hook"], "written")
         self.assertEqual(len(self._settings()["hooks"]["PreToolUse"]), 2)
 
+    def test_symlinked_gitignore_is_refused_before_any_write(self) -> None:
+        real: Path = self.tmp / "real-gitignore"
+        real.write_text("dist/\n", encoding="utf-8")
+        try:
+            (self.project / ".gitignore").symlink_to(real)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"symlinks unavailable here: {exc}")
+        with self.assertRaises(InstallError) as ctx:
+            self._install()
+        self.assertIn("symlink", str(ctx.exception))
+        self.assertFalse(self.settings_path.exists())
+        self.assertFalse(self.receipt_path.exists())
+        self.assertEqual(real.read_text(encoding="utf-8"), "dist/\n")
+
+    def test_settings_file_mode_is_preserved(self) -> None:
+        if os.name == "nt":
+            self.skipTest("POSIX mode bits are not enforced on Windows")
+        self._write_settings({"permissions": {"allow": []}})
+        self.settings_path.chmod(0o600)
+        self._install()
+        self.assertEqual(self.settings_path.stat().st_mode & 0o777, 0o600)
+
     def test_missing_project_directory_is_refused(self) -> None:
         with self.assertRaises(InstallError):
             install(self.tmp / "nowhere", resources=self.resources, interpreter=self.interpreter)
@@ -536,11 +586,36 @@ class TestUninstall(_ScratchCase):
         elsewhere.parent.mkdir()
         elsewhere.write_bytes(_GUARD_BYTES)
         receipt: dict = self._receipt()
-        receipt["guard"] = {"path": str(elsewhere), "sha256": hashlib.sha256(_GUARD_BYTES).hexdigest()}
+        # A recorded path that climbs out of the project with ".." is refused.
+        receipt["guard"] = {"path": "../elsewhere/pre-commit", "sha256": hashlib.sha256(_GUARD_BYTES).hexdigest()}
         self.receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
         report: Report = self._uninstall()
         self.assertEqual(_statuses(report)["guard"], "kept")
         self.assertTrue(elsewhere.exists())
+
+    def test_guard_is_still_removed_after_the_project_moves(self) -> None:
+        self._init_repo()
+        self._install()
+        moved: Path = self.tmp / "moved"
+        self.project.rename(moved)
+        report: Report = uninstall(moved, environ={}, stdin_isatty=_human)
+        self.assertEqual(_statuses(report)["guard"], "removed")
+        self.assertFalse((moved / ".git" / "hooks" / "pre-commit").exists())
+        self.assertFalse((moved / RECEIPT_RELPATH).exists())
+
+    def test_symlinked_gitignore_is_kept_not_written_through(self) -> None:
+        self._install()
+        real: Path = self.tmp / "real-gitignore"
+        real.write_text(f"{IGNORE_LINE}\n", encoding="utf-8")
+        gitignore: Path = self.project / ".gitignore"
+        gitignore.unlink()
+        try:
+            gitignore.symlink_to(real)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"symlinks unavailable here: {exc}")
+        report: Report = self._uninstall()
+        self.assertEqual(_statuses(report)["gitignore"], "kept")
+        self.assertEqual(real.read_text(encoding="utf-8"), f"{IGNORE_LINE}\n")
 
 
 class TestUninstallHumanGate(_ScratchCase):
