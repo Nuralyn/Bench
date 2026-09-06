@@ -19,7 +19,7 @@ from typing import Any
 
 from pipeline.constitution import build_cached_prefix, build_context_section
 from pipeline.snapshot import snapshot_response
-from utils.api import DEFENDER_MODEL, call_model
+from utils.api import call_model, stage_model, stamp_model
 
 
 _SYSTEM_PROMPT: str = """You are the Defender in the Bench constitutional governance pipeline. Your role
@@ -119,6 +119,10 @@ def run_defender(
             "status": "PIPELINE_ERROR",
             "error": f"INVALID_DEFENDER_INPUT: {input_error}",
             "_tokens": {"input": 0, "output": 0},
+            # No call was made: an explicit None, so the entry is not read
+            # as one from before models were recorded.
+            "_model": None,
+            "_model_override": False,
         }
 
     # The prompt is the constitution (cached prefix), the repository context
@@ -130,8 +134,11 @@ def run_defender(
     cached_context: str = build_context_section(file_context)
     user_content: str = _build_user_content(diff_info, challenger_result)
 
+    # Resolved per call so a BENCH_DEFENDER_MODEL override is read now and
+    # recorded on whatever this stage returns.
+    model, overridden = stage_model("defender")
     response: dict[str, Any] = call_model(
-        DEFENDER_MODEL,
+        model,
         _SYSTEM_PROMPT,
         user_content,
         cached_prefix=cached_prefix,
@@ -141,11 +148,11 @@ def run_defender(
     tokens: Any = response.get("_tokens", {"input": 0, "output": 0})
 
     if "error" in response:
-        return {
-            "status": "PIPELINE_ERROR",
-            "error": response,
-            "_tokens": tokens,
-        }
+        return stamp_model(
+            {"status": "PIPELINE_ERROR", "error": response, "_tokens": tokens},
+            model,
+            overridden,
+        )
 
     # Repair cosmetic drift before validating and record what was repaired
     # on the result, so the ledger entry shows it. _normalize_defender_
@@ -170,14 +177,18 @@ def run_defender(
         response["_normalized"] = notes
 
     if not _validate_defender_response(response):
-        return {
-            "status": "PIPELINE_ERROR",
-            "error": "INVALID_DEFENDER_RESPONSE",
-            "raw_response": original,
-            "_tokens": tokens,
-        }
+        return stamp_model(
+            {
+                "status": "PIPELINE_ERROR",
+                "error": "INVALID_DEFENDER_RESPONSE",
+                "raw_response": original,
+                "_tokens": tokens,
+            },
+            model,
+            overridden,
+        )
 
-    return response
+    return stamp_model(response, model, overridden)
 
 
 def _build_user_content(diff_info: dict, challenger_result: dict) -> str:

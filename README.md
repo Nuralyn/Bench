@@ -549,6 +549,27 @@ column is an illustrative snapshot for readers, not an authoritative record;
 refresh it when you change a model. The exact IDs live in the constants named
 above.
 
+Each stage's model can be overridden for a run without editing the constants:
+`BENCH_CHALLENGER_MODEL`, `BENCH_DEFENDER_MODEL`, and `BENCH_ORACLE_MODEL`
+replace the constant for that stage when set to a non-blank value. This exists
+for the lockout case: changing a model in source is itself a governed edit, and
+if the pipeline's current model no longer resolves (an older `claude` CLI, a
+retired ID), that edit cannot be adjudicated without a way to run the pipeline
+on another model first. An override is never silent. The ID is used as given,
+so one that does not resolve fails the stage and the runner fails closed; each
+stage writes the model it actually ran on (`_model`) and whether it was
+overridden (`_model_override`) into its part of the ledger entry, on every path
+including pipeline errors; a note goes to stderr when the override is read;
+`python -m cli stats` prints a "Models by stage" line with override counts; and
+the viewer's scope table can be switched to the entries a given Oracle model
+ruled on. A stage that made no call (the Defender the runner skipped after a
+CLEAR challenge, or a stage that rejected its input) records a model of
+`null`, and entries written before v2.1 carry no model field. The variables
+can also be set in a project's `.claude/settings.json` `env` block, which is
+the same place the hook itself is configured: treat a change there with the
+care you would give the hook, since it changes which model rules, and expect
+to find it in that project's ledger.
+
 With `BENCH_PROVIDER=claude_code` (set by the repo's `.claude/settings.json`),
 the local Claude Code CLI must be recent enough to recognize these IDs: Claude
 Sonnet 5 needs Claude Code v2.1.197+ and Claude Opus 4.8 needs v2.1.154+ (per

@@ -184,6 +184,74 @@ def stats_by_scope(entries: list[dict], project_root: str) -> list[dict]:
     return _group_tallies(groups, "scope")
 
 
+# Labels for a stage that recorded no model. Entries before v2.1 carry no
+# "_model" key at all; a stage that made no call (the Defender the runner
+# skipped after a CLEAR challenge, or a stage that rejected its input)
+# records None; a stage never reached (an earlier stage failed) has no
+# result dict.
+MODEL_UNRECORDED: str = "unrecorded"
+MODEL_SKIPPED: str = "no call"
+MODEL_NOT_REACHED: str = "not reached"
+
+
+def stage_model_label(entry: dict, stage: str) -> str:
+    """The model ``stage`` of ``entry`` ran on, as the stage recorded it.
+
+    Never empty: a stage records a non-blank id or None, so an empty string
+    can only come from a hand-edited entry and is read as unrecorded.
+    """
+    result: Any = entry.get(stage)
+    if not isinstance(result, dict):
+        return MODEL_NOT_REACHED
+    if "_model" not in result:
+        return MODEL_UNRECORDED
+    model: Any = result["_model"]
+    if model is None:
+        return MODEL_SKIPPED
+    return str(model) or MODEL_UNRECORDED
+
+
+def models_by_stage(entries: list[dict]) -> dict[str, dict[str, dict[str, int]]]:
+    """{stage: {model label: {"entries", "overridden"}}} over ``entries``.
+
+    "overridden" counts entries whose stage recorded that the model came
+    from a BENCH_<STAGE>_MODEL override rather than the constant, so an
+    override is visible in the aggregate and not only in one entry.
+    """
+    tallies: dict[str, dict[str, dict[str, int]]] = {stage: {} for stage in _STAGES}
+    for entry in entries:
+        for stage in _STAGES:
+            label: str = stage_model_label(entry, stage)
+            figures: dict[str, int] = tallies[stage].setdefault(
+                label, {"entries": 0, "overridden": 0}
+            )
+            figures["entries"] += 1
+            result: Any = entry.get(stage)
+            if isinstance(result, dict) and result.get("_model_override") is True:
+                figures["overridden"] += 1
+    return tallies
+
+
+def stats_by_scope_and_model(
+    entries: list[dict], project_root: str
+) -> tuple[list[dict], dict[str, list[dict]]]:
+    """(``stats_by_scope`` over every entry, the same per Oracle model label).
+
+    The Oracle is the stage that rules, so its model is the one a verdict
+    rate is attributed to. The aggregate travels beside the per-model map
+    rather than under a reserved key: a label is whatever string a stage
+    recorded, so any key chosen for the aggregate could be a model's name.
+    Labels are sorted.
+    """
+    groups: dict[str, list[dict]] = {}
+    for entry in entries:
+        groups.setdefault(stage_model_label(entry, "oracle"), []).append(entry)
+    per_model: dict[str, list[dict]] = {
+        label: stats_by_scope(groups[label], project_root) for label in sorted(groups)
+    }
+    return stats_by_scope(entries, project_root), per_model
+
+
 def _parse_citation(citation: Any) -> tuple[str, bool] | None:
     """(constraint_id, violated) for one citation, or None to skip it.
 

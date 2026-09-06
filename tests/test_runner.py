@@ -162,6 +162,39 @@ class HappyPathTests(unittest.TestCase):
         self.assertEqual(result["defender"]["_seconds"], 0.0)
         self.assertIsInstance(result["challenger"]["_seconds"], float)
 
+    def test_skipped_defender_records_no_model(
+        self, mock_const: MagicMock, mock_chall: MagicMock,
+        mock_def: MagicMock, mock_oracle: MagicMock, mock_ledger: MagicMock,
+    ) -> None:
+        # No model ruled in a skipped stage: an explicit None, not a missing
+        # key (which stats reads as an entry from before models were
+        # recorded) and not the constant (which would claim a call).
+        mock_const.return_value = _MOCK_CONSTITUTION
+        mock_chall.return_value = _clear_challenger()
+        mock_oracle.return_value = _pass_oracle()
+        result: dict = run_governance_pipeline("Write", _TOOL_INPUT, _DIFF)
+        self.assertIn("_model", result["defender"])
+        self.assertIsNone(result["defender"]["_model"])
+        self.assertFalse(result["defender"]["_model_override"])
+
+    def test_model_stamps_never_reach_downstream_prompts(
+        self, mock_const: MagicMock, mock_chall: MagicMock,
+        mock_def: MagicMock, mock_oracle: MagicMock, mock_ledger: MagicMock,
+    ) -> None:
+        # The model name is bookkeeping, not evidence: the Oracle must not
+        # read which model challenged, only what it found.
+        mock_const.return_value = _MOCK_CONSTITUTION
+        mock_chall.return_value = {
+            **_findings_challenger(), "_model": "claude-x", "_model_override": True,
+        }
+        mock_def.return_value = _rebuttal_defender()
+        mock_oracle.return_value = _pass_oracle()
+        result: dict = run_governance_pipeline("Write", _TOOL_INPUT, _DIFF)
+        seen_by_oracle: dict = mock_oracle.call_args.args[3]
+        self.assertNotIn("_model", seen_by_oracle)
+        self.assertNotIn("_model_override", seen_by_oracle)
+        self.assertEqual(result["challenger"]["_model"], "claude-x")
+
     def test_veto_verdict_propagated(
         self, mock_const: MagicMock, mock_chall: MagicMock,
         mock_def: MagicMock, mock_oracle: MagicMock, mock_ledger: MagicMock,
