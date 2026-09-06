@@ -518,10 +518,92 @@ class CmdViewerTests(unittest.TestCase):
             "<!doctype html><title>t</title>",
         )
         if os.name == "posix":
-            # Owner-only, like the ledger's entry files. Windows keeps only
-            # the read-only bit, so there is nothing to assert there.
+            # Owner-only, like the ledger's entry files.
             self.assertEqual(target.stat().st_mode & 0o777, 0o600)
+        else:
+            # Windows keeps only the read-only bit of the mode, so the file's
+            # ACL is what protects it: one entry, for this user, nothing
+            # inherited (utils.owneronly; tests/test_owneronly.py reads it
+            # back in full).
+            acl = subprocess.run(
+                ["icacls", str(target)], capture_output=True, text=True,
+                encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL, timeout=60,
+            ).stdout
+            entries: list[str] = [line for line in acl.splitlines() if ":(" in line]
+            self.assertEqual(len(entries), 1, acl)
+            self.assertNotIn("(I)", entries[0])
+            self.assertTrue(entries[0].rstrip().endswith(":(F)"), entries[0])
         opened.assert_called_once_with(target.resolve().as_uri())
+
+    def test_symlinked_viewer_target_is_refused(self) -> None:
+        tmp: str = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+        bench_dir: Path = Path(tmp) / ".bench"
+        bench_dir.mkdir()
+        elsewhere: Path = Path(tmp) / "elsewhere.html"
+        elsewhere.write_text("keep me", encoding="utf-8")
+        try:
+            (bench_dir / "viewer.html").symlink_to(elsewhere)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"symlinks unavailable here: {exc}")
+        err = io.StringIO()
+        with patch(
+            "cli.commands.generate_viewer_html", return_value="<!doctype html>"
+        ), patch(
+            "cli.commands.resolve_ledger_path",
+            return_value=str(bench_dir / "bench-ledger.json"),
+        ), patch("cli.commands.webbrowser.open") as opened:
+            with redirect_stderr(err):
+                code: int = cmd_viewer()
+        self.assertEqual(code, 1)
+        self.assertIn("symlink", err.getvalue())
+        self.assertEqual(elsewhere.read_text(encoding="utf-8"), "keep me")
+        opened.assert_not_called()
+
+    def test_symlinked_ledger_directory_is_refused(self) -> None:
+        tmp: str = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+        outside: Path = Path(tmp) / "outside"
+        outside.mkdir()
+        bench_dir: Path = Path(tmp) / ".bench"
+        try:
+            bench_dir.symlink_to(outside, target_is_directory=True)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"symlinks unavailable here: {exc}")
+        err = io.StringIO()
+        with patch(
+            "cli.commands.generate_viewer_html", return_value="<!doctype html>"
+        ), patch(
+            "cli.commands.resolve_ledger_path",
+            return_value=str(bench_dir / "bench-ledger.json"),
+        ), patch("cli.commands.webbrowser.open") as opened:
+            with redirect_stderr(err):
+                code: int = cmd_viewer()
+        self.assertEqual(code, 1)
+        self.assertIn("symlink", err.getvalue())
+        self.assertEqual(list(outside.iterdir()), [])
+        opened.assert_not_called()
+
+    def test_unrestrictable_viewer_is_removed_not_left_readable(self) -> None:
+        tmp: str = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+        ledger_path: str = os.path.join(tmp, ".bench", "bench-ledger.json")
+        target: Path = Path(tmp) / ".bench" / "viewer.html"
+        err = io.StringIO()
+        with patch(
+            "cli.commands.generate_viewer_html", return_value="<!doctype html>"
+        ), patch(
+            "cli.commands.resolve_ledger_path", return_value=ledger_path
+        ), patch(
+            "cli.commands.restrict_to_owner", side_effect=OSError("acl refused")
+        ), patch("cli.commands.webbrowser.open") as opened:
+            with redirect_stderr(err):
+                code: int = cmd_viewer()
+        self.assertEqual(code, 1)
+        self.assertFalse(target.exists())
+        self.assertIn("acl refused", err.getvalue())
+        self.assertIn("removing it", err.getvalue())
+        opened.assert_not_called()
 
     def test_generation_failure_exits_one(self) -> None:
         err = io.StringIO()
