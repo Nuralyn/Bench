@@ -62,6 +62,7 @@ HOOK_SCRIPT_RELPATH: str = f"{HOOK_PACKAGE}/{HOOK_SCRIPT_NAME}"
 IGNORE_LINE: str = "/.bench/"
 _GITIGNORE_NAME: str = ".gitignore"
 _CLAUDE_DIRNAME: str = ".claude"
+_SETTINGS_NAME: str = "settings.json"
 _BENCH_DIRNAME: str = ".bench"
 RECEIPT_RELPATH: str = ".bench/install.json"
 _RECEIPT_WHAT: str = "the install receipt"
@@ -528,7 +529,7 @@ def install(
     receipt_path: Path = target / RECEIPT_RELPATH
     previous: dict[str, Any] = _load_json_object(receipt_path, _RECEIPT_WHAT) or {}
 
-    settings_path: Path = target / _CLAUDE_DIRNAME / "settings.json"
+    settings_path: Path = target / _CLAUDE_DIRNAME / _SETTINGS_NAME
     settings: dict[str, Any] = _load_json_object(settings_path, "settings") or {}
     before: str = json.dumps(settings, sort_keys=True)
     command: str = hook_command(found.hook_script, python)
@@ -726,7 +727,7 @@ def uninstall(
     # a directory or file swapped for a symlink after install would otherwise
     # have the recorded removals land in whatever it points at.
     _refuse_symlink(target / _CLAUDE_DIRNAME, "the settings directory")
-    _refuse_symlink(target / _CLAUDE_DIRNAME / "settings.json", "settings")
+    _refuse_symlink(target / _CLAUDE_DIRNAME / _SETTINGS_NAME, "settings")
     _refuse_symlink(target / _BENCH_DIRNAME, "the ledger directory")
     receipt_path: Path = target / RECEIPT_RELPATH
     _refuse_symlink(receipt_path, _RECEIPT_WHAT)
@@ -739,7 +740,7 @@ def uninstall(
         )
     report: Report = Report()
 
-    settings_path: Path = target / _CLAUDE_DIRNAME / "settings.json"
+    settings_path: Path = target / _CLAUDE_DIRNAME / _SETTINGS_NAME
     settings: dict[str, Any] = _load_json_object(settings_path, "settings") or {}
     before: str = json.dumps(settings, sort_keys=True)
     hook_record: Any = receipt.get("hook")
