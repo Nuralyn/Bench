@@ -587,7 +587,10 @@ class TipCacheTests(unittest.TestCase):
         self._cache.write_text(json.dumps(data), encoding="utf-8")
 
     def _write_foreign_entry(
-        self, parents: list[str], name: str = "foreign.py"
+        self,
+        parents: list[str],
+        name: str = "foreign.py",
+        suffix: str = ".json",
     ) -> dict:
         """An entry file that did not pass through this writer.
 
@@ -604,7 +607,7 @@ class TipCacheTests(unittest.TestCase):
         }
         entry["entry_hash"] = compute_entry_hash(entry)
         self._entries.mkdir(parents=True, exist_ok=True)
-        (self._entries / f"{entry['entry_hash']}.json").write_text(
+        (self._entries / f"{entry['entry_hash']}{suffix}").write_text(
             json.dumps(entry), encoding="utf-8"
         )
         return entry
@@ -769,6 +772,49 @@ class TipCacheTests(unittest.TestCase):
         # A refused append writes nothing, the cache included.
         self.assertEqual(self._cache.read_bytes(), before)
 
+    def test_a_tampered_non_tip_is_the_auditors_finding_not_the_appends(
+        self,
+    ) -> None:
+        """The boundary the cache draws, pinned so it is a decision and not
+        an accident: the append proves what it links to, and the full walk
+        belongs to the auditor. The receipt lands on a sound tip; verify
+        reports the damage exactly as it did before."""
+        first: dict = self._append("a.py")
+        tip: dict = self._append("b.py")
+        target: Path = self._entries / f"{first['entry_hash']}.json"
+        tampered: dict = json.loads(target.read_text(encoding="utf-8"))
+        tampered["verdict"] = "VETO"
+        target.write_text(json.dumps(tampered), encoding="utf-8")
+
+        entry: dict = self._append("c.py")
+
+        self.assertEqual(entry["previous_hash"], [tip["entry_hash"]])
+        result: dict = verify_chain(self._ledger)
+        self.assertFalse(result["valid"])
+        self.assertEqual(result["failure_type"], "HASH_MISMATCH")
+
+    @unittest.skipUnless(
+        os.path.normcase("A") != "A", "the filesystem folds case only on Windows"
+    )
+    def test_the_listing_folds_case_where_the_loader_does(self) -> None:
+        """On Windows ``glob("*.json")`` matches ``.JSON`` too. A file only
+        the loader could see would be a tip the cache never links to, so the
+        listing must select exactly what the loader selects."""
+        self._append("a.py")
+        tip: dict = self._append("b.py")
+        foreign: dict = self._write_foreign_entry(
+            [tip["entry_hash"]], suffix=".JSON"
+        )
+
+        entry: dict = self._append("c.py")
+
+        self.assertEqual(entry["previous_hash"], [foreign["entry_hash"]])
+        # And the cache now names it, so the next append takes the fast path.
+        self.assertEqual(self._cache_data()["tips"], [entry["entry_hash"]])
+        after, reads = _reads_during(lambda: self._append("d.py"))
+        self.assertEqual(len(reads), 1)
+        self.assertEqual(after["previous_hash"], [entry["entry_hash"]])
+
     def test_a_cache_that_cannot_be_written_does_not_fail_the_append(
         self,
     ) -> None:
@@ -801,6 +847,19 @@ class TipCacheTests(unittest.TestCase):
         self.assertEqual(
             names, sorted(p.name for p in self._entries.glob("*.json"))
         )
+
+    def test_the_listing_applies_the_platform_case_rule(self) -> None:
+        """Both branches, on any platform, by pinning the rule directly."""
+        self._entries.mkdir(parents=True, exist_ok=True)
+        (self._entries / "lower.json").write_text("{}", encoding="utf-8")
+        (self._entries / "UPPER.JSON").write_text("{}", encoding="utf-8")
+
+        with patch("ledger.chain._FOLD_CASE", True):
+            self.assertEqual(
+                _entry_file_names(self._entries), ["UPPER.JSON", "lower.json"]
+            )
+        with patch("ledger.chain._FOLD_CASE", False):
+            self.assertEqual(_entry_file_names(self._entries), ["lower.json"])
 
     def test_the_scan_not_the_listing_decides_whether_the_ledger_is_empty(
         self,

@@ -450,6 +450,15 @@ fresh clone has none.
 _TIP_CACHE_FORMAT: int = 1
 
 
+_FOLD_CASE: bool = os.path.normcase("A") != "A"
+"""Whether this platform's paths fold case, as ``pathlib`` decides it.
+
+``Path.glob("*.json")`` matches ``.JSON`` on such a platform (Windows) and
+not elsewhere. The listing below must select exactly what the full scan and
+the auditor select, so it applies the same rule.
+"""
+
+
 def _entry_file_names(entries_dir: Path) -> list[str]:
     """Sorted names of the entry files, from one directory listing and no reads.
 
@@ -458,27 +467,29 @@ def _entry_file_names(entries_dir: Path) -> list[str]:
     since the cache was written changes it. It is also the one cost of an
     append that still grows with the chain, which is why ``os.listdir`` is
     used rather than ``glob``: it is three times faster on a large directory
-    (measured on NTFS, about 20 ms for 20,000 names against 65 ms), and the
-    filter is an exact suffix match. A file that ``glob("*.json")`` would match but this does
-    not (a differently cased suffix on Windows) therefore never enters the
-    cache: the full scan still finds it, its tip fails to resolve against
-    this listing, and the append falls back to the scan rather than trusting
-    the cache. Names are not checked for being regular files, which would
-    cost a stat per name: ``glob`` does not check either, so a stray
-    directory with the suffix is treated exactly as before. Its appearance
-    changes the listing, the scan refuses it as unreadable, and the auditor
-    reports it. It is never a tip, so the cache never links to it.
+    (measured on NTFS, about 20 ms for 20,000 names against 65 ms).
+
+    The filter must select exactly the files ``glob("*.json")`` selects for
+    the full scan and the auditor, or a file only they can see could become
+    a tip the cache never links to; ``_FOLD_CASE`` carries pathlib's rule.
+    Names are not checked for being regular files, which would cost a stat
+    per name: ``glob`` does not check either, so a stray directory with the
+    suffix is treated exactly as before. Its appearance changes the listing,
+    the scan refuses it as unreadable, and the auditor reports it. It is
+    never a tip, so the cache never links to it.
     """
     if not entries_dir.is_dir():
         return []
     try:
-        names: list[str] = [
-            name for name in os.listdir(entries_dir) if name.endswith(".json")
-        ]
+        raw: list[str] = os.listdir(entries_dir)
     except OSError as e:
         raise LedgerReadError(
             f"cannot list ledger entries {entries_dir}: {e}"
         ) from e
+    if _FOLD_CASE:
+        names: list[str] = [n for n in raw if n.lower().endswith(".json")]
+    else:
+        names = [n for n in raw if n.endswith(".json")]
     names.sort()
     return names
 
@@ -552,7 +563,19 @@ def _cached_tips(
     A cache that names a tip which no longer resolves is not repaired or
     partially used: it is discarded and the scan rebuilds it. A tip whose file
     is present but defective is likewise handed to the scan, which raises with
-    its own diagnosis, so the cache never changes what a corrupt ledger does.
+    its own diagnosis, so a corrupt tip changes nothing about what an append
+    does.
+
+    An entry the append does not link to is, by design, not read here. The
+    listing digest is over names, so an entry modified in place, corrupted,
+    or made unreadable without being renamed is not noticed by the cache,
+    and the receipt is written onto a valid tip where the full scan would
+    have refused. That is the boundary this cache draws: the append proves
+    what it links to, and the full walk belongs to ``verify_chain``, which
+    reports the damage as ``HASH_MISMATCH`` or ``READ_ERROR`` exactly as it
+    did before. Before the cache, such damage cost every later receipt; now
+    the trail keeps recording on a sound tip while the auditor names the
+    fault.
 
     What the checks cannot prove is that a named tip is still unreferenced,
     because that is a property of every other entry. The worst a wrong cache
@@ -600,10 +623,13 @@ def _cached_tips(
     # already descends from it, which is the one way a cache could
     # manufacture a fork. It is rescanned instead; tests/test_chain.py
     # (TipCacheTests) pins that.
-    present: set[str] = set(names)
+    # Membership under the same case rule as the listing, so a tip filed
+    # with a folded suffix on Windows still resolves and is read below
+    # through the case-insensitive filesystem that admitted it.
+    present: set[str] = {os.path.normcase(name) for name in names}
     for tip in tips:
         entry_file: Path = entries_dir / f"{tip}.json"
-        if entry_file.name not in present:
+        if os.path.normcase(entry_file.name) not in present:
             print(
                 f"[bench ledger] tip cache names {tip[:12]}, which no longer "
                 "resolves; rescanning the chain",
