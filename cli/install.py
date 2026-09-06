@@ -319,24 +319,37 @@ def _refuse_symlinked_gitignore(gitignore: Path) -> None:
         )
 
 
-def _ensure_ignored(gitignore: Path) -> str:
-    """Append ``/.bench/`` unless an equivalent line is already present."""
+def _ignore_plan(gitignore: Path) -> tuple[str, str | None, bool]:
+    """Decide the .gitignore step without writing.
+
+    Returns (status, the exact text to append or None, whether the file will
+    be created). The appended text follows the file's own line endings and
+    supplies a separator only when the file lacks a final newline, so
+    uninstall can remove precisely those bytes and leave the rest untouched.
+    """
     _refuse_symlinked_gitignore(gitignore)
+    if gitignore.is_dir():
+        raise InstallError(f"{gitignore} is a directory, not an ignore file")
+    created: bool = not gitignore.exists()
     existing: str = ""
-    if gitignore.exists():
+    if not created:
         try:
-            existing = gitignore.read_text(encoding="utf-8")
+            existing = gitignore.read_bytes().decode("utf-8")
         except (OSError, UnicodeDecodeError) as exc:
             raise InstallError(f"cannot read {gitignore}: {exc}") from exc
     if any(line.strip() in _IGNORE_EQUIVALENTS for line in existing.splitlines()):
-        return "unchanged"
-    separator: str = "" if not existing or existing.endswith("\n") else "\n"
+        return "unchanged", None, False
+    newline: str = "\r\n" if "\r\n" in existing else "\n"
+    separator: str = "" if not existing or existing.endswith("\n") else newline
+    return "written", f"{separator}{IGNORE_LINE}{newline}", created
+
+
+def _append_text(path: Path, text: str) -> None:
     try:
-        with gitignore.open("a", encoding="utf-8", newline="\n") as handle:
-            handle.write(f"{separator}{IGNORE_LINE}\n")
+        with path.open("ab") as handle:
+            handle.write(text.encode("utf-8"))
     except OSError as exc:
-        raise InstallError(f"cannot write {gitignore}: {exc}") from exc
-    return "written"
+        raise InstallError(f"cannot write {path}: {exc}") from exc
 
 
 def _hooks_dir(project: Path) -> Path | None:
@@ -394,20 +407,20 @@ def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def _install_guard(project: Path, guard: Path) -> tuple[str, str, Path | None]:
-    """Install the ledger commit guard as the project's pre-commit hook.
+def _guard_plan(project: Path, guard: Path, source: bytes) -> tuple[str, str, Path | None]:
+    """Decide the commit-guard step without writing.
 
     Returns (status, detail, target); ``target`` is set only when the file
-    at the hooks directory is Bench's guard, whether written now or already
-    there. An existing pre-commit hook is never overwritten: the guard is one
-    line of defence behind the ignore rule and the CI hygiene test, and
-    replacing a project's own hook to add it would be a worse trade.
+    at the hooks directory is or will be Bench's guard, and status "written"
+    means ``_write_guard`` must run. An existing pre-commit hook is never
+    overwritten: the guard is one line of defence behind the ignore rule and
+    the CI hygiene test, and replacing a project's own hook to add it would
+    be a worse trade.
     """
     hooks_dir, why_not = _locate_hooks_dir(project)
     if hooks_dir is None:
         return "skipped", why_not, None
     target: Path = hooks_dir / GUARD_NAME
-    source: bytes = _read_bytes(guard, "the commit guard")
     if target.is_symlink():
         # Checked before exists(): a dangling link reads as absent, and a
         # write would then land wherever the link points.
@@ -420,14 +433,17 @@ def _install_guard(project: Path, guard: Path) -> tuple[str, str, Path | None]:
             f"{target} exists and is not Bench's guard; call {guard.as_posix()} from it",
             None,
         )
+    return "written", str(target), target
+
+
+def _write_guard(target: Path, source: bytes) -> None:
     try:
-        hooks_dir.mkdir(parents=True, exist_ok=True)
+        target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(source)
         mode: int = target.stat().st_mode
         target.chmod(mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     except OSError as exc:
         raise InstallError(f"cannot write {target}: {exc}") from exc
-    return "written", str(target), target
 
 
 def _resolve_project(project: Path) -> Path:
@@ -482,6 +498,7 @@ def _guard_receipt(
     guard_status: str,
     previous: dict[str, Any],
     project: Path,
+    source: bytes,
 ) -> dict[str, str] | None:
     """The receipt's guard record: a guard install wrote now, or one an
     earlier receipt already claimed. An identical file nobody claimed stays
@@ -494,10 +511,17 @@ def _guard_receipt(
         return None
     if guard_status != "written" and not isinstance(previous.get("guard"), dict):
         return None
+    # The digest is of the bytes install writes (or found identical), so the
+    # record is correct even though the receipt is written before the guard.
     return {
         "path": guard_target.relative_to(project).as_posix(),
-        "sha256": _sha256(_read_bytes(guard_target, "the commit guard")),
+        "sha256": _sha256(source),
     }
+
+
+def _carry(previous: dict[str, Any], key: str, now: bool) -> bool:
+    """A creation flag stays true once any install run recorded it."""
+    return now or bool(previous.get(key))
 
 
 def install(
@@ -529,50 +553,63 @@ def install(
     receipt_path: Path = target / RECEIPT_RELPATH
     previous: dict[str, Any] = _load_json_object(receipt_path, _RECEIPT_WHAT) or {}
 
+    # Plan every step in memory first, write the receipt, then apply. A
+    # failure after the receipt leaves a record that reverses whatever did
+    # land; a failure before it leaves nothing written at all.
     settings_path: Path = target / _CLAUDE_DIRNAME / _SETTINGS_NAME
+    settings_existed: bool = settings_path.exists()
+    claude_dir_existed: bool = settings_path.parent.exists()
     settings: dict[str, Any] = _load_json_object(settings_path, "settings") or {}
     before: str = json.dumps(settings, sort_keys=True)
     command: str = hook_command(found.hook_script, python)
     hook_status: str = _register_hook(settings, command, settings_path)
-    report.add("hook", hook_status, command)
     # Ownership is recorded, never inferred: a hook that already matched the
     # generated command (a project wired by hand) is not claimed, so a later
     # uninstall leaves it. A hook install wrote or rewrote is its own.
     hook_record: dict[str, str] | None = None
     if hook_status != "unchanged" or isinstance(previous.get("hook"), dict):
         hook_record = {"command": command, "matcher": HOOK_MATCHER}
-
     env_added: dict[str, str] = _str_mapping(previous.get("env_added"))
+    provider_status: str | None = None
     if provider is not None:
-        status: str = _apply_provider(settings, provider, env_added, settings_path)
-        report.add("provider", status, f"BENCH_PROVIDER={provider}")
-    if json.dumps(settings, sort_keys=True) != before:
-        _write_json(settings_path, settings, "settings")
-        report.add("settings", "written", str(settings_path))
-    else:
-        report.add("settings", "unchanged", str(settings_path))
+        provider_status = _apply_provider(settings, provider, env_added, settings_path)
+    settings_changed: bool = json.dumps(settings, sort_keys=True) != before
 
-    ignore_status: str = _ensure_ignored(target / _GITIGNORE_NAME)
-    report.add("gitignore", ignore_status, IGNORE_LINE)
-    line_added: bool = ignore_status == "written" or bool(
-        previous.get("gitignore_line_added")
-    )
+    gitignore: Path = target / _GITIGNORE_NAME
+    ignore_status, ignore_text, ignore_created = _ignore_plan(gitignore)
+    guard_source: bytes = _read_bytes(found.guard, "the commit guard")
+    guard_status, guard_detail, guard_target = _guard_plan(target, found.guard, guard_source)
 
-    guard_status, guard_detail, guard_target = _install_guard(target, found.guard)
-    report.add("guard", guard_status, guard_detail)
-    guard_record: dict[str, str] | None = _guard_receipt(
-        guard_target, guard_status, previous, target
-    )
-
+    previous_appended: Any = previous.get("gitignore_appended")
     receipt: dict[str, Any] = {
         "bench_version": _bench_version(),
         "installed_at": datetime.now(timezone.utc).isoformat(),
         "hook": hook_record,
         "env_added": env_added,
-        "gitignore_line_added": line_added,
-        "guard": guard_record,
+        "settings_created": _carry(previous, "settings_created", not settings_existed),
+        "claude_dir_created": _carry(previous, "claude_dir_created", not claude_dir_existed),
+        "gitignore_created": _carry(previous, "gitignore_created", ignore_created),
+        "gitignore_appended": (
+            ignore_text
+            if ignore_text is not None
+            else (previous_appended if isinstance(previous_appended, str) else None)
+        ),
+        "guard": _guard_receipt(guard_target, guard_status, previous, target, guard_source),
     }
     _write_json(receipt_path, receipt, _RECEIPT_WHAT)
+
+    report.add("hook", hook_status, command)
+    if provider_status is not None:
+        report.add("provider", provider_status, f"BENCH_PROVIDER={provider}")
+    if settings_changed:
+        _write_json(settings_path, settings, "settings")
+    report.add("settings", "written" if settings_changed else "unchanged", str(settings_path))
+    if ignore_text is not None:
+        _append_text(gitignore, ignore_text)
+    report.add("gitignore", ignore_status, IGNORE_LINE)
+    if guard_status == "written" and guard_target is not None:
+        _write_guard(guard_target, guard_source)
+    report.add("guard", guard_status, guard_detail)
     report.add("receipt", "written", str(receipt_path))
     return report
 
@@ -659,9 +696,15 @@ def _chain_present(bench_dir: Path, receipt_path: Path) -> bool:
     return any(child != receipt_path for child in bench_dir.iterdir())
 
 
-def _remove_ignore_line(project: Path, added: bool, receipt_path: Path) -> tuple[str, str]:
+def _remove_ignore_suffix(
+    project: Path, receipt: dict[str, Any], receipt_path: Path
+) -> tuple[str, str]:
+    """Remove exactly the bytes install appended to .gitignore, and nothing
+    else: no re-wrapping of lines, no line-ending changes. The file is
+    removed only if install created it and nothing else was added since."""
     gitignore: Path = project / _GITIGNORE_NAME
-    if not added:
+    appended: Any = receipt.get("gitignore_appended")
+    if not isinstance(appended, str) or not appended:
         return "kept", f"{IGNORE_LINE} was not added by install"
     if _chain_present(project / _BENCH_DIRNAME, receipt_path):
         return "kept", f"{project / _BENCH_DIRNAME} holds a chain that must stay out of git"
@@ -669,21 +712,39 @@ def _remove_ignore_line(project: Path, added: bool, receipt_path: Path) -> tuple
         return "kept", f"{gitignore} is a symlink; not writing through it"
     if not gitignore.exists():
         return "unchanged", IGNORE_LINE
+    suffix: bytes = appended.encode("utf-8")
     try:
-        lines: list[str] = gitignore.read_text(encoding="utf-8").splitlines()
-    except (OSError, UnicodeDecodeError) as exc:
-        raise InstallError(f"cannot read {gitignore}: {exc}") from exc
-    remaining: list[str] = [line for line in lines if line.strip() != IGNORE_LINE]
-    if len(remaining) == len(lines):
-        return "unchanged", IGNORE_LINE
-    try:
-        if remaining:
-            gitignore.write_text("\n".join(remaining) + "\n", encoding="utf-8", newline="\n")
-        else:
+        data: bytes = gitignore.read_bytes()
+        if not data.endswith(suffix):
+            return "kept", f"{gitignore} changed since install"
+        remaining: bytes = data[: -len(suffix)]
+        if not remaining and receipt.get("gitignore_created"):
             gitignore.unlink()
+        else:
+            gitignore.write_bytes(remaining)
     except OSError as exc:
         raise InstallError(f"cannot write {gitignore}: {exc}") from exc
     return "removed", IGNORE_LINE
+
+
+def _finish_settings(
+    path: Path, settings: dict[str, Any], changed: bool, receipt: dict[str, Any]
+) -> tuple[str, str]:
+    """Write the settings back, or remove the file only if install created
+    it. A file that predates install stays, even as an empty object, and its
+    directory is removed only if install created that too."""
+    if not changed:
+        return "unchanged", str(path)
+    if settings or not receipt.get("settings_created"):
+        _write_json(path, settings, "settings")
+        return "written", str(path)
+    try:
+        path.unlink()
+        if receipt.get("claude_dir_created") and not any(path.parent.iterdir()):
+            path.parent.rmdir()
+    except OSError as exc:
+        raise InstallError(f"cannot remove {path}: {exc}") from exc
+    return "removed", str(path)
 
 
 def _remove_recorded_guard(project: Path, record: Any) -> tuple[str, str]:
@@ -756,23 +817,12 @@ def uninstall(
     report.add("hook", hook_status, hook_detail)
     env_status, env_detail = _remove_added_env(settings, _str_mapping(receipt.get("env_added")))
     report.add("env", env_status, env_detail)
-    if json.dumps(settings, sort_keys=True) == before:
-        report.add("settings", "unchanged", str(settings_path))
-    elif settings:
-        _write_json(settings_path, settings, "settings")
-        report.add("settings", "written", str(settings_path))
-    else:
-        try:
-            settings_path.unlink()
-            if not any(settings_path.parent.iterdir()):
-                settings_path.parent.rmdir()
-        except OSError as exc:
-            raise InstallError(f"cannot remove {settings_path}: {exc}") from exc
-        report.add("settings", "removed", str(settings_path))
-
-    ignore_status, ignore_detail = _remove_ignore_line(
-        target, bool(receipt.get("gitignore_line_added")), receipt_path
+    settings_status, settings_detail = _finish_settings(
+        settings_path, settings, json.dumps(settings, sort_keys=True) != before, receipt
     )
+    report.add("settings", settings_status, settings_detail)
+
+    ignore_status, ignore_detail = _remove_ignore_suffix(target, receipt, receipt_path)
     report.add("gitignore", ignore_status, ignore_detail)
 
     guard_status, guard_detail = _remove_recorded_guard(target, receipt.get("guard"))

@@ -281,7 +281,10 @@ class TestInstall(_ScratchCase):
         receipt: dict = self._receipt()
         self.assertEqual(receipt["hook"], {"command": self.command, "matcher": HOOK_MATCHER})
         self.assertEqual(receipt["env_added"], {})
-        self.assertTrue(receipt["gitignore_line_added"])
+        self.assertTrue(receipt["settings_created"])
+        self.assertTrue(receipt["claude_dir_created"])
+        self.assertTrue(receipt["gitignore_created"])
+        self.assertEqual(receipt["gitignore_appended"], f"{IGNORE_LINE}\n")
         # Relative to the project, so a moved repository still finds it.
         self.assertEqual(
             receipt["guard"],
@@ -496,12 +499,56 @@ class TestInstall(_ScratchCase):
         report: Report = self._install()
         self.assertEqual(_statuses(report)["gitignore"], "unchanged")
         self.assertEqual((self.project / ".gitignore").read_text(encoding="utf-8"), "node_modules/\n.bench/\n")
-        self.assertFalse(self._receipt()["gitignore_line_added"])
+        self.assertIsNone(self._receipt()["gitignore_appended"])
 
-    def test_gitignore_without_trailing_newline_gets_its_own_line(self) -> None:
-        (self.project / ".gitignore").write_text("dist", encoding="utf-8")
+    def test_gitignore_without_trailing_newline_gets_its_own_line_and_back(self) -> None:
+        (self.project / ".gitignore").write_bytes(b"dist")
         self._install()
-        self.assertEqual((self.project / ".gitignore").read_text(encoding="utf-8"), f"dist\n{IGNORE_LINE}\n")
+        self.assertEqual((self.project / ".gitignore").read_bytes(), f"dist\n{IGNORE_LINE}\n".encode())
+        self._uninstall()
+        self.assertEqual((self.project / ".gitignore").read_bytes(), b"dist")
+
+    def test_gitignore_line_endings_are_preserved_both_ways(self) -> None:
+        original: bytes = b"node_modules/\r\ndist/\r\n"
+        (self.project / ".gitignore").write_bytes(original)
+        self._install()
+        self.assertEqual(
+            (self.project / ".gitignore").read_bytes(), original + f"{IGNORE_LINE}\r\n".encode()
+        )
+        self._uninstall()
+        self.assertEqual((self.project / ".gitignore").read_bytes(), original)
+
+    def test_gitignore_changed_since_install_is_kept(self) -> None:
+        self._install()
+        gitignore: Path = self.project / ".gitignore"
+        gitignore.write_bytes(gitignore.read_bytes() + b"coverage/\n")
+        report: Report = self._uninstall()
+        self.assertEqual(_statuses(report)["gitignore"], "kept")
+        self.assertEqual(gitignore.read_bytes(), f"{IGNORE_LINE}\ncoverage/\n".encode())
+
+    def test_gitignore_directory_is_refused_before_any_write(self) -> None:
+        (self.project / ".gitignore").mkdir()
+        with self.assertRaises(InstallError):
+            self._install()
+        self.assertFalse(self.settings_path.exists())
+        self.assertFalse(self.receipt_path.exists())
+
+    def test_a_failure_after_the_receipt_is_reversible(self) -> None:
+        # The receipt is written before any other file, so whatever landed
+        # before the failure is reversed by uninstall instead of orphaned.
+        self._init_repo()
+        with patch.object(install_module, "_write_guard", side_effect=InstallError("disk full")):
+            with self.assertRaises(InstallError):
+                self._install()
+        self.assertTrue(self.settings_path.exists())
+        self.assertTrue(self.receipt_path.exists())
+        self.assertIsNotNone(self._receipt()["hook"])
+        report: Report = self._uninstall()
+        self.assertEqual(_statuses(report)["hook"], "removed")
+        self.assertEqual(_statuses(report)["settings"], "removed")
+        self.assertEqual(_statuses(report)["gitignore"], "removed")
+        self.assertFalse(self.settings_path.exists())
+        self.assertFalse((self.project / ".gitignore").exists())
 
     def test_invalid_settings_json_is_an_error_not_an_overwrite(self) -> None:
         self.settings_path.parent.mkdir()
@@ -626,6 +673,26 @@ class TestUninstall(_ScratchCase):
         self.assertEqual(status, "unchanged")
         self.assertIn("changed since install", detail)
         self.assertEqual(self._settings()["env"], {"BENCH_PROVIDER": "anthropic"})
+
+    def test_a_pre_existing_empty_settings_file_and_directory_survive(self) -> None:
+        self._write_settings({})
+        self._install()
+        self.assertFalse(self._receipt()["settings_created"])
+        self.assertFalse(self._receipt()["claude_dir_created"])
+        report: Report = self._uninstall()
+        self.assertEqual(_statuses(report)["settings"], "written")
+        self.assertTrue(self.settings_path.is_file())
+        self.assertEqual(self._settings(), {})
+
+    def test_a_pre_existing_directory_survives_when_the_file_did_not(self) -> None:
+        self.settings_path.parent.mkdir()
+        self._install()
+        self.assertTrue(self._receipt()["settings_created"])
+        self.assertFalse(self._receipt()["claude_dir_created"])
+        report: Report = self._uninstall()
+        self.assertEqual(_statuses(report)["settings"], "removed")
+        self.assertFalse(self.settings_path.exists())
+        self.assertTrue(self.settings_path.parent.is_dir())
 
     def test_ignore_line_stays_while_a_chain_exists(self) -> None:
         self._install()
