@@ -69,7 +69,7 @@ from utils.stats import (
     seconds_by_stage,
     tokens_per_entry,
 )
-from utils.owneronly import restrict_to_owner
+from utils.owneronly import open_owner_only
 from utils.viewer import generate_viewer_html
 
 _HASH_PREFIX_LEN: int = 12
@@ -1067,8 +1067,9 @@ def cmd_viewer() -> int:
     to the chain it renders (``<ledger dir>/viewer.html``, inside the
     gitignored ``.bench/`` directory) rather than to the system temp
     directory, where it outlived the session with no cleanup, and it is
-    restricted to the current user on every platform: a 0600 mode on POSIX,
-    a one-entry DACL on Windows (utils.owneronly).
+    created readable by the current user only on every platform, from its
+    first byte: a 0600 mode on POSIX, a one-entry DACL on Windows
+    (utils.owneronly).
     """
     try:
         html_content: str = generate_viewer_html()
@@ -1094,33 +1095,23 @@ def cmd_viewer() -> int:
         return 1
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
-        # Owner-only from creation, matching the ledger's own entry files,
-        # since the page embeds every diff body the chain holds. O_TRUNC
-        # keeps an existing file's mode, so the restriction below covers a
-        # rewrite too. Windows honours only the read-only bit of this mode;
-        # restrict_to_owner sets the file's ACL there instead.
-        fd: int = os.open(
-            target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600
-        )
+        # Owner-only from the first byte, since the page embeds every diff
+        # body the chain holds: the previous page is removed and a new file
+        # is created exclusively with the restriction already in place
+        # (mode 0600 on POSIX, a one-entry DACL on Windows). Restricting
+        # after the write would leave a window in which the page could be
+        # opened and a readable handle kept.
+        if target.exists():
+            target.unlink()
+        fd: int = open_owner_only(target)
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(html_content)
     except OSError as e:
-        print(f"[bench cli] viewer write failed: {e}", file=sys.stderr)
-        return 1
-    try:
-        restrict_to_owner(target)
-    except OSError as e:
-        # A page of diff bodies that cannot be restricted to its owner is
-        # removed, not left behind readable by whoever shares the machine.
         print(
-            f"[bench cli] could not restrict {target} to the current user: {e}; "
-            f"removing it rather than leaving it readable",
+            f"[bench cli] viewer write failed: {e}. Nothing readable was left "
+            f"behind: the page is created owner-only or not at all.",
             file=sys.stderr,
         )
-        try:
-            target.unlink()
-        except OSError as unlink_error:
-            print(f"[bench cli] could not remove {target}: {unlink_error}", file=sys.stderr)
         return 1
 
     print(f"Bench viewer written to: {target}")

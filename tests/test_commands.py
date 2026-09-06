@@ -584,7 +584,9 @@ class CmdViewerTests(unittest.TestCase):
         self.assertEqual(list(outside.iterdir()), [])
         opened.assert_not_called()
 
-    def test_unrestrictable_viewer_is_removed_not_left_readable(self) -> None:
+    def test_unprotectable_viewer_is_never_written(self) -> None:
+        # The page is created owner-only or not at all: if the platform
+        # refuses the restricted creation, no file with diff bodies exists.
         tmp: str = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, tmp)
         ledger_path: str = os.path.join(tmp, ".bench", "bench-ledger.json")
@@ -595,15 +597,34 @@ class CmdViewerTests(unittest.TestCase):
         ), patch(
             "cli.commands.resolve_ledger_path", return_value=ledger_path
         ), patch(
-            "cli.commands.restrict_to_owner", side_effect=OSError("acl refused")
+            "cli.commands.open_owner_only", side_effect=OSError("acl refused")
         ), patch("cli.commands.webbrowser.open") as opened:
             with redirect_stderr(err):
                 code: int = cmd_viewer()
         self.assertEqual(code, 1)
         self.assertFalse(target.exists())
         self.assertIn("acl refused", err.getvalue())
-        self.assertIn("removing it", err.getvalue())
         opened.assert_not_called()
+
+    def test_a_previous_page_is_replaced_by_a_fresh_owner_only_one(self) -> None:
+        tmp: str = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+        bench_dir: Path = Path(tmp) / ".bench"
+        bench_dir.mkdir()
+        target: Path = bench_dir / "viewer.html"
+        target.write_text("old page", encoding="utf-8")
+        with patch(
+            "cli.commands.generate_viewer_html", return_value="<!doctype html>new"
+        ), patch(
+            "cli.commands.resolve_ledger_path",
+            return_value=str(bench_dir / "bench-ledger.json"),
+        ), patch("cli.commands.webbrowser.open", return_value=True):
+            with redirect_stdout(io.StringIO()):
+                code: int = cmd_viewer()
+        self.assertEqual(code, 0)
+        self.assertEqual(target.read_text(encoding="utf-8"), "<!doctype html>new")
+        if os.name == "posix":
+            self.assertEqual(target.stat().st_mode & 0o777, 0o600)
 
     def test_generation_failure_exits_one(self) -> None:
         err = io.StringIO()
