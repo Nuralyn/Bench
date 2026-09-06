@@ -91,6 +91,31 @@ class TestHelp(unittest.TestCase):
                 for flag in flags:
                     self.assertIn(flag, out)
 
+    def test_flag_summary_lines_start_with_the_command(self) -> None:
+        # Each summary line is the command followed by its flags, on every
+        # Python version. argparse derived a subparser's prog from the
+        # parent's two-line usage on 3.11 to 3.13 until prog was set.
+        _, out, _ = _run(["--help"])
+        summary: str = out.split("commands and their flags:", 1)[1]
+        for command in _GRAMMAR:
+            with self.subTest(command=command):
+                self.assertIn(f"\n  {command}", summary)
+        self.assertNotIn("python -m cli", summary)
+        self.assertNotIn("[-h]", summary)
+        self.assertIn("\n  install [--project PATH]", summary)
+
+    def test_per_command_usage_names_the_command(self) -> None:
+        _, out, _ = _run(["verify-purge", "--help"])
+        self.assertTrue(out.startswith("usage: bench verify-purge "), out[:60])
+
+    def test_help_states_which_flags_the_command_requires(self) -> None:
+        # The parser leaves required values to the command, so the prose is
+        # the only statement of requiredness and must match the command.
+        _, out, _ = _run(["record-sanitation", "--help"])
+        self.assertIn("Every flag is required", out)
+        _, out, _ = _run(["verify-sanitation-binding", "--help"])
+        self.assertIn("--record, --mirror, and --repository are\nrequired", out)
+
     def test_grammar_table_matches_the_parser(self) -> None:
         # The table above must not drift from build_parser: every subparser
         # is in the table and the table names nothing the parser lacks.

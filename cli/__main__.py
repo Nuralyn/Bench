@@ -17,6 +17,7 @@ generic "the following arguments are required". Logic lives in commands.py.
 import argparse
 import sys
 from collections.abc import Callable, Sequence
+from typing import NoReturn
 
 from cli.commands import (
     cmd_attest,
@@ -38,6 +39,7 @@ from cli.commands import (
 from cli.install import PROVIDERS
 
 USAGE: str = "bench <command> [options]\n       python -m cli <command> [options]"
+_REPO_METAVAR: str = "OWNER/NAME"
 
 _DESCRIPTION: str = (
     "Bench: constitutional governance for Claude Code. Every command reads the\n"
@@ -45,14 +47,51 @@ _DESCRIPTION: str = (
 )
 
 
+class _ParserExit(Exception):
+    """argparse wanted to end the process; ``main`` returns the code instead.
+
+    ``code`` is 0 after help, 2 after a usage error. The message, if any,
+    has already been written to stderr by ``_Parser.exit``.
+    """
+
+    def __init__(self, code: int) -> None:
+        super().__init__(code)
+        self.code: int = code
+
+
+class _Parser(argparse.ArgumentParser):
+    """An ArgumentParser that reports instead of calling ``sys.exit``.
+
+    ``main`` returns an exit code so the console script and ``python -m cli``
+    behave alike and tests can call it directly; letting argparse raise
+    SystemExit and catching it would be swallowing a process-exit signal.
+    Subparsers are created with this class too (argparse uses the parent's
+    type), so every usage error takes the same path.
+    """
+
+    def exit(self, status: int = 0, message: str | None = None) -> NoReturn:
+        if message:
+            print(message, end="", file=sys.stderr)
+        raise _ParserExit(status)
+
+    def error(self, message: str) -> NoReturn:
+        self.print_usage(sys.stderr)
+        print(f"{self.prog}: error: {message}", file=sys.stderr)
+        raise _ParserExit(2)
+
+
 def _add(
-    sub: "argparse._SubParsersAction[argparse.ArgumentParser]",
+    sub: "argparse._SubParsersAction[_Parser]",
     name: str,
     help_text: str,
     description: str | None = None,
 ) -> argparse.ArgumentParser:
     return sub.add_parser(
         name,
+        # Set explicitly: argparse otherwise derives a subparser's prog from
+        # the parent's usage string, which here is two lines, and the
+        # per-command usage came out mangled on Python 3.11 to 3.13.
+        prog=f"bench {name}",
         help=help_text,
         description=description or help_text,
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -65,7 +104,7 @@ def _add(
 
 def build_parser() -> argparse.ArgumentParser:
     """The complete grammar: one subparser per command, every flag declared."""
-    parser = argparse.ArgumentParser(
+    parser = _Parser(
         prog="bench",
         usage=USAGE,
         description=_DESCRIPTION,
@@ -114,7 +153,8 @@ def build_parser() -> argparse.ArgumentParser:
         "BEFORE the push: the record names post-image hashes, and an unrecorded\n"
         "removal violates C-008. Refuses outside a plain TTY, inside an agent\n"
         "session, on a non-conforming record, and if the chain does not still\n"
-        "verify after. Every flag except --repository is required.",
+        "verify after. Every flag is required: C-008 enumerates each field and\n"
+        "none has a default.",
     )
     record.add_argument("--refs-file", metavar="PATH", help="pre- and post-rewrite refs")
     record.add_argument("--backup-id", metavar="ID", help="identifier of the encrypted backup")
@@ -122,7 +162,7 @@ def build_parser() -> argparse.ArgumentParser:
     record.add_argument("--reason", metavar="TEXT", help="why the published copy was sanitized")
     record.add_argument("--retention-owner", metavar="NAME", help="who retains the backup")
     record.add_argument("--retention-policy", metavar="TEXT", help="how long and under what terms")
-    record.add_argument("--repository", metavar="OWNER/NAME", help="GitHub repository the copy lives in")
+    record.add_argument("--repository", metavar=_REPO_METAVAR, help="GitHub repository the copy lives in")
 
     purge = _add(
         sub,
@@ -133,18 +173,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--manifest and --repository are required.",
     )
     purge.add_argument("--manifest", metavar="TSV", help="purge manifest to check")
-    purge.add_argument("--repository", metavar="OWNER/NAME", help="GitHub repository to probe")
+    purge.add_argument("--repository", metavar=_REPO_METAVAR, help="GitHub repository to probe")
 
     binding = _add(
         sub,
         "verify-sanitation-binding",
         "Check a sanitation record against a mirror and the remote",
         "Check that a sanitation record's post-image refs match a local mirror\n"
-        "and the remote repository. --record and --mirror are required.",
+        "and the remote repository. --record, --mirror, and --repository are\n"
+        "required.",
     )
     binding.add_argument("--record", metavar="HASH", help="entry hash of the sanitation record")
     binding.add_argument("--mirror", metavar="PATH", help="local mirror clone to compare")
-    binding.add_argument("--repository", metavar="OWNER/NAME", help="GitHub repository to compare")
+    binding.add_argument("--repository", metavar=_REPO_METAVAR, help="GitHub repository to compare")
 
     audit_san = _add(
         sub,
@@ -257,20 +298,16 @@ _DISPATCH: dict[str, Callable[[argparse.Namespace], int]] = {
 def main(argv: Sequence[str]) -> int:
     """Parse ``argv`` (``argv[0]`` is the program) and run one command.
 
-    argparse reports usage errors and help itself, then raises SystemExit;
-    that exit code is returned rather than propagated so the console script
-    and ``python -m cli`` behave alike and tests can call this directly.
-    Usage errors exit 2, help exits 0, commands return their own code.
+    Usage errors exit 2, help exits 0, commands return their own code. The
+    parser reports and raises ``_ParserExit`` instead of calling
+    ``sys.exit``, so the code is returned here rather than a process-exit
+    signal being caught.
     """
     parser: argparse.ArgumentParser = build_parser()
     try:
         args: argparse.Namespace = parser.parse_args(list(argv[1:]))
-    except SystemExit as exc:
-        # argparse has already written the usage message or help text.
-        code = exc.code
-        if code is None:
-            return 0
-        return code if isinstance(code, int) else 2
+    except _ParserExit as exc:
+        return exc.code
     if args.command == "help":
         parser.print_help()
         return 0
