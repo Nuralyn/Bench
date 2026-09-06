@@ -448,6 +448,22 @@ class TestInstall(_ScratchCase):
         self.assertEqual(self.guard_path.read_bytes(), b"#!/bin/sh\nnpm test\n")
         self.assertIsNone(self._receipt()["guard"])
 
+    def test_a_dangling_symlink_at_the_guard_target_is_not_written_through(self) -> None:
+        self._init_repo()
+        self.guard_path.parent.mkdir(parents=True, exist_ok=True)
+        destination: Path = self.tmp / "elsewhere" / "pre-commit"
+        destination.parent.mkdir()
+        try:
+            self.guard_path.symlink_to(destination)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"symlinks unavailable here: {exc}")
+        report: Report = self._install()
+        status, detail = _step(report, "guard")
+        self.assertEqual(status, "skipped")
+        self.assertIn("symlink", detail)
+        self.assertFalse(destination.exists())
+        self.assertIsNone(self._receipt()["guard"])
+
     def test_an_identical_unclaimed_guard_is_not_claimed(self) -> None:
         # Same bytes as Bench's guard but no receipt says install wrote it:
         # ownership is recorded, never inferred from content.
@@ -632,6 +648,25 @@ class TestUninstall(_ScratchCase):
         report: Report = self._uninstall()
         self.assertEqual(_statuses(report)["guard"], "kept")
         self.assertTrue(elsewhere.exists())
+
+    def test_a_settings_directory_swapped_for_a_symlink_is_refused(self) -> None:
+        # Only the recorded Bench hook lives in settings, so a successful
+        # uninstall would delete the file: through a link that would be
+        # another project's settings.
+        self._install()
+        other: Path = self.tmp / "other-project" / ".claude"
+        other.mkdir(parents=True)
+        shutil.copy(self.settings_path, other / "settings.json")
+        shutil.rmtree(self.settings_path.parent)
+        try:
+            self.settings_path.parent.symlink_to(other, target_is_directory=True)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"symlinks unavailable here: {exc}")
+        with self.assertRaises(InstallError) as ctx:
+            self._uninstall()
+        self.assertIn("symlink", str(ctx.exception))
+        self.assertTrue((other / "settings.json").is_file())
+        self.assertTrue(self.receipt_path.exists())
 
     def test_guard_is_still_removed_after_the_project_moves(self) -> None:
         self._init_repo()

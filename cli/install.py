@@ -407,6 +407,10 @@ def _install_guard(project: Path, guard: Path) -> tuple[str, str, Path | None]:
         return "skipped", why_not, None
     target: Path = hooks_dir / GUARD_NAME
     source: bytes = _read_bytes(guard, "the commit guard")
+    if target.is_symlink():
+        # Checked before exists(): a dangling link reads as absent, and a
+        # write would then land wherever the link points.
+        return "skipped", f"{target} is a symlink; not writing through it", None
     if target.exists():
         if _read_bytes(target, "the pre-commit hook") == source:
             return "unchanged", str(target), target
@@ -718,7 +722,14 @@ def uninstall(
         stdin_isatty if stdin_isatty is not None else sys.stdin.isatty,
     )
     target: Path = _resolve_project(project)
+    # The same refusals install applies, before anything is read or removed:
+    # a directory or file swapped for a symlink after install would otherwise
+    # have the recorded removals land in whatever it points at.
+    _refuse_symlink(target / _CLAUDE_DIRNAME, "the settings directory")
+    _refuse_symlink(target / _CLAUDE_DIRNAME / "settings.json", "settings")
+    _refuse_symlink(target / _BENCH_DIRNAME, "the ledger directory")
     receipt_path: Path = target / RECEIPT_RELPATH
+    _refuse_symlink(receipt_path, _RECEIPT_WHAT)
     receipt: dict[str, Any] | None = _load_json_object(receipt_path, _RECEIPT_WHAT)
     if receipt is None:
         raise InstallError(
