@@ -23,7 +23,6 @@ _REPO_ROOT: Path = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from cli.__main__ import _flag_value  # noqa: E402
 from ledger import retire  # noqa: E402
 from ledger.chain import (  # noqa: E402
     ANCHOR_VERDICT,
@@ -559,13 +558,9 @@ class CliWiringTests(RetirementTestCase):
         self.assertEqual(
             cmd_retire(archive_dir=self.archive_dir, reason=None), 1
         )
-
-    def test_flag_value_handles_absent_present_and_trailing(self) -> None:
-        self.assertIsNone(_flag_value([], "--reason"))
-        self.assertIsNone(_flag_value(["--reason"], "--reason"))
-        self.assertEqual(
-            _flag_value(["--reason", "because"], "--reason"), "because"
-        )
+    # Flag parsing itself is argparse's and is covered by
+    # tests/test_cli_parser.py; the command-level checks above are the
+    # ones that carry the C-008 reasoning.
 
 
 class ProjectRelativeTests(unittest.TestCase):
