@@ -59,6 +59,7 @@ GUARD_NAME: str = "pre-commit"
 # install, or a wheel (site-packages/hooks/pre-tool-use.py).
 HOOK_SCRIPT_RELPATH: str = f"{HOOK_PACKAGE}/{HOOK_SCRIPT_NAME}"
 IGNORE_LINE: str = "/.bench/"
+_GITIGNORE_NAME: str = ".gitignore"
 RECEIPT_RELPATH: str = ".bench/install.json"
 _RECEIPT_WHAT: str = "the install receipt"
 DISTRIBUTION_NAME: str = "bench-governance"
@@ -492,7 +493,7 @@ def install(
         )
     target: Path = _resolve_project(project)
     # Checked before anything is written, so a refusal leaves no half-install.
-    _refuse_symlinked_gitignore(target / ".gitignore")
+    _refuse_symlinked_gitignore(target / _GITIGNORE_NAME)
     python: Path = interpreter if interpreter is not None else Path(sys.executable)
     report: Report = Report()
     receipt_path: Path = target / RECEIPT_RELPATH
@@ -514,7 +515,7 @@ def install(
     else:
         report.add("settings", "unchanged", str(settings_path))
 
-    ignore_status: str = _ensure_ignored(target / ".gitignore")
+    ignore_status: str = _ensure_ignored(target / _GITIGNORE_NAME)
     report.add("gitignore", ignore_status, IGNORE_LINE)
     line_added: bool = ignore_status == "written" or bool(
         previous.get("gitignore_line_added")
@@ -622,7 +623,7 @@ def _chain_present(bench_dir: Path, receipt_path: Path) -> bool:
 
 
 def _remove_ignore_line(project: Path, added: bool, receipt_path: Path) -> tuple[str, str]:
-    gitignore: Path = project / ".gitignore"
+    gitignore: Path = project / _GITIGNORE_NAME
     if not added:
         return "kept", f"{IGNORE_LINE} was not added by install"
     if _chain_present(project / ".bench", receipt_path):
