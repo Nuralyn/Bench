@@ -29,6 +29,9 @@ jobs:
         # The lock was added by recorded owner decision (commit 9eb1ade);
         # regenerate it per the note in requirements.txt.
         run: pip install --only-binary ':all:' --require-hashes -r requirements.lock
+      # Installation of the package itself is proved by the package job below,
+      # which builds the wheel from hash-pinned inputs and runs it from a
+      # clean environment; the matrix runs the tests from the checkout.
       - name: Run tests
         run: python -m unittest discover -s tests -v
 
@@ -51,6 +54,68 @@ jobs:
         run: ruff check .
       - name: Type check
         run: python -m mypy
+
+  package:
+    # A plain `pip install` must be complete: the wheel has to carry the core
+    # constitution, the hook script, and the commit guard, and the pipeline
+    # has to run from site-packages with no checkout anywhere. This job builds
+    # the wheel from hash-pinned inputs, installs it into a clean environment,
+    # registers it in a scratch project, and fires the installed hook with an
+    # unknown provider. The expected result is a fail-closed VETO recorded in
+    # that project's ledger at GENESIS, which proves the constitution loaded
+    # and the pipeline ran, with no model call and no key.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Build the wheel
+        run: |
+          pip install --only-binary ':all:' --require-hashes -r requirements-build.lock
+          pip wheel --no-deps --no-build-isolation -w dist .
+      - name: Install the wheel into a clean environment
+        run: |
+          python -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --only-binary ':all:' --require-hashes -r requirements.lock
+          "$RUNNER_TEMP/venv/bin/pip" install --no-deps dist/*.whl
+      - name: Prove the packaged resources and the pipeline run from the wheel
+        working-directory: ${{ runner.temp }}
+        env:
+          BENCH_PROVIDER: nonexistent
+        run: |
+          set -euo pipefail
+          BENCH="$RUNNER_TEMP/venv/bin/bench"
+          "$BENCH" help > /dev/null
+          "$BENCH" constitution | tee constitution.txt | head -4
+          grep -q 'Constraints  : 8' constitution.txt
+          grep -q 'site-packages/pipeline/bench.json' constitution.txt
+          git init -q proj
+          "$BENCH" install --project proj | tee install.txt
+          grep -q 'guard      written' install.txt
+          test -x proj/.git/hooks/pre-commit
+          grep -qx '/.bench/' proj/.gitignore
+          cd proj
+          HOOK=$(python3 -c "import json; print(json.load(open('.claude/settings.json'))['hooks']['PreToolUse'][0]['hooks'][0]['command'])")
+          echo "$HOOK" | grep -q 'site-packages/hooks/pre-tool-use.py'
+          echo '{"tool_name":"Write","tool_input":{"file_path":"x.py","content":"pass\n"}}' | sh -c "$HOOK" > decision.json
+          python3 - <<'EOF'
+          import json, pathlib
+          out = json.load(open("decision.json"))["hookSpecificOutput"]
+          reason = out.get("permissionDecisionReason", "")
+          assert out["permissionDecision"] == "deny", out
+          assert "stage error" in reason, reason
+          for absent in ("Constitution load failure", "pipeline is unavailable"):
+              assert absent not in reason, reason
+          entries = list(pathlib.Path(".bench/entries").glob("*.json"))
+          assert len(entries) == 1, entries
+          entry = json.loads(entries[0].read_text())
+          assert entry["pipeline_error"] is True, entry["pipeline_error"]
+          assert entry["previous_hash"] == "GENESIS", entry["previous_hash"]
+          print("wheel hook: fail-closed VETO recorded at GENESIS")
+          EOF
+          "$BENCH" verify | tee verify.txt
+          grep -q 'Ledger: VALID' verify.txt
 
   browser-tests:
     # tests/test_viewer_browser.py loads the generated ledger viewer in

@@ -166,7 +166,7 @@ class DefaultPathTests(unittest.TestCase):
     """
 
     def test_default_resolves_to_bench_root_regardless_of_cwd(self) -> None:
-        expected_path: Path = _REPO_ROOT / "bench.json"
+        expected_path: Path = _REPO_ROOT / "pipeline" / "bench.json"
         _, expected_hash = load_constitution_snapshot(str(expected_path))
 
         original_cwd: str = os.getcwd()

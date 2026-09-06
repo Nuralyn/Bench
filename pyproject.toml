@@ -1,5 +1,36 @@
-# Tool configuration only. Packaging metadata is a separate change
-# (roadmap v2.1 item 3.1) and is deliberately not declared here yet.
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bench-governance"
+version = "2.1.0.dev0"
+description = "Constitutional governance layer for Claude Code: every edit is challenged, defended, ruled on, and hash-chained into a ledger."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+authors = [{ name = "Dana Burks", email = "dburks@nuralyn.com" }]
+# Mirrors requirements.txt exactly; tests/test_packaging.py fails if the two
+# drift. The lock files remain the install path CI uses.
+dependencies = ["anthropic==1.2.0"]
+
+[project.urls]
+Repository = "https://github.com/Nuralyn/Bench"
+
+[project.scripts]
+bench = "cli.__main__:run"
+
+# Runtime resources ship as package data so a wheel install is complete: the
+# core constitution beside the module that loads it, and the two hook scripts
+# in the hooks package (pre-tool-use.py is a module file there and ships on
+# its own). tests/test_packaging.py fails if any of the three goes missing.
+[tool.setuptools]
+packages = ["cli", "pipeline", "ledger", "utils", "hooks"]
+
+[tool.setuptools.package-data]
+pipeline = ["bench.json"]
+hooks = ["pre-commit"]
 
 [tool.ruff]
 target-version = "py311"

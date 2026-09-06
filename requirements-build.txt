@@ -1,0 +1,9 @@
+# Build backend for the package (pyproject.toml [build-system]). CI installs
+# requirements-build.lock (pinned with sha256 hashes) and then builds with
+# --no-build-isolation, so nothing is fetched unpinned to produce the wheel or
+# the editable install. Regenerate the lock exactly as for requirements.lock:
+#   python -m piptools compile --generate-hashes --strip-extras \
+#     --output-file requirements-build.lock requirements-build.txt
+# and land it the same way: by deliberate human decision after reading the
+# diff (CLAUDE.md rule 1). Not needed to run Bench.
+setuptools==84.0.0

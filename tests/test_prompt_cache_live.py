@@ -38,7 +38,7 @@ _SYSTEM: str = (
 )
 class PromptCacheLiveTests(unittest.TestCase):
     def test_second_call_reads_the_prefix_from_cache(self) -> None:
-        core, _ = load_constitution_snapshot(str(_REPO_ROOT / "bench.json"))
+        core, _ = load_constitution_snapshot(str(_REPO_ROOT / "pipeline" / "bench.json"))
         # Bench's real prefix: the constitution plus a repository context of
         # the size the runner sends, well over the model's cacheable minimum.
         prefix: str = build_cached_prefix(core, "# CONTEXT\n" + ("lorem ipsum " * 900))

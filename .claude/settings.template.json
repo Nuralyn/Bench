@@ -9,7 +9,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"/absolute/path/to/bench/hooks/pre-tool-use.py\""
+            "command": "\"/absolute/path/to/python\" \"/absolute/path/to/bench/hooks/pre-tool-use.py\""
           }
         ]
       }

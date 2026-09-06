@@ -82,7 +82,6 @@ PreToolUse Hook -> Challenger (Sonnet) -> Defender (Sonnet) -> Oracle (Opus) -> 
 
 ```
 bench/
-  bench.json              # Constitution file. User-editable. Versioned.
   .claude/
     settings.json         # Claude Code hook config
   hooks/
@@ -92,6 +91,8 @@ bench/
     defender.py           # Soundness argument (Sonnet)
     oracle.py             # Binding verdict (Opus)
     constitution.py       # Load, snapshot, hash
+    bench.json            # Constitution file. User-editable. Versioned.
+                          # Package data, so it ships in the wheel.
     runner.py             # Sequential orchestration
   ledger/                 # Code only. No chain data is tracked here.
     chain.py              # Hash-chaining, append
@@ -109,7 +110,9 @@ bench/
     commands.py           # verify, ledger, stats, constitution, viewer,
                           # retire, audit-retirement, record-sanitation,
                           # audit-sanitation, verify-sanitation-binding,
-                          # verify-purge, migrate-ledger, attest
+                          # verify-purge, migrate-ledger, attest,
+                          # install, uninstall
+    install.py            # bench install / bench uninstall
   utils/
     diff.py               # Diff extraction and formatting
     api.py                # Anthropic API client
@@ -192,7 +195,8 @@ non-Anthropic model families remain out of scope.
     files or functions only.
 14. One change per tool call. Do not batch unrelated changes into a single
     Write/Edit operation.
-15. If you modify bench.json (the constitution), increment the version field.
+15. If you modify pipeline/bench.json (the constitution), increment the
+    version field.
 16. If you modify any file in pipeline/, ledger/, or hooks/, you are
     modifying the governance pipeline itself. Constraint C-007 applies.
     Be aware that Bench will scrutinize these changes.
@@ -223,7 +227,7 @@ change.
 
 ## Constitution Reference
 
-The constitution lives in bench.json. Current constraints:
+The constitution lives in pipeline/bench.json. Current constraints:
 
 - **C-001**: No silent error swallowing (veto)
 - **C-002**: Scope boundary enforcement (veto)
