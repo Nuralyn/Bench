@@ -1,42 +1,7 @@
 #!/bin/sh
-# Bench pre-commit guard: refuse a commit that stages operational ledger data.
-#
-# A ledger entry embeds the full diff body of the change it governs, so a
-# committed chain publishes every change it ever saw. Between April and July
-# 2026 that is exactly what happened in this repository, across three
-# unrelated projects, because the chain was a tracked artifact of the repo it
-# governed. The chain is now private and project-local: every governed
-# project, Bench included, keeps it in .bench/, which is gitignored. A fresh
-# clone starts with no chain and opens a new one at GENESIS on its first
-# governed edit.
-#
-# This hook is the commit-time gate. tests/test_ledger_hygiene.py holds the
-# CI-side backstop, which also catches a chain committed under another name.
-# Public verification is served by the generated attestation artifact, which
-# carries commitments rather than content.
-#
-# Enable once per clone:  git config core.hooksPath scripts/githooks
-
-# --diff-filter=d excludes deletions: untracking a previously committed chain
-# stages the removal of those paths, and that is the direction this guard
-# wants, not something to block.
-staged=$(git diff --cached --name-only --diff-filter=d -- \
-    .bench \
-    ledger/bench-ledger.json \
-    ledger/ledger-meta.json \
-    ledger/entries)
-
-if [ -n "$staged" ]; then
-    echo "pre-commit: this commit stages operational ledger data:" >&2
-    echo "$staged" | sed 's/^/  /' >&2
-    echo "" >&2
-    echo "The ledger is private. It records the full diff of every change it" >&2
-    echo "governs, so committing it publishes them all. Unstage these paths:" >&2
-    echo "" >&2
-    echo "  git rm --cached -r <path>" >&2
-    echo "" >&2
-    echo "Note that .gitignore does not untrack a file already committed." >&2
-    exit 1
-fi
-
-exit 0
+# Compatibility shim. The ledger commit guard lives at hooks/pre-commit, where
+# it ships inside the Bench wheel for `bench install` to copy into governed
+# projects. Clones that enabled the guard with
+#   git config core.hooksPath scripts/githooks
+# keep working through this file. Git runs hooks from the repository root.
+exec "$(dirname "$0")/../../hooks/pre-commit" "$@"

@@ -232,7 +232,7 @@ class LedgerShapeDetectorTests(unittest.TestCase):
         self.assertFalse(_is_ledger_shaped(payload))
 
     def test_ignores_bench_json(self) -> None:
-        raw: str = (_REPO_ROOT / "bench.json").read_text(encoding="utf-8")
+        raw: str = (_REPO_ROOT / "pipeline" / "bench.json").read_text(encoding="utf-8")
         self.assertFalse(_is_ledger_shaped(raw))
 
     def test_ignores_python_source_including_this_detector(self) -> None:

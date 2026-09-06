@@ -22,6 +22,7 @@ import webbrowser
 from pathlib import Path
 from typing import Any
 
+from cli.install import InstallError, Report, install, uninstall
 from ledger.chain import (
     LedgerReadError,
     append_entry,
@@ -1205,6 +1206,47 @@ def cmd_audit_retirement(archive: str | None = None) -> int:
     if message := report.get("message"):
         print(f"  message      : {message}", file=sys.stderr)
     return 1
+
+
+def cmd_install(project: str | None, provider: str | None = None) -> int:
+    """Register Bench in a project: hook, ignore rule, commit guard.
+
+    Argument handling and rendering only; every step and its idempotency
+    rule lives in ``cli.install.install``.
+    """
+    if not project:
+        print("[bench cli] install requires --project <path>", file=sys.stderr)
+        return 1
+    try:
+        report: Report = install(Path(project), provider=provider)
+    except InstallError as e:
+        print(f"[bench cli] install failed: {e}", file=sys.stderr)
+        return 1
+    print(f"Bench registered in {Path(project).expanduser().resolve()}")
+    print(report.render(), end="")
+    return 0 if report.ok else 1
+
+
+def cmd_uninstall(project: str | None) -> int:
+    """Reverse ``install``.
+
+    Passes the real environment and ``sys.stdin.isatty`` so the human gate
+    ``cli.install.uninstall`` applies is the live one, as ``cmd_retire`` does
+    for retirement.
+    """
+    if not project:
+        print("[bench cli] uninstall requires --project <path>", file=sys.stderr)
+        return 1
+    try:
+        report: Report = uninstall(
+            Path(project), environ=os.environ, stdin_isatty=sys.stdin.isatty
+        )
+    except InstallError as e:
+        print(f"[bench cli] uninstall failed: {e}", file=sys.stderr)
+        return 1
+    print(f"Bench removed from {Path(project).expanduser().resolve()}")
+    print(report.render(), end="")
+    return 0 if report.ok else 1
 
 
 def _print_entry_line(entry: dict) -> None:

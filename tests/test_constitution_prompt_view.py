@@ -234,7 +234,7 @@ class BenchConstitutionBudgetTests(unittest.TestCase):
     """Bench's own constitution, as the models receive it, fits the budget."""
 
     def test_prompt_view_of_core_constitution_is_within_budget(self) -> None:
-        core, _ = load_constitution_snapshot(str(_REPO_ROOT / "bench.json"))
+        core, _ = load_constitution_snapshot(str(_REPO_ROOT / "pipeline" / "bench.json"))
         rendered: str = json.dumps(prompt_view(core), indent=2)
         self.assertLessEqual(
             len(rendered),
@@ -246,7 +246,7 @@ class BenchConstitutionBudgetTests(unittest.TestCase):
         )
 
     def test_core_constitution_rules_reach_the_models_whole(self) -> None:
-        core, _ = load_constitution_snapshot(str(_REPO_ROOT / "bench.json"))
+        core, _ = load_constitution_snapshot(str(_REPO_ROOT / "pipeline" / "bench.json"))
         view: dict = prompt_view(core)
         self.assertEqual(len(view["constraints"]), len(core["constraints"]))
         for original, rendered in zip(core["constraints"], view["constraints"]):

@@ -5,6 +5,9 @@ __pycache__/
 .venv/
 venv/
 *.egg-info/
+# `pip wheel .` and `pip install .` build in-tree
+build/
+dist/
 .coverage
 htmlcov/
 .pytest_cache/

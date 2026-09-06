@@ -45,7 +45,7 @@ file, where `python -m cli constitution` shows them apart from the rule and
 the ledger's constitution hash still covers them. Users can add their own
 constraints. The constitution is law. The Oracle enforces it.
 
-See [bench.json](bench.json) for the current constraints.
+See [pipeline/bench.json](pipeline/bench.json) for the current constraints.
 
 ## Self-Governance
 
@@ -173,8 +173,12 @@ Run `python -m cli stats` to see the full governance history.
 git clone https://github.com/Nuralyn/bench.git
 cd bench
 
-# Install
-pip install -r requirements.txt
+# Install. The constitution, hook script, and commit guard ship inside the
+# package, so a plain install is complete; use -e for a checkout you develop
+# in. Either way you get a `bench` command and `python -m cli` keeps working.
+# Give Bench an environment of its own (a venv or pipx): its top-level
+# packages have generic names.
+pip install .            # developers: pip install -e .
 
 # Optional: the browser-level viewer test (tests/test_viewer_browser.py)
 # needs Playwright and Chromium. Without them that module skips itself;
@@ -206,16 +210,29 @@ export ANTHROPIC_API_KEY=your-key-here
 #   Option B: use your existing Claude Code subscription instead (no API key)
 # export BENCH_PROVIDER=claude_code
 
-# Add Bench hooks to your Claude Code project
-# Copy the TEMPLATE, not Bench's own .claude/settings.json: that file registers
-# the hook by a Bench-relative path, which only resolves when the working
-# directory is the Bench repo itself.
-cp .claude/settings.template.json /your-project/.claude/settings.json
-# Then edit the copied file and replace /absolute/path/to/bench with the
-# absolute path to this checkout. Claude Code runs the hook with your project
-# as the working directory, so a relative path leaves python unable to find the
-# script. The hook then emits no JSON, and Bench fails closed — blocking every
-# Write/Edit/MultiEdit in that project until the path is corrected.
+# Register Bench in your Claude Code project. This writes the PreToolUse hook
+# into <project>/.claude/settings.json (merging with what is already there),
+# pinned to the interpreter you installed Bench into and to the installed hook
+# script; appends /.bench/ to the project's .gitignore; and installs the
+# ledger commit guard as the project's pre-commit hook when it has none. It
+# records exactly what it wrote in <project>/.bench/install.json. Re-running
+# it is safe: every step reports written, updated, or unchanged.
+bench install --project /your-project
+# Add --provider claude_code (or anthropic, openrouter) to set BENCH_PROVIDER
+# in that settings file; without it the pipeline's default applies.
+#
+# Claude Code runs the hook with your project as the working directory and
+# whatever `python` is on PATH there, which is why the command pins the
+# interpreter. If the environment Bench lives in moves or is deleted, the hook
+# emits no JSON and Bench fails closed, blocking every Write/Edit/MultiEdit in
+# that project until you re-run `bench install`. To wire it by hand instead,
+# copy .claude/settings.template.json and replace both placeholders with
+# absolute paths.
+#
+# `bench uninstall --project /your-project` removes what the receipt names and
+# only if unchanged since: anything else is reported and kept, and with no
+# receipt nothing is removed. Like `retire`, it refuses inside an agent
+# session: run it from a plain terminal.
 
 # Add your project's own rules as a layer
 # Bench's core constitution always applies. Put rules specific to THIS project
@@ -243,15 +260,16 @@ JSON
 # you govern. It is the shared floor, not the place for one project's rules.
 
 # Keep the ledger out of git BEFORE your first governed edit
-# The ledger stores the full diff of every change it governs, so committing it
-# publishes them (see "Project-Scoped Ledger" below). Anchor the pattern with a
-# leading slash: bare `.bench/` would match any directory of that name at any
-# depth in the project.
+# `bench install` already did this. The ledger stores the full diff of every
+# change it governs, so committing it publishes them (see "Project-Scoped
+# Ledger" below). If you wired Bench by hand, add the line yourself, anchored
+# with a leading slash: bare `.bench/` would match any directory of that name
+# at any depth in the project.
 echo '/.bench/' >> /your-project/.gitignore
 
-# Verify governance
-python -m cli verify
-python -m cli stats
+# Verify governance (python -m cli <command> is the same thing)
+bench verify
+bench stats
 ```
 
 ## Provider Configuration
@@ -422,7 +440,7 @@ constraint stricter, but it cannot weaken what the core already requires.
 
 | Working directory | Constitution |
 |---|---|
-| Inside the Bench repo | `bench.json` (core only — it *is* Bench's constitution) |
+| Inside the Bench repo | `pipeline/bench.json` (core only — it *is* Bench's constitution) |
 | Any other project | core + `<project>/bench.json` when that file exists |
 | `BENCH_CONSTITUTION_PATH` set | core + that file |
 

@@ -12,11 +12,13 @@ from cli.commands import (
     cmd_audit_retirement,
     cmd_audit_sanitation,
     cmd_constitution,
+    cmd_install,
     cmd_ledger,
     cmd_migrate_ledger,
     cmd_record_sanitation,
     cmd_retire,
     cmd_stats,
+    cmd_uninstall,
     cmd_verify,
     cmd_verify_purge,
     cmd_verify_sanitation_binding,
@@ -25,9 +27,20 @@ from cli.commands import (
 
 
 _USAGE: str = (
-    "Usage: python -m cli <command> [options]\n"
+    "Usage: bench <command> [options]\n"
+    "       python -m cli <command> [options]\n"
     "\n"
     "Commands:\n"
+    "  install --project PATH [--provider NAME]\n"
+    "                             Register Bench in a project: write the\n"
+    "                             PreToolUse hook into its .claude/settings.json\n"
+    "                             (pinned to this interpreter and checkout),\n"
+    "                             add /.bench/ to its .gitignore, and install\n"
+    "                             the ledger commit guard. Idempotent.\n"
+    "  uninstall --project PATH   Reverse install: remove the hook, Bench's env\n"
+    "                             keys, the guard it wrote, and the ignore line\n"
+    "                             when no chain exists there. Refuses inside an\n"
+    "                             agent session, like retire.\n"
     "  verify                     Validate the ledger hash chain\n"
     "  ledger [--all] [--vetoes]  Show ledger entries (default: last 10)\n"
     "  stats                      Governance summary statistics\n"
@@ -185,6 +198,18 @@ def _run_custody_command(command: str, rest: list[str]) -> int | None:
     return None
 
 
+def _run_setup_command(command: str, rest: list[str]) -> int | None:
+    """Dispatch install and uninstall. None when ``command`` is neither."""
+    if command == "install":
+        return cmd_install(
+            project=_flag_value(rest, "--project"),
+            provider=_flag_value(rest, "--provider"),
+        )
+    if command == "uninstall":
+        return cmd_uninstall(project=_flag_value(rest, "--project"))
+    return None
+
+
 def main(argv: list[str]) -> int:
     if len(argv) < 2:
         print(_USAGE, end="")
@@ -199,6 +224,9 @@ def main(argv: list[str]) -> int:
     result = _run_custody_command(command, rest)
     if result is not None:
         return result
+    result = _run_setup_command(command, rest)
+    if result is not None:
+        return result
     if command in ("-h", "--help", "help"):
         print(_USAGE, end="")
         return 0
@@ -208,5 +236,14 @@ def main(argv: list[str]) -> int:
     return 1
 
 
-if __name__ == "__main__":
+def run() -> None:
+    """Console-script entry point for the ``bench`` command (pyproject.toml).
+
+    ``python -m cli`` reaches ``main`` through the block below. Both spellings
+    hand ``main`` the same argv shape, so the two cannot drift.
+    """
     sys.exit(main(sys.argv))
+
+
+if __name__ == "__main__":
+    run()

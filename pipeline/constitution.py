@@ -72,9 +72,11 @@ _PROMPT_CONSTRAINT_FIELDS: tuple[str, ...] = (
 # A cwd-relative default would let `python -m cli constitution`, run from a
 # governed project, display a different constitution than the one the
 # pipeline enforced; anchoring here means every caller sees one constitution
-# regardless of working directory.
-_BENCH_ROOT: Path = Path(__file__).resolve().parent.parent
-_DEFAULT_CONSTITUTION_PATH: str = str(_BENCH_ROOT / "bench.json")
+# regardless of working directory. The file sits beside this module (it is
+# package data of ``pipeline``) so the same path holds in a checkout, an
+# editable install, and a wheel; a copy outside the package would be absent
+# from a wheel and every governed edit would fail closed.
+_DEFAULT_CONSTITUTION_PATH: str = str(Path(__file__).resolve().parent / "bench.json")
 
 # Core constraints are Bench's own (C-001..C-008). A governed project's own
 # constraints live in a reserved namespace so the two can never be confused and
