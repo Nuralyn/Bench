@@ -142,7 +142,10 @@ def _present_segments(ledger_path: str) -> list[str]:
 
     All three are optional. A first retirement finds the frozen array, its meta
     pin, and the entries directory; every retirement after it finds only the
-    entries directory, because that is all ``append_entry`` writes.
+    entries directory, because that is the only segment ``append_entry``
+    writes. The tip cache it keeps beside the entries is derived, not a
+    segment: it is neither archived nor moved, and the anchor append rebuilds
+    it for the successor.
     """
     file_path: Path = Path(ledger_path)
     directory: Path = file_path.parent

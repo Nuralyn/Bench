@@ -23,6 +23,12 @@ reconciled by the next governed edit.
 Writes are atomic via ``os.replace`` on a same-directory temp file, so a crash
 mid-write cannot leave a half-written file on disk.
 
+Beside ``entries/`` sits ``tip-cache.json``, a derived record of the current
+tips that lets an append validate only the entries it will link to instead of
+re-reading the whole chain. It is never authoritative (see
+``TIP_CACHE_FILENAME``): a stale, missing, or doubtful cache falls back to the
+full scan, and the auditor does not read it at all.
+
 This module only records; independent validation lives in ``verify.py``.
 """
 
@@ -426,6 +432,237 @@ def compute_tips(entries: list[dict]) -> list[str]:
     return sorted(known - referenced)
 
 
+TIP_CACHE_FILENAME: str = "tip-cache.json"
+"""Derived record of the current tips, written beside ``entries/``.
+
+Computing the tips from scratch means reading and re-hashing every entry file,
+so the cost of an append grew with the length of the chain. The cache names
+the tips the last append left behind, so the next append reads and validates
+only the entries it will link to. It is derived, never authoritative: the
+auditor (``verify.py``) never reads it, ``load_ledger`` never reads it, and
+the writer trusts it only after every cheap check passes (see
+``_cached_tips``). When any check fails the writer falls back to the full
+scan and rebuilds the cache from it. Deleting the file is always safe.
+
+It is not a ledger segment. Retirement neither archives nor moves it, and a
+fresh clone has none.
+"""
+_TIP_CACHE_FORMAT: int = 1
+
+
+def _entry_file_names(entries_dir: Path) -> list[str]:
+    """Sorted names of the entry files, from one directory listing and no reads.
+
+    A listing is the cheapest possible view of the entries directory and is
+    what the cache's staleness check is keyed on: any file added or removed
+    since the cache was written changes it. It is also the one cost of an
+    append that still grows with the chain, which is why ``os.listdir`` is
+    used rather than ``glob``: it is three times faster on a large directory
+    (measured on NTFS, about 20 ms for 20,000 names against 65 ms), and the
+    filter is an exact suffix match. A file that ``glob("*.json")`` would match but this does
+    not (a differently cased suffix on Windows) therefore never enters the
+    cache: the full scan still finds it, its tip fails to resolve against
+    this listing, and the append falls back to the scan rather than trusting
+    the cache. Names are not checked for being regular files, which would
+    cost a stat per name: ``glob`` does not check either, so a stray
+    directory with the suffix is treated exactly as before. Its appearance
+    changes the listing, the scan refuses it as unreadable, and the auditor
+    reports it. It is never a tip, so the cache never links to it.
+    """
+    if not entries_dir.is_dir():
+        return []
+    try:
+        names: list[str] = [
+            name for name in os.listdir(entries_dir) if name.endswith(".json")
+        ]
+    except OSError as e:
+        raise LedgerReadError(
+            f"cannot list ledger entries {entries_dir}: {e}"
+        ) from e
+    names.sort()
+    return names
+
+
+def _listing_digest(names: list[str]) -> str:
+    """SHA-256 over the sorted entry file names, the cache's staleness key."""
+    joined: str = "\n".join(sorted(names))
+    return hashlib.sha256(joined.encode("utf-8")).hexdigest()
+
+
+def _legacy_pin(legacy: list[dict]) -> tuple[int, str]:
+    """``(count, tip hash)`` of the frozen array, as the cache records it.
+
+    The array is frozen, so these only change if the file itself is swapped
+    for another, which the cache must notice.
+    """
+    if not legacy:
+        return 0, ""
+    return len(legacy), str(legacy[-1].get("entry_hash", ""))
+
+
+def _read_tip_cache(cache_path: Path) -> dict | None:
+    """Parse the cache, or return ``None`` when it is absent or unusable.
+
+    Absence is the normal first-run state and is silent. Anything else that
+    stops the cache from being used is logged (C-001), because a cache that
+    keeps failing turns every append back into a full scan and the operator
+    should be able to see why.
+    """
+    if not cache_path.is_file():
+        return None
+    try:
+        data: object = json.loads(cache_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as e:
+        print(
+            f"[bench ledger] tip cache unreadable ({e}); rescanning the chain",
+            file=sys.stderr,
+        )
+        return None
+    if not isinstance(data, dict) or data.get("format") != _TIP_CACHE_FORMAT:
+        print(
+            "[bench ledger] tip cache has an unknown format; rescanning the "
+            "chain",
+            file=sys.stderr,
+        )
+        return None
+    return data
+
+
+def _cached_tips(
+    cache_path: Path,
+    entries_dir: Path,
+    names: list[str],
+    legacy: list[dict],
+) -> list[str] | None:
+    """The tips the cache names, or ``None`` when the full scan must run.
+
+    The cache is trusted exactly as far as it can be checked without reading
+    the chain:
+
+    * its listing digest must equal the digest of the current listing, so a
+      file added or removed by anything other than this writer (another
+      process, a restore, a hand copy) invalidates it;
+    * its pin on the frozen array must match the array actually read;
+    * every tip it names must resolve to an entry file in the listing, and
+      that file must pass the same identity checks the full scan applies
+      before an append may build on it. The writer only ever records the
+      entry it just wrote, so a tip is always an entry file; a cache naming
+      the frozen array's tip did not come from this writer and is rescanned.
+
+    A cache that names a tip which no longer resolves is not repaired or
+    partially used: it is discarded and the scan rebuilds it. A tip whose file
+    is present but defective is likewise handed to the scan, which raises with
+    its own diagnosis, so the cache never changes what a corrupt ledger does.
+
+    What the checks cannot prove is that a named tip is still unreferenced,
+    because that is a property of every other entry. The worst a wrong cache
+    can do is therefore name an older entry as a parent and leave a fork,
+    which is a legal state the auditor reports and the next full scan heals.
+    It can never produce a broken link, a lost entry, or a second genesis.
+    """
+    cache: dict | None = _read_tip_cache(cache_path)
+    if cache is None:
+        return None
+
+    legacy_count, legacy_tip = _legacy_pin(legacy)
+    if (
+        cache.get("entries_digest") != _listing_digest(names)
+        or cache.get("legacy_count") != legacy_count
+        or cache.get("legacy_tip") != legacy_tip
+    ):
+        print(
+            "[bench ledger] tip cache is stale; rescanning the chain",
+            file=sys.stderr,
+        )
+        return None
+
+    raw_tips: Any = cache.get("tips")
+    if (
+        not isinstance(raw_tips, list)
+        or not raw_tips
+        or not all(isinstance(tip, str) and tip for tip in raw_tips)
+    ):
+        print(
+            "[bench ledger] tip cache names no usable tips; rescanning the "
+            "chain",
+            file=sys.stderr,
+        )
+        return None
+    tips: list[str] = sorted(set(raw_tips))
+
+    # Every tip must be an entry file, with no exemption for the frozen
+    # array's tip. The writer records only the entry it just wrote, which
+    # always lives in entries/, so no cache it produced can name the array's
+    # tip. The one state in which that tip is live (an array with no entry
+    # files yet) is also a state with no cache, so it takes the full scan.
+    # A cache that does name it was not produced here, and exempting it from
+    # the file check would mean linking to it with no proof that nothing
+    # already descends from it, which is the one way a cache could
+    # manufacture a fork. It is rescanned instead; tests/test_chain.py
+    # (TipCacheTests) pins that.
+    present: set[str] = set(names)
+    for tip in tips:
+        entry_file: Path = entries_dir / f"{tip}.json"
+        if entry_file.name not in present:
+            print(
+                f"[bench ledger] tip cache names {tip[:12]}, which no longer "
+                "resolves; rescanning the chain",
+                file=sys.stderr,
+            )
+            return None
+        try:
+            data: dict | None = _read_entry_file(entry_file, strict=True)
+        except LedgerReadError as e:
+            print(
+                f"[bench ledger] cached tip cannot be read ({e}); rescanning "
+                "the chain",
+                file=sys.stderr,
+            )
+            return None
+        if data is None or _entry_defect(data, entry_file):
+            print(
+                f"[bench ledger] cached tip {tip[:12]} fails validation; "
+                "rescanning the chain",
+                file=sys.stderr,
+            )
+            return None
+    return tips
+
+
+def _write_tip_cache(
+    cache_path: Path,
+    names: list[str],
+    legacy: list[dict],
+    tips: list[str],
+) -> None:
+    """Record ``tips`` as the current tips for the listing ``names``.
+
+    Best effort by design. The entry is already on disk when this runs, and
+    the cache is derived, so a failure here must not turn a recorded verdict
+    into a reported error; it is logged and the next append rescans.
+    """
+    legacy_count, legacy_tip = _legacy_pin(legacy)
+    payload: dict[str, Any] = {
+        "format": _TIP_CACHE_FORMAT,
+        "note": (
+            "Derived from a scan of the chain and never authoritative. "
+            "Safe to delete; the next append rebuilds it."
+        ),
+        "entries_digest": _listing_digest(names),
+        "legacy_count": legacy_count,
+        "legacy_tip": legacy_tip,
+        "tips": sorted(tips),
+    }
+    try:
+        _atomic_write_json(cache_path, payload)
+    except OSError as e:
+        print(
+            f"[bench ledger] tip cache not updated ({e}); the next append "
+            "rescans the chain",
+            file=sys.stderr,
+        )
+
+
 def _order_entries(legacy: list[dict], new: list[dict]) -> list[dict]:
     """Legacy entries in stored order, then new entries topologically.
 
@@ -533,19 +770,34 @@ def append_entry(
     directory.mkdir(parents=True, exist_ok=True)
 
     # Strict on the write path: appending onto a ledger that cannot be fully
-    # read risks a second genesis or a lost parent.
+    # read risks a second genesis or a lost parent. The frozen array is
+    # constant in size and is read every time; the entries directory is
+    # listed every time but read in full only when the tip cache cannot be
+    # trusted (see _cached_tips), so what an append reads no longer grows
+    # with the length of the chain. Only the listing does.
     entries_dir: Path = Path(resolve_entries_dir(resolved))
+    cache_path: Path = directory / TIP_CACHE_FILENAME
     legacy: list[dict] = _load_legacy_strict(file_path)
-    existing_new: list[dict] = _load_entry_files(entries_dir, strict=True)
-    existing: list[dict] = legacy + existing_new
+    names: list[str] = _entry_file_names(entries_dir)
 
     # A list of every current tip, so a fork left by a git merge is reconciled
     # by the next governed edit instead of needing a separate command. Sorted,
     # so the hash does not depend on filesystem iteration order.
     previous_hash: str | list[str] = _GENESIS_MARKER
-    if existing:
-        previous_hash = compute_tips(existing)
-        if not previous_hash:
+    cached: list[str] | None = None
+    if legacy or names:
+        cached = _cached_tips(cache_path, entries_dir, names, legacy)
+    if cached is not None:
+        previous_hash = cached
+    else:
+        # The scan decides whether the ledger is empty, not the listing: it
+        # is the same enumeration the auditor uses, so nothing it would count
+        # as an entry can be missed and answered with a second genesis.
+        existing_new: list[dict] = _load_entry_files(entries_dir, strict=True)
+        existing: list[dict] = legacy + existing_new
+        if existing:
+            previous_hash = compute_tips(existing)
+        if existing and not previous_hash:
             # A non-empty ledger always has at least one tip; a cycle is
             # impossible because a parent hash must exist before a child can
             # commit to it. Reaching here means the ledger is incoherent, and
@@ -603,6 +855,13 @@ def append_entry(
             f"refusing to overwrite existing ledger entry {entry_file}"
         )
     _atomic_write_json(entry_file, entry)
+
+    # The new entry named every current tip as a parent, so it is now the
+    # only tip. Record that for the listing as it stands with the new file
+    # in it; anything that changes the listing after this invalidates it.
+    _write_tip_cache(
+        cache_path, names + [entry_file.name], legacy, [entry["entry_hash"]]
+    )
 
     return entry
 
