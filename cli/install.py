@@ -59,6 +59,7 @@ GUARD_NAME: str = "pre-commit"
 HOOK_SCRIPT_RELPATH: str = f"{HOOK_PACKAGE}/{HOOK_SCRIPT_NAME}"
 IGNORE_LINE: str = "/.bench/"
 RECEIPT_RELPATH: str = ".bench/install.json"
+_RECEIPT_WHAT: str = "the install receipt"
 DISTRIBUTION_NAME: str = "bench-governance"
 PROVIDERS: tuple[str, ...] = ("anthropic", "openrouter", "claude_code")
 _GIT_TIMEOUT_SECONDS: float = 30.0
@@ -390,6 +391,46 @@ def _str_mapping(value: Any) -> dict[str, str]:
     return {str(k): str(v) for k, v in value.items() if isinstance(v, str)}
 
 
+def _apply_provider(
+    settings: dict[str, Any], provider: str, env_added: dict[str, str], path: Path
+) -> str:
+    """Set ``env.BENCH_PROVIDER``. Returns the step status.
+
+    The key is recorded in ``env_added`` as install's own only when install
+    added it. An explicit ``--provider`` that overrides a value the project
+    set itself leaves ownership with the project, so uninstall keeps it.
+    """
+    env: dict[str, Any] = _mapping(settings, "env", path)
+    current: Any = env.get("BENCH_PROVIDER")
+    if current == provider:
+        status: str = "unchanged"
+    elif "BENCH_PROVIDER" not in env:
+        status = "set"
+        env_added["BENCH_PROVIDER"] = provider
+    else:
+        status = "updated"
+        if "BENCH_PROVIDER" in env_added:
+            env_added["BENCH_PROVIDER"] = provider
+    env["BENCH_PROVIDER"] = provider
+    return status
+
+
+def _guard_receipt(
+    guard_target: Path | None, guard_status: str, previous: dict[str, Any]
+) -> dict[str, str] | None:
+    """The receipt's guard record: a guard install wrote now, or one an
+    earlier receipt already claimed. An identical file nobody claimed stays
+    unclaimed, since ownership is recorded, never inferred from content."""
+    if guard_target is None:
+        return None
+    if guard_status != "written" and not isinstance(previous.get("guard"), dict):
+        return None
+    return {
+        "path": str(guard_target),
+        "sha256": _sha256(_read_bytes(guard_target, "the commit guard")),
+    }
+
+
 def install(
     project: Path,
     resources: Resources | None = None,
@@ -413,7 +454,7 @@ def install(
     python: Path = interpreter if interpreter is not None else Path(sys.executable)
     report: Report = Report()
     receipt_path: Path = target / RECEIPT_RELPATH
-    previous: dict[str, Any] = _load_json_object(receipt_path, "the install receipt") or {}
+    previous: dict[str, Any] = _load_json_object(receipt_path, _RECEIPT_WHAT) or {}
 
     settings_path: Path = target / ".claude" / "settings.json"
     settings: dict[str, Any] = _load_json_object(settings_path, "settings") or {}
@@ -423,20 +464,7 @@ def install(
 
     env_added: dict[str, str] = _str_mapping(previous.get("env_added"))
     if provider is not None:
-        env: dict[str, Any] = _mapping(settings, "env", settings_path)
-        current: Any = env.get("BENCH_PROVIDER")
-        if current == provider:
-            status: str = "unchanged"
-        elif "BENCH_PROVIDER" not in env:
-            status = "set"
-            env_added["BENCH_PROVIDER"] = provider
-        else:
-            # An explicit --provider overrides a value the project set itself;
-            # the key stays the project's, so uninstall will leave it.
-            status = "updated"
-            if "BENCH_PROVIDER" in env_added:
-                env_added["BENCH_PROVIDER"] = provider
-        env["BENCH_PROVIDER"] = provider
+        status: str = _apply_provider(settings, provider, env_added, settings_path)
         report.add("provider", status, f"BENCH_PROVIDER={provider}")
     if json.dumps(settings, sort_keys=True) != before:
         _write_json(settings_path, settings, "settings")
@@ -452,14 +480,9 @@ def install(
 
     guard_status, guard_detail, guard_target = _install_guard(target, found.guard)
     report.add("guard", guard_status, guard_detail)
-    guard_record: dict[str, str] | None = None
-    if guard_target is not None and (
-        guard_status == "written" or isinstance(previous.get("guard"), dict)
-    ):
-        guard_record = {
-            "path": str(guard_target),
-            "sha256": _sha256(_read_bytes(guard_target, "the commit guard")),
-        }
+    guard_record: dict[str, str] | None = _guard_receipt(
+        guard_target, guard_status, previous
+    )
 
     receipt: dict[str, Any] = {
         "bench_version": _bench_version(),
@@ -469,7 +492,7 @@ def install(
         "gitignore_line_added": line_added,
         "guard": guard_record,
     }
-    _write_json(receipt_path, receipt, "the install receipt")
+    _write_json(receipt_path, receipt, _RECEIPT_WHAT)
     report.add("receipt", "written", str(receipt_path))
     return report
 
@@ -617,7 +640,7 @@ def uninstall(
     )
     target: Path = _resolve_project(project)
     receipt_path: Path = target / RECEIPT_RELPATH
-    receipt: dict[str, Any] | None = _load_json_object(receipt_path, "the install receipt")
+    receipt: dict[str, Any] | None = _load_json_object(receipt_path, _RECEIPT_WHAT)
     if receipt is None:
         raise InstallError(
             f"no install receipt at {receipt_path}; nothing removed. Bench was "
