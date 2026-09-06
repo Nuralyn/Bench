@@ -63,6 +63,7 @@ from utils.stats import (
     compute_ledger_stats,
     entry_has_pipeline_error,
     entry_verdict,
+    models_by_stage,
     normalized_entries,
     pct,
     seconds_by_stage,
@@ -988,6 +989,18 @@ def cmd_stats() -> int:
         print(f"Seconds by stage       : {by_stage} (median/p90)")
     else:
         print("Seconds per edit       : n/a (no entry carries a timing yet)")
+    # Which model each stage ran on, as the stages recorded it, with how
+    # many entries came from a BENCH_<STAGE>_MODEL override. An override
+    # is never silent: it is on the entry and it is here.
+    models: dict[str, dict[str, dict[str, int]]] = models_by_stage(entries)
+    parts: list[str] = []
+    for stage in ("challenger", "defender", "oracle"):
+        for label, figures in sorted(models[stage].items()):
+            overridden: str = (
+                f", {figures['overridden']} overridden" if figures["overridden"] else ""
+            )
+            parts.append(f"{stage} {label} ({figures['entries']}{overridden})")
+    print(f"Models by stage        : {'; '.join(parts)}")
     print(f"Constitution hash      : {_short_hash(latest_cons_hash, 16)}")
     print(f"Ledger integrity       : {integrity}")
 

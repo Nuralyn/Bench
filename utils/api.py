@@ -77,6 +77,63 @@ DEFENDER_MODEL: str = "claude-sonnet-5"
 ORACLE_MODEL: str = "claude-opus-4-8"
 UTILITY_MODEL: str = "claude-haiku-4-5-20251001"
 
+# Per-stage override, read at call time so the ledger records what ran. The
+# variable names are the public contract (README, Models); stage_model
+# resolves them. An override is never silent: each stage writes the model it
+# used and whether it was overridden into its entry record, and a note goes
+# to stderr every time an override is read.
+STAGE_MODEL_ENV: dict[str, str] = {
+    "challenger": "BENCH_CHALLENGER_MODEL",
+    "defender": "BENCH_DEFENDER_MODEL",
+    "oracle": "BENCH_ORACLE_MODEL",
+}
+_STAGE_DEFAULT_MODEL: dict[str, str] = {
+    "challenger": CHALLENGER_MODEL,
+    "defender": DEFENDER_MODEL,
+    "oracle": ORACLE_MODEL,
+}
+
+
+def stage_model(stage: str) -> tuple[str, bool]:
+    """The model a stage runs on now: (model id, whether an override applied).
+
+    ``BENCH_<STAGE>_MODEL`` set to a non-blank value replaces the constant
+    for that stage; blank or unset means the constant. The id is used as
+    given: one that does not resolve on the provider fails the stage, and
+    the runner fails closed on that, so a bad override blocks edits rather
+    than being quietly ignored or quietly substituted.
+    """
+    if stage not in STAGE_MODEL_ENV:
+        raise ValueError(f"unknown pipeline stage {stage!r}")
+    variable: str = STAGE_MODEL_ENV[stage]
+    default: str = _STAGE_DEFAULT_MODEL[stage]
+    override: str = os.environ.get(variable, "").strip()
+    if not override:
+        return default, False
+    print(
+        f"[bench api] {stage} model overridden by {variable}: {override!r} "
+        f"(default {default})",
+        file=sys.stderr,
+    )
+    return override, True
+
+
+def stamp_model(
+    result: dict[str, Any], model: str, overridden: bool
+) -> dict[str, Any]:
+    """Record on a stage result which model it ran on and whether that was
+    an override. Returns ``result`` for use in a return statement.
+
+    Written on every path a stage returns after calling the model, error or
+    not, so the ledger entry shows the model behind a verdict and behind a
+    pipeline error alike. Underscore keys are bookkeeping: the runner strips
+    them from what downstream stages read, so the model name never becomes
+    evidence.
+    """
+    result["_model"] = model
+    result["_model_override"] = overridden
+    return result
+
 # OpenRouter publishes Anthropic slugs with a dotted version (for example
 # "anthropic/claude-opus-4.8"), while the constants above use the first-party
 # hyphenated IDs. Map the models the pipeline dispatches through call_model to

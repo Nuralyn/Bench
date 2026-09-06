@@ -17,9 +17,16 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from utils.stats import (  # noqa: E402
+    ALL_MODELS,
+    MODEL_NOT_REACHED,
+    MODEL_SKIPPED,
+    MODEL_UNRECORDED,
     citations_by_constraint,
     compute_ledger_stats,
     entry_has_pipeline_error,
+    models_by_stage,
+    stage_model_label,
+    stats_by_scope_and_model,
     entry_verdict,
     latency_by_week,
     pct,
@@ -689,6 +696,61 @@ class LatencyByWeekTests(unittest.TestCase):
 
     def test_empty_ledger(self) -> None:
         self.assertEqual(latency_by_week([]), [])
+
+
+class StageModelStatsTests(unittest.TestCase):
+    """Which model each stage ran on, as the entries recorded it."""
+
+    def _entry(self, oracle_model: object = "claude-opus-4-8", override: bool = False) -> dict:
+        entry: dict = _pass_entry()
+        entry["challenger"] = {"status": "CLEAR", "_model": "claude-sonnet-5", "_model_override": False}
+        entry["defender"] = {"status": "CONFIRM_CLEAR", "_model": None, "_model_override": False}
+        entry["oracle"] = {"verdict": "PASS", "_model": oracle_model, "_model_override": override}
+        return entry
+
+    def test_label_distinguishes_unrecorded_skipped_and_not_reached(self) -> None:
+        entry: dict = self._entry()
+        self.assertEqual(stage_model_label(entry, "challenger"), "claude-sonnet-5")
+        self.assertEqual(stage_model_label(entry, "defender"), MODEL_SKIPPED)
+        self.assertEqual(stage_model_label({"oracle": {"verdict": "PASS"}}, "oracle"), MODEL_UNRECORDED)
+        self.assertEqual(stage_model_label({}, "oracle"), MODEL_NOT_REACHED)
+        self.assertEqual(stage_model_label({"oracle": "junk"}, "oracle"), MODEL_NOT_REACHED)
+
+    def test_models_by_stage_counts_entries_and_overrides(self) -> None:
+        entries: list[dict] = [
+            self._entry(),
+            self._entry("claude-sonnet-5", override=True),
+            self._entry("claude-sonnet-5", override=True),
+            {"challenger": {"status": "PIPELINE_ERROR"}},
+        ]
+        tallies = models_by_stage(entries)
+        self.assertEqual(
+            tallies["oracle"],
+            {
+                "claude-opus-4-8": {"entries": 1, "overridden": 0},
+                "claude-sonnet-5": {"entries": 2, "overridden": 2},
+                MODEL_NOT_REACHED: {"entries": 1, "overridden": 0},
+            },
+        )
+        self.assertEqual(tallies["defender"][MODEL_SKIPPED]["entries"], 3)
+        self.assertEqual(tallies["challenger"][MODEL_UNRECORDED]["entries"], 1)
+
+    def test_scope_tables_are_split_by_the_ruling_model(self) -> None:
+        entries: list[dict] = [self._entry(), self._entry("claude-sonnet-5", override=True)]
+        entries[1]["change"] = {"file": "pipeline/oracle.py"}
+        entries[1]["verdict"] = "VETO"
+        entries[1]["oracle"]["verdict"] = "VETO"
+        tables = stats_by_scope_and_model(entries, "/proj")
+        self.assertEqual(list(tables), [ALL_MODELS, "claude-opus-4-8", "claude-sonnet-5"])
+        by_scope = {row["scope"]: row for row in tables["claude-sonnet-5"]}
+        self.assertEqual(by_scope["governance"]["vetoed"], 1)
+        self.assertEqual(by_scope["other"]["adjudicated"], 0)
+        all_rows = {row["scope"]: row for row in tables[ALL_MODELS]}
+        self.assertEqual(all_rows["other"]["passed"], 1)
+
+    def test_empty_ledger_has_all_models_only(self) -> None:
+        self.assertEqual(list(stats_by_scope_and_model([], "/proj")), [ALL_MODELS])
+        self.assertEqual(models_by_stage([]), {"challenger": {}, "defender": {}, "oracle": {}})
 
 
 if __name__ == "__main__":

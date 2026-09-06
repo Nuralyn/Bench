@@ -205,13 +205,16 @@ def run_governance_pipeline(
 
     if challenger_result.get("status") == "CLEAR":
         # No model call was made, so the stage cost no time either; the
-        # explicit zero keeps latency figures honest about skipped stages.
+        # explicit zero keeps latency figures honest about skipped stages,
+        # and the explicit None model says no model ruled here.
         defender_result: dict[str, Any] = {
             "status": "CONFIRM_CLEAR",
             "rebuttals": [],
             "summary": "Challenger found no issues.",
             "_tokens": {"input": 0, "output": 0},
             "_seconds": 0.0,
+            "_model": None,
+            "_model_override": False,
         }
     else:
         started = time.perf_counter()

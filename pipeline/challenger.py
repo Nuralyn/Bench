@@ -20,7 +20,7 @@ from typing import Any
 
 from pipeline.constitution import build_cached_prefix, build_context_section
 from pipeline.snapshot import snapshot_response
-from utils.api import CHALLENGER_MODEL, call_model
+from utils.api import call_model, stage_model, stamp_model
 
 
 _SYSTEM_PROMPT: str = """You are the Challenger in the Bench constitutional governance pipeline. Your role
@@ -120,6 +120,10 @@ def run_challenger(
             "status": "PIPELINE_ERROR",
             "error": f"INVALID_CHALLENGER_INPUT: {input_error}",
             "_tokens": {"input": 0, "output": 0},
+            # No call was made: an explicit None, so the entry is not read
+            # as one from before models were recorded.
+            "_model": None,
+            "_model_override": False,
         }
 
     # The prompt is the constitution (cached prefix), the repository context
@@ -131,8 +135,11 @@ def run_challenger(
     cached_context: str = build_context_section(file_context)
     user_content: str = _build_user_content(diff_info)
 
+    # Resolved per call so a BENCH_CHALLENGER_MODEL override is read now
+    # and recorded on whatever this stage returns.
+    model, overridden = stage_model("challenger")
     response: dict[str, Any] = call_model(
-        CHALLENGER_MODEL,
+        model,
         _SYSTEM_PROMPT,
         user_content,
         cached_prefix=cached_prefix,
@@ -142,11 +149,11 @@ def run_challenger(
     tokens: Any = response.get("_tokens", {"input": 0, "output": 0})
 
     if "error" in response:
-        return {
-            "status": "PIPELINE_ERROR",
-            "error": response,
-            "_tokens": tokens,
-        }
+        return stamp_model(
+            {"status": "PIPELINE_ERROR", "error": response, "_tokens": tokens},
+            model,
+            overridden,
+        )
 
     # Repair the one cosmetic drift before validating and record it on the
     # result, so the ledger entry shows it. _normalize_challenger_response
@@ -168,14 +175,18 @@ def run_challenger(
         response["_normalized"] = notes
 
     if not _validate_challenger_response(response):
-        return {
-            "status": "PIPELINE_ERROR",
-            "error": "INVALID_CHALLENGER_RESPONSE",
-            "raw_response": original,
-            "_tokens": tokens,
-        }
+        return stamp_model(
+            {
+                "status": "PIPELINE_ERROR",
+                "error": "INVALID_CHALLENGER_RESPONSE",
+                "raw_response": original,
+                "_tokens": tokens,
+            },
+            model,
+            overridden,
+        )
 
-    return response
+    return stamp_model(response, model, overridden)
 
 
 def _build_user_content(diff_info: dict) -> str:

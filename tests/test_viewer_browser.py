@@ -271,6 +271,22 @@ class ViewerBrowserTests(unittest.TestCase):
             self.page.locator("#dash-latency").text_content() or "",
         )
 
+    def test_scope_select_switches_the_visible_table(self) -> None:
+        # The fixture predates model recording: its adjudicated entries read
+        # "unrecorded" and the anchor, which has no oracle, "not reached".
+        select: Locator = self.page.locator("#scope-model")
+        self.assertEqual(select.input_value(), "all")
+        self.assertTrue(self.page.locator('[data-scope-model="all"]').is_visible())
+        self.assertFalse(self.page.locator('[data-scope-model="unrecorded"]').is_visible())
+        select.select_option("unrecorded")
+        self.assertFalse(self.page.locator('[data-scope-model="all"]').is_visible())
+        self.assertTrue(self.page.locator('[data-scope-model="unrecorded"]').is_visible())
+        cells: list[str] = self.page.locator(
+            '[data-scope-model="unrecorded"] tbody td'
+        ).all_text_contents()
+        # Four adjudicated entries, none in the governance scope.
+        self.assertEqual(cells[7:9], ["other", "4"])
+
     def test_dashboard_tables_stay_inside_their_cards(self) -> None:
         # On a wide screen the grid once opened an empty fourth column and
         # squeezed the lower cards until their tables spilled past the card

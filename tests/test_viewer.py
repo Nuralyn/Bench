@@ -224,6 +224,37 @@ class DashboardTests(unittest.TestCase):
                 html_out,
             )
 
+    def test_scope_table_switches_by_oracle_model(self) -> None:
+        chain: list[dict] = _build_valid_chain(3, verdicts=["PASS", "VETO", "PASS"])
+        for entry, model, override in zip(
+            chain, ("claude-opus-4-8", "claude-sonnet-5", "claude-opus-4-8"), (False, True, False)
+        ):
+            entry["oracle"]["_model"] = model
+            entry["oracle"]["_model_override"] = override
+            entry["challenger"] = {"status": "CLEAR", "_model": "claude-sonnet-5", "_model_override": False}
+        for i, entry in enumerate(chain):
+            if i:
+                entry["previous_hash"] = chain[i - 1]["entry_hash"]
+            entry["entry_hash"] = compute_entry_hash(entry)
+        html_out: str = self._render(chain)
+        # One select listing "all" first, then each Oracle model seen.
+        self.assertIn('<select id="scope-model"', html_out)
+        self.assertIn('<option value="all">all models</option>', html_out)
+        self.assertIn('<option value="claude-opus-4-8">claude-opus-4-8</option>', html_out)
+        self.assertIn('<option value="claude-sonnet-5">claude-sonnet-5</option>', html_out)
+        # The "all" table shows; the per-model tables are present but hidden.
+        self.assertIn('<div data-scope-model="all">', html_out)
+        self.assertIn('<div data-scope-model="claude-sonnet-5" hidden>', html_out)
+        # The Sonnet-ruled table holds exactly the one vetoed entry.
+        sonnet_table: str = html_out.split('<div data-scope-model="claude-sonnet-5" hidden>', 1)[1]
+        sonnet_table = sonnet_table.split("</div>", 1)[0]
+        self.assertIn("<tr><td>other</td><td>1</td><td>0</td><td>1</td>", sonnet_table)
+        # The models table names each stage's model with its override count.
+        self.assertIn(self._row(["oracle", "claude-sonnet-5", "1", "1"]), html_out)
+        self.assertIn(self._row(["oracle", "claude-opus-4-8", "2", "0"]), html_out)
+        self.assertIn(self._row(["challenger", "claude-sonnet-5", "3", "0"]), html_out)
+        self.assertEqual(html_out.count('class="card" id="dash-'), 5)
+
     def test_constraint_table_separates_violated_from_cited(self) -> None:
         chain: list[dict] = _build_valid_chain(2, verdicts=["VETO", "VETO"])
         chain[1]["oracle"]["constraint_citations"] = [

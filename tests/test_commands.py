@@ -218,6 +218,23 @@ class CmdStatsTests(unittest.TestCase):
             text,
         )
 
+    def test_stats_prints_models_by_stage_with_override_counts(self) -> None:
+        entries: list[dict] = _entries()
+        entries[0]["oracle"] = {"verdict": "PASS", "_model": "claude-opus-4-8", "_model_override": False}
+        entries[1]["oracle"] = {"verdict": "VETO", "_model": "claude-sonnet-5", "_model_override": True}
+        out = io.StringIO()
+        with patch("cli.commands.load_ledger", return_value=entries):
+            with patch("cli.commands.verify_chain", return_value=_valid_verify()):
+                with redirect_stdout(out):
+                    cmd_stats()
+        text: str = out.getvalue()
+        self.assertIn("Models by stage        : ", text)
+        self.assertIn("oracle claude-opus-4-8 (1)", text)
+        self.assertIn("oracle claude-sonnet-5 (1, 1 overridden)", text)
+        # The fixture entries have no challenger result at all, so that
+        # stage reads as never reached rather than as a model that answered.
+        self.assertIn("challenger not reached (2)", text)
+
     def test_exit_one_when_chain_invalid(self) -> None:
         out = io.StringIO()
         invalid: dict = {"valid": False, "failure_type": "CHAIN_BREAK"}

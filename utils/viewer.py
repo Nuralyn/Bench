@@ -34,7 +34,8 @@ from utils.stats import (
     citations_by_constraint,
     compute_ledger_stats,
     pct,
-    stats_by_scope,
+    models_by_stage,
+    stats_by_scope_and_model,
     latency_by_week,
     seconds_by_stage,
     stats_by_week,
@@ -399,6 +400,24 @@ _VERDICT_HEADERS: list[str] = [
 ]
 
 
+def _scope_model_select(labels: list[str]) -> str:
+    """The control that switches the scope table between Oracle models.
+
+    One option per label from utils.stats.stats_by_scope_and_model, "all"
+    first; the page script shows the matching table and hides the rest.
+    """
+    options: str = "".join(
+        f'<option value="{html.escape(label)}">'
+        f'{html.escape("all models" if label == "all" else label)}</option>'
+        for label in labels
+    )
+    return (
+        '<label class="fine select">Oracle model '
+        f'<select id="scope-model" aria-label="Filter the scope table by Oracle model">'
+        f"{options}</select></label>"
+    )
+
+
 def _token_distribution_line(
     summary: dict[str, float | int], billed: dict[str, float | int]
 ) -> str:
@@ -435,7 +454,8 @@ def _build_dashboard(entries: list[dict], project_root: str) -> str:
     deeper in the tree or a file outside it.
     """
     weeks: list[dict] = stats_by_week(entries)
-    scopes: list[dict] = stats_by_scope(entries, project_root)
+    scope_tables: dict[str, list[dict]] = stats_by_scope_and_model(entries, project_root)
+    models: dict[str, dict[str, dict[str, int]]] = models_by_stage(entries)
     citations: list[dict] = citations_by_constraint(entries)
     tokens: dict[str, dict[str, int]] = tokens_by_stage(entries)
     seconds: dict[str, dict[str, float | int]] = seconds_by_stage(entries)
@@ -464,8 +484,14 @@ def _build_dashboard(entries: list[dict], project_root: str) -> str:
     week_rows: list[list[str]] = [
         [str(row.get("week", ""))] + _verdict_cells(row) for row in weeks
     ]
-    scope_rows: list[list[str]] = [
-        [str(row.get("scope", ""))] + _verdict_cells(row) for row in scopes
+    scope_rows_by_model: dict[str, list[list[str]]] = {
+        label: [[str(row.get("scope", ""))] + _verdict_cells(row) for row in rows]
+        for label, rows in scope_tables.items()
+    }
+    model_rows: list[list[str]] = [
+        [stage, label, f"{figures['entries']:,}", f"{figures['overridden']:,}"]
+        for stage in ("challenger", "defender", "oracle")
+        for label, figures in sorted(models[stage].items())
     ]
     citation_rows: list[list[str]] = [
         [
@@ -516,10 +542,24 @@ def _build_dashboard(entries: list[dict], project_root: str) -> str:
         "</div>\n"
         '<div class="card" id="dash-scope">\n'
         "  <h2>Verdicts by scope</h2>\n  "
-        + _table(["Scope"] + _VERDICT_HEADERS, scope_rows, "No governed changes yet.")
+        + _scope_model_select(list(scope_rows_by_model))
+        + "\n  "
+        + "\n  ".join(
+            f'<div data-scope-model="{html.escape(label)}"'
+            + ("" if label == "all" else " hidden")
+            + ">"
+            + _table(["Scope"] + _VERDICT_HEADERS, rows, "No governed changes yet.")
+            + "</div>"
+            for label, rows in scope_rows_by_model.items()
+        )
         + f'\n  <p class="fine">Governance is the C-007 scope: {html.escape(governance_paths)}. '
-        "Everything else in the project is other.</p>\n"
-        "</div>\n"
+        "Everything else in the project is other. The Oracle model is the one "
+        "that ruled; entries before v2.1 recorded none.</p>\n  "
+        + _table(
+            ["Stage", "Model", "Entries", "Overridden"],
+            model_rows, "No model recorded yet.",
+        )
+        + "\n</div>\n"
         '<div class="card" id="dash-constraints">\n'
         "  <h2>Constraints in vetoes</h2>\n  "
         + _table(
@@ -653,6 +693,12 @@ header h1 { margin: 0; font-size: 1.5rem; font-weight: 500; letter-spacing: 0.02
 }
 .dashboard td.empty { text-align: center; color: #94a3b8; font-style: italic; }
 .dashboard .fine { margin: 0.5rem 0 0; font-size: 0.75rem; color: #94a3b8; }
+.dashboard label.select { display: block; margin: 0 0 0.5rem; }
+.dashboard select {
+  margin-left: 0.4rem; padding: 0.15rem 0.4rem; font: inherit;
+  background: #1a1a2e; color: #e2e8f0; border: 1px solid #3a3a55; border-radius: 4px;
+}
+.dashboard select:focus-visible { outline: 2px solid #a78bfa; outline-offset: 1px; }
 .filter-bar {
   display: flex; gap: 0.5rem;
   padding: 1rem 2rem 0.75rem;
@@ -869,6 +915,16 @@ _JS: str = """
   const emptyMsg = document.getElementById('empty-msg');
   const filterEmptyMsg = document.getElementById('filter-empty-msg');
   const filterButtons = document.querySelectorAll('.filter');
+
+  // The scope card renders one table per Oracle model; the select shows one.
+  const scopeSelect = document.getElementById('scope-model');
+  if (scopeSelect) {
+    scopeSelect.addEventListener('change', function () {
+      document.querySelectorAll('[data-scope-model]').forEach(function (el) {
+        el.hidden = el.dataset.scopeModel !== scopeSelect.value;
+      });
+    });
+  }
 
   function shortHash(h, n) {
     if (!h || typeof h !== 'string') return 'N/A';
