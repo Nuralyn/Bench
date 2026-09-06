@@ -61,6 +61,8 @@ GUARD_NAME: str = "pre-commit"
 HOOK_SCRIPT_RELPATH: str = f"{HOOK_PACKAGE}/{HOOK_SCRIPT_NAME}"
 IGNORE_LINE: str = "/.bench/"
 _GITIGNORE_NAME: str = ".gitignore"
+_CLAUDE_DIRNAME: str = ".claude"
+_BENCH_DIRNAME: str = ".bench"
 RECEIPT_RELPATH: str = ".bench/install.json"
 _RECEIPT_WHAT: str = "the install receipt"
 DISTRIBUTION_NAME: str = "bench-governance"
@@ -515,14 +517,14 @@ def install(
     target: Path = _resolve_project(project)
     # Checked before anything is written, so a refusal leaves no half-install.
     _refuse_symlinked_gitignore(target / _GITIGNORE_NAME)
-    _refuse_symlink(target / ".claude", "the settings directory")
-    _refuse_symlink(target / ".bench", "the ledger directory")
+    _refuse_symlink(target / _CLAUDE_DIRNAME, "the settings directory")
+    _refuse_symlink(target / _BENCH_DIRNAME, "the ledger directory")
     python: Path = interpreter if interpreter is not None else Path(sys.executable)
     report: Report = Report()
     receipt_path: Path = target / RECEIPT_RELPATH
     previous: dict[str, Any] = _load_json_object(receipt_path, _RECEIPT_WHAT) or {}
 
-    settings_path: Path = target / ".claude" / "settings.json"
+    settings_path: Path = target / _CLAUDE_DIRNAME / "settings.json"
     settings: dict[str, Any] = _load_json_object(settings_path, "settings") or {}
     before: str = json.dumps(settings, sort_keys=True)
     command: str = hook_command(found.hook_script, python)
@@ -656,8 +658,8 @@ def _remove_ignore_line(project: Path, added: bool, receipt_path: Path) -> tuple
     gitignore: Path = project / _GITIGNORE_NAME
     if not added:
         return "kept", f"{IGNORE_LINE} was not added by install"
-    if _chain_present(project / ".bench", receipt_path):
-        return "kept", f"{project / '.bench'} holds a chain that must stay out of git"
+    if _chain_present(project / _BENCH_DIRNAME, receipt_path):
+        return "kept", f"{project / _BENCH_DIRNAME} holds a chain that must stay out of git"
     if gitignore.is_symlink():
         return "kept", f"{gitignore} is a symlink; not writing through it"
     if not gitignore.exists():
@@ -726,7 +728,7 @@ def uninstall(
         )
     report: Report = Report()
 
-    settings_path: Path = target / ".claude" / "settings.json"
+    settings_path: Path = target / _CLAUDE_DIRNAME / "settings.json"
     settings: dict[str, Any] = _load_json_object(settings_path, "settings") or {}
     before: str = json.dumps(settings, sort_keys=True)
     hook_record: Any = receipt.get("hook")
