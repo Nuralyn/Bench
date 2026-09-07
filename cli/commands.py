@@ -993,6 +993,7 @@ def cmd_stats() -> int:
         for row in tokens_by_week(entries):
             print(
                 f"  {row['week']}: median {int(row['median']):,}, "
+                f"p90 {int(row['p90']):,}, "
                 f"at cached rates {int(row['billed_median']):,} "
                 f"({int(row['entries'])} with usage)"
             )

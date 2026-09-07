@@ -240,11 +240,14 @@ class CmdStatsTests(unittest.TestCase):
         text: str = out.getvalue()
         self.assertIn("Tokens by week         :", text)
         self.assertIn(
-            "  2026-W02: median 550, at cached rates 550 (1 with usage)", text
+            "  2026-W02: median 550, p90 550, at cached rates 550 (1 with usage)",
+            text,
         )
         # 1,000 input entirely read from cache bills at 100.
         self.assertIn(
-            "  2026-W03: median 1,000, at cached rates 100 (1 with usage)", text
+            "  2026-W03: median 1,000, p90 1,000, at cached rates 100 "
+            "(1 with usage)",
+            text,
         )
 
     def test_stats_prints_models_by_stage_with_override_counts(self) -> None:
