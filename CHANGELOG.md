@@ -6,7 +6,7 @@ tags. Since the runner began recording verdicts, partway through 1.0.0, every
 change has landed through Bench's own governance pipeline and carries a
 receipt in the operational ledger; the earliest 1.0.0 work predates that.
 
-## [2.1.0] - unreleased
+## [2.1.0] - 2026-09-06
 
 The theme is making the claim survive a skeptic: cheaper verdicts, a real
 installer, honest numbers, and tests for the properties that used to live in

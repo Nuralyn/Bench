@@ -302,25 +302,30 @@ Set `BENCH_PROVIDER=claude_code` to run the pipeline on the subscription that al
 
 Every governed `Write`, `Edit`, or `MultiEdit` is three sequential model calls, and Claude Code makes many small edits. The figures below come from Bench's own operational ledger. `python -m cli stats` prints each of them (the "Tokens per edit", "Seconds per edit", and "Seconds by stage" lines), and the viewer's dashboard shows the same distributions, so anyone with a chain can reproduce the table for their own ledger rather than take an estimate.
 
-Tokens, over 1,148 entries that recorded usage, as of 2026-09-04:
+Tokens per governed edit, all stages, by week of the operational chain, as of 2026-09-07:
 
-| Figure | Value |
-|---|---|
-| Median tokens per governed edit, all stages | 36,166 |
-| 90th percentile | 47,590 |
+| Week | Governed edits | Median tokens | 90th percentile | Median at cached rates |
+|---|---|---|---|---|
+| 2026-W36, the v2.1 roadmap week | 1,797 | 34,747 | 42,650 | 33,451 |
+| 2026-W37, the release week so far | 80 | 19,483 | 36,811 | 18,124 |
+| Every entry with usage recorded (2,705) | | 34,967 | 44,486 | 33,979 |
 
-Wall time, recorded per stage from v2.1 onward. The first 78 timed entries, all on the `claude_code` provider, which cold-starts a `claude` process per stage:
+The release-week row is the first under every 2.1 cost change together, and it is a small sample of light edits: most were docstring changes, which the Challenger clears in seconds and the Defender then skips. It is not a settled reduction. The roadmap-week row is the number to plan on until the release week fills out, and the roadmap's target of a median under 20,000 tokens stays a target.
+
+Wall time, recorded per stage, on the `claude_code` provider, which cold-starts a `claude` process per stage. Over the 1,635 timed entries:
 
 | Stage | Median seconds | 90th percentile |
 |---|---|---|
-| Challenger | 17.3 | 29.5 |
-| Defender | 10.2 | 30.8 |
-| Oracle | 21.9 | 29.9 |
-| Whole edit | 47.0 | 92.9 |
+| Challenger | 21.8 | 38.7 |
+| Defender | 15.8 | 38.6 |
+| Oracle | 23.1 | 34.9 |
+| Whole edit | 61.9 | 107.7 |
+
+By week, the whole-edit median was 63.5 seconds in 2026-W36 and 22.0 seconds in 2026-W37, with the same caveat on the second figure.
 
 The Defender median is low because a CLEAR challenge skips it and records zero seconds. The direct API providers avoid the process start but not the sequential three-call shape. Both tables will drift as the ledger grows; run `python -m cli stats` for the current figures on your own chain, and `python -m cli viewer` for the per-week view.
 
-Roadmap v2.1 targets a median under 20,000 tokens, and two of its steps are in. Each stage receives every constraint's rule without its rationale and commentary (`pipeline.constitution.prompt_view`), and constitution v7 moved procedure and history out of the rules into commentary. On the `anthropic` provider the constitution and the repository context open every stage prompt under one cache breakpoint: they are written to the prompt cache on the first edit and read back at a tenth of the input price on every edit that follows within five minutes. Each stage's `_tokens` record now carries `cache_read` and `cache_creation` beside `input` and `output`, and `cli stats` and the viewer print a second per-edit figure with those counted at the cached rates (reads 0.1x, writes 1.25x), so the cost of a cached edit is read off the ledger rather than estimated. On the `claude_code` provider the CLI caches its system prompt file and not stdin text, so the constitution is folded into that file; the repository context is repository input and stays on stdin at user priority, uncached, because a project's CLAUDE.md must not outrank the stage prompt or the constitution. Measured on the development machine, a Challenger call under that layout reads about 2,470 of 9,340 prompt tokens from cache. The figures above predate both changes; the ledger will show the difference.
+Roadmap v2.1 targets a median under 20,000 tokens, and two of its steps are in. Each stage receives every constraint's rule without its rationale and commentary (`pipeline.constitution.prompt_view`), and constitution v7 moved procedure and history out of the rules into commentary. On the `anthropic` provider the constitution and the repository context open every stage prompt under one cache breakpoint: they are written to the prompt cache on the first edit and read back at a tenth of the input price on every edit that follows within five minutes. Each stage's `_tokens` record now carries `cache_read` and `cache_creation` beside `input` and `output`, and `cli stats` and the viewer print a second per-edit figure with those counted at the cached rates (reads 0.1x, writes 1.25x), so the cost of a cached edit is read off the ledger rather than estimated. On the `claude_code` provider the CLI caches its system prompt file and not stdin text, so the constitution is folded into that file; the repository context is repository input and stays on stdin at user priority, uncached, because a project's CLAUDE.md must not outrank the stage prompt or the constitution. Measured on the development machine, a Challenger call under that layout reads about 2,470 of 9,340 prompt tokens from cache. The roadmap-week row above straddles both changes, which landed partway through it; the release-week row is the first entirely under them, and the ledger will show whether its figure holds as it fills with ordinary edits.
 
 ## Design Decisions
 

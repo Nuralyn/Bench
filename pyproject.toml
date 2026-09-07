@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "bench-governance"
-version = "2.1.0.dev0"
+version = "2.1.0"
 description = "Constitutional governance layer for Claude Code: every edit is challenged, defended, ruled on, and hash-chained into a ledger."
 readme = "README.md"
 license = "MIT"
