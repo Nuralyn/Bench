@@ -730,7 +730,7 @@ class EntriesByWeekTests(unittest.TestCase):
         self.assertEqual([r["week"] for r in latency_by_week(entries)], ["2026-W02", "2026-W03"])
         self.assertEqual([r["week"] for r in tokens_by_week(entries)], ["2026-W02", UNKNOWN_WEEK])
         for table in (latency_by_week(entries), tokens_by_week(entries)):
-            self.assertTrue({r["week"] for r in table} <= set(groups))
+            self.assertLessEqual({r["week"] for r in table}, set(groups))
 
 
 class TokensByWeekTests(unittest.TestCase):
