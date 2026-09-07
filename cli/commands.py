@@ -817,8 +817,8 @@ def cmd_migrate_ledger() -> int:
     """Populate this clone's private chain from the pre-migration location.
 
     Only needed once, and only by a clone that existed before the ledger
-    became private. Checking out that switch makes git delete the formerly
-    tracked chain under ``ledger/``, and nothing can repopulate ``.bench/``
+    became private. Checking out that switch makes git delete the chain such
+    a clone tracks under ``ledger/``, and nothing can repopulate ``.bench/``
     from git because it is ignored by design. Without this the clone would
     resolve to an empty chain and silently open a fresh GENESIS.
     """

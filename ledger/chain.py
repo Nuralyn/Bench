@@ -11,14 +11,12 @@ read on every append and never written again, with ``ledger-meta.json`` frozen
 beside it as a permanent pin on that segment's tip and count. New entries are
 written one per file to ``entries/<entry_hash>.json``.
 
-That split is what lets two branches record verdicts independently. A single
-array rewritten in full on every append gave two branches divergent chains that
-could not be merged — interleaving breaks the links, rebasing rewrites hashes —
-so the array was frozen rather than migrated, because C-008 forbids moving or
-rewriting an existing entry and a file that is never written cannot conflict.
-``previous_hash`` accordingly holds a string (legacy, one parent) or a sorted
-list, and an append names every current tip, so a fork left by a merge is
-reconciled by the next governed edit.
+The split is what lets two branches record verdicts independently. A file
+that is never written cannot conflict, and an entry file named by its own
+hash merges as a union, so two branches that both appended combine without
+rewriting any entry, which C-008 forbids. ``previous_hash`` holds a string
+(legacy, one parent) or a sorted list, and an append names every current
+tip, so a fork left by a merge is reconciled by the next governed edit.
 
 Writes are atomic via ``os.replace`` on a same-directory temp file, so a crash
 mid-write cannot leave a half-written file on disk.
@@ -92,10 +90,10 @@ the auditor independent of the write path.
 class LedgerReadError(RuntimeError):
     """Raised when existing ledger content cannot be read or would be lost.
 
-    Fail-closed on the write path (C-001, C-008). A corrupt ledger previously
-    read as an empty chain, which made the next append restart from GENESIS and
+    Fail-closed on the write path (C-001, C-008). A corrupt ledger must not
+    read as an empty chain: the next append would restart from GENESIS and
     overwrite the damaged file. Refusing to proceed preserves the evidence
-    instead of destroying it; the caller in ``pipeline.runner`` already logs and
+    instead of destroying it; the caller in ``pipeline.runner`` logs and
     returns the verdict without a receipt rather than blocking the developer.
     """
 
@@ -133,14 +131,6 @@ def resolve_ledger_path() -> str:
     governs, so publishing one publishes every change it ever saw. It is
     therefore never a tracked artifact of the repository it governs, and
     dogfooding does not earn an exception to that.
-
-    Bench's existing chain was relocated to that path before this branch
-    removed the special case: the legacy segment, ``ledger-meta.json``, and
-    every entry file were copied unchanged, and ``verify_chain`` reports VALID
-    at the new location with genesis hash 4e98fb41 unchanged. No entry was
-    modified, reordered, or removed, so continuity is preserved and no
-    retirement was triggered, which matters because a storage-location change
-    is not a permitted C-008 retirement trigger.
 
     Claude Code invokes hooks with the governed project as the working
     directory. That is the same assumption ``utils.diff`` already relies on
@@ -486,9 +476,9 @@ def _entry_file_names(entries_dir: Path) -> list[str]:
     a tip the cache never links to; ``_FOLD_CASE`` carries pathlib's rule.
     Names are not checked for being regular files, which would cost a stat
     per name: ``glob`` does not check either, so a stray directory with the
-    suffix is treated exactly as before. Its appearance changes the listing,
-    the scan refuses it as unreadable, and the auditor reports it. It is
-    never a tip, so the cache never links to it.
+    suffix is handled by the scan, not the cache. Its appearance changes the
+    listing, the scan refuses it as unreadable, and the auditor reports it.
+    It is never a tip, so the cache never links to it.
     """
     if not entries_dir.is_dir():
         return []

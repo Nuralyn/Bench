@@ -211,19 +211,19 @@ _SEVERITY_ALIASES: dict[str, str] = {"WARNING": "CONCERN"}
 def _normalize_challenger_response(response: dict[str, Any]) -> list[str]:
     """Repair one cosmetic drift in a Challenger response in place; return notes.
 
-    A finding severity of "WARNING" becomes "CONCERN". The operational
-    ledger recorded that shape as INVALID_CHALLENGER_RESPONSE on 2026-08-22
-    and 2026-09-05 (UTC): each a fail-closed VETO recorded as a pipeline
-    error, not a ruling, on an edit the Challenger had examined and
-    reported findings for. The finding reaches the Oracle with its
-    constraint, location, evidence, and reasoning untouched.
+    A finding severity of "WARNING" becomes "CONCERN". WARNING is the word
+    C-005 uses for its own severity, echoed back where the schema wants
+    VIOLATION, CONCERN, or OBSERVATION; left as written it fails validation,
+    and an edit the Challenger examined and reported findings for is denied
+    as a pipeline error rather than ruled on. The finding reaches the Oracle
+    with its constraint, location, evidence, and reasoning untouched.
 
     Nothing else is repaired. A finding without evidence, a location, a
     constraint, or reasoning, any other severity, an unknown status, and a
     non-list findings are left for _validate_challenger_response to fail
-    closed exactly as before: the normalizer never synthesizes a field the
-    schema requires. run_challenger records the returned notes on the
-    result as ``_normalized`` so the ledger entry shows the repair.
+    closed: the normalizer never synthesizes a field the schema requires.
+    run_challenger records the returned notes on the result as
+    ``_normalized`` so the ledger entry shows the repair.
     tests/test_challenger.py NormalizeChallengerResponseTests covers the
     repair, the untouched clean response, and each fail-closed case end to
     end through run_challenger.

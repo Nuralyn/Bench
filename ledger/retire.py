@@ -54,7 +54,11 @@ from pipeline.constitution import (
 from utils.project import project_root
 
 ANCHOR_TOOL: str = "ChainRetirement"
-"""``change.tool`` on an anchor entry, matching the 2026-07-24 reference."""
+"""``change.tool`` on an anchor entry.
+
+Fixed to the value the frozen 2026-07-24 anchor carries, so every anchor in
+a chain is recognised by one string.
+"""
 
 _LOCK_WAIT_SECONDS: float = 30.0
 """How long a retirement waits for the chain's append lock before refusing.
@@ -327,8 +331,9 @@ def build_anchor_summary(
 ) -> dict:
     """Assemble the anchor's ``change.diff_summary``.
 
-    The field set is the one the conforming 2026-07-24 anchor established, which
-    is in turn C-008(c)'s enumeration plus the bookkeeping an auditor needs.
+    The field set is C-008(c)'s enumeration plus the bookkeeping an auditor
+    needs, and it is the set ``validate_anchor_summary`` checks on every
+    anchor, the frozen one already in the chain included.
     ``predecessor_first_entry`` and ``predecessor_last_entry`` hold timestamp
     *values*, not hashes or indices, because that is what C-008(c) names.
     """
@@ -540,10 +545,9 @@ def _project_relative(ledger_path: str) -> str:
         relative: str = os.path.relpath(
             os.path.realpath(ledger_path), str(project_root())
         )
-        # Forward slashes, matching the 2026-07-24 reference anchor's
-        # "ledger/bench-ledger.json". The ledger is read on whatever platform
-        # audits it, so the recorded evidence should not carry the separator of
-        # the machine that happened to write it.
+        # Forward slashes, as every anchor records the path. The ledger is
+        # read on whatever platform audits it, so the recorded evidence should
+        # not carry the separator of the machine that happened to write it.
         return relative.replace(os.sep, "/")
     except (OSError, ValueError) as exc:
         # Windows: a different drive from the project has no relative form.
@@ -886,13 +890,14 @@ def audit_retirement(
     if archive_ledger_path:
         resolved: str = archive_ledger_path
     elif recorded.suffix == ".json":
-        # The 2026-07-24 retirement archived a single JSON array and recorded
-        # that file directly. Retirements written by execute_retirement record
-        # the archive *directory*, because a chain is now up to three segments.
-        # Both are legitimate values for C-008(c)'s "verbatim archive path", so
-        # the auditor reads either rather than only the shape it writes.
-        # Keyed on the suffix, not on is_file, so a missing archive is reported
-        # as a failed verification rather than as a confusing path.
+        # An anchor's archive_path is one of two shapes. The frozen 2026-07-24
+        # anchor records a single JSON array file directly; every anchor
+        # execute_retirement writes records the archive *directory*, because a
+        # chain is up to three segments. Both are legitimate values for
+        # C-008(c)'s "verbatim archive path", so the auditor reads either
+        # rather than only the shape it writes. Keyed on the suffix, not on
+        # is_file, so a missing archive is reported as a failed verification
+        # rather than as a confusing path.
         resolved = str(recorded)
     else:
         resolved = str(recorded / Path(resolve_ledger_path()).name)

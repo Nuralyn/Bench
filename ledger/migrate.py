@@ -1,9 +1,9 @@
 """One-time upgrade path for clones created before the ledger went private.
 
-Bench used to keep its own chain as tracked files under ``ledger/``. That
-exemption is gone: every governed project, Bench included, now keeps its
-chain in a gitignored ``.bench/``. The commit that made the switch untracks
-the old paths, so pulling it makes git delete ``ledger/bench-ledger.json``,
+Such a clone holds Bench's own chain as tracked files under ``ledger/``,
+while every governed project, Bench included, keeps its chain in a
+gitignored ``.bench/``. The commit that made the switch untracks the old
+paths, so pulling it makes git delete ``ledger/bench-ledger.json``,
 ``ledger/ledger-meta.json``, and ``ledger/entries/`` from the working tree.
 
 Nothing in git can repopulate ``.bench/``, because ``.bench/`` is ignored by

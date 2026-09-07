@@ -245,10 +245,9 @@ def _build_user_content(
     )
 
 
-# Cosmetic drift in otherwise sound Oracle responses. A missing confidence
-# is the one the ledger has recorded (every invalid Oracle response so far);
-# the remediation placeholders and blank advisories are the drift the
-# schema invites, since it asks for null on PASS and an optional list.
+# Cosmetic drift in otherwise sound Oracle responses: a missing confidence,
+# and the remediation placeholders and blank advisories the schema invites,
+# since it asks for null on PASS and an optional list.
 _DEFAULT_CONFIDENCE: str = "LOW"
 _REMEDIATION_PLACEHOLDERS: frozenset[str] = frozenset(
     {"", "null", "none", "n/a", "na", "not applicable"}

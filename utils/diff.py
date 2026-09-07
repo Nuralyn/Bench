@@ -149,7 +149,7 @@ def build_diff_info(tool_name: str, tool_input: dict) -> dict[str, Any]:
       * Write      -> change_type="create", addition-only formatted_diff
       * Edit       -> change_type="modify", old/new strings (possibly truncated)
       * MultiEdit  -> change_type="multi_modify", edits list (possibly truncated)
-      * anything else -> empty dict (preserves prior hook behavior)
+      * anything else -> empty dict (no fields to extract)
 
     Any embedded binary content anywhere in the payload collapses the
     whole dict to a metadata-only representation — raw bytes never

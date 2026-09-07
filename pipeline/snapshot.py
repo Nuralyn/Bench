@@ -3,11 +3,11 @@
 Each stage repairs a short list of cosmetic drift in its judge's JSON before
 validating it (the _normalize_*_response functions), and on a validation
 failure the ledger records what the judge actually wrote, not the repaired
-copy. That record used to be a deep copy, which recursed into every field
-and raised RecursionError on an unknown field nested a few hundred levels
-deep, turning an otherwise valid response into a pipeline error even
-though the validators tolerate unknown fields and the ledger can serialize
-far deeper than a deep copy can walk.
+copy. A deep copy would not do: it recurses into every field and raises
+RecursionError on an unknown field nested a few hundred levels deep, turning
+an otherwise valid response into a pipeline error even though the validators
+tolerate unknown fields and the ledger can serialize far deeper than a deep
+copy can walk.
 
 The normalizers only ever write to the top level of the response and to
 the dicts inside one list (findings, rebuttals). So the snapshot copies
