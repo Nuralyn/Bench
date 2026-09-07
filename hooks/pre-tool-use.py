@@ -117,36 +117,7 @@ def extract_diff_info(tool_name: str, tool_input: dict[str, Any]) -> dict[str, A
     normalized: str = raw_path
     path_external: bool = False
     if raw_path:
-        # Mirror utils.diff._normalize_path: resolve against the Bench repo
-        # root (_REPO_ROOT, from __file__) for in-repo files. _REPO_ROOT is
-        # NOT os.getcwd() because the hook can run with a working directory
-        # below the repo root, and resolving against CWD would wrongly reject
-        # in-repo edits (e.g. editing utils/api.py while CWD is tests/).
-        # For files outside the Bench repo (global governance), fall back to
-        # CWD-relative normalization via _fallback_normalize_to_cwd.
-        root: str = os.path.realpath(str(_REPO_ROOT))
-        candidate: str = os.path.realpath(os.path.join(root, raw_path))
-        try:
-            normalized = os.path.relpath(candidate, root)
-        except ValueError as exc:
-            print(
-                f"[bench hook] path on different drive from Bench repo "
-                f"(fallback) {raw_path!r}: {exc}; normalizing against CWD",
-                file=sys.stderr,
-            )
-            normalized = _fallback_normalize_to_cwd(candidate)
-            path_external = True
-        else:
-            if normalized == os.pardir or normalized.startswith(
-                os.pardir + os.sep
-            ):
-                print(
-                    f"[bench hook] path outside Bench repo (fallback) "
-                    f"{raw_path!r}; normalizing against CWD",
-                    file=sys.stderr,
-                )
-                normalized = _fallback_normalize_to_cwd(candidate)
-                path_external = True
+        normalized, path_external = _fallback_normalize_path(raw_path)
     result: dict[str, Any]
     if tool_name == "Write":
         result = {
@@ -171,12 +142,51 @@ def extract_diff_info(tool_name: str, tool_input: dict[str, Any]) -> dict[str, A
     return result
 
 
+def _fallback_normalize_path(raw_path: str) -> tuple[str, bool]:
+    """Normalize a path when ``utils.diff`` could not be imported.
+
+    A deliberate copy of ``utils.diff._normalize_path``, not an import: this
+    runs only when that import has already failed, so it cannot share code
+    with it. What keeps the two equal is ``tests/test_hook.py``
+    (``FallbackAgreesWithPrimaryTests``), which feeds both the same inputs.
+
+    Resolves against the Bench repo root (``_REPO_ROOT``, from ``__file__``)
+    for in-repo files. The root is not ``os.getcwd()`` because the hook can
+    run with a working directory below the repo root, and resolving against
+    it would wrongly reject in-repo edits (editing utils/api.py while the
+    working directory is tests/). A file outside the repo is normalized
+    against the working directory, which Claude Code sets to the governed
+    project's root. Returns the path and whether it was external.
+    """
+    root: str = os.path.realpath(str(_REPO_ROOT))
+    candidate: str = os.path.realpath(os.path.join(root, raw_path))
+    try:
+        normalized: str = os.path.relpath(candidate, root)
+    except ValueError as exc:
+        print(
+            f"[bench hook] path on different drive from Bench repo "
+            f"(fallback) {raw_path!r}: {exc}; normalizing against CWD",
+            file=sys.stderr,
+        )
+        return _fallback_normalize_to_cwd(candidate), True
+    if normalized == os.pardir or normalized.startswith(os.pardir + os.sep):
+        print(
+            f"[bench hook] path outside Bench repo (fallback) {raw_path!r}; "
+            f"normalizing against CWD",
+            file=sys.stderr,
+        )
+        return _fallback_normalize_to_cwd(candidate), True
+    return normalized, False
+
+
 def _fallback_normalize_to_cwd(candidate: str) -> str:
     """Normalize path relative to CWD for files outside the Bench repo.
 
-    Mirrors utils.diff._normalize_relative_to_cwd for the degraded fallback
-    path. Returns CWD-relative if the file is inside the governed project,
-    otherwise returns the absolute path for transparency in the ledger.
+    A deliberate copy of ``utils.diff._normalize_relative_to_cwd`` for the
+    degraded fallback path, pinned equal to it by
+    ``tests/test_hook.py``. Returns CWD-relative if the file is inside the
+    governed project, otherwise the absolute path for transparency in the
+    ledger.
     """
     try:
         cwd: str = os.path.realpath(os.getcwd())

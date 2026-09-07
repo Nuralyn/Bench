@@ -20,6 +20,7 @@ _REPO_ROOT: Path = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+import utils.diff as diff_module  # noqa: E402
 from utils.diff import (  # noqa: E402
     BINARY_LABEL,
     MAX_DIFF_CHARS,
@@ -31,6 +32,7 @@ from utils.diff import (  # noqa: E402
     _normalize_path,
     _truncate_preserving,
     build_diff_info,
+    relative_to_cwd,
 )
 
 
@@ -549,6 +551,32 @@ class MultiEditBudgetTests(unittest.TestCase):
         result = self._payload(1, MAX_DIFF_CHARS * 3)
         self.assertEqual(len(result["edits"]), 1)
         self.assertNotIn("omitted_edits", result)
+
+
+class RelativeToCwdTests(unittest.TestCase):
+    """The one rule for "has a CWD-relative form", shared by the governance
+    path and the CLI's path display."""
+
+    def test_inside_the_working_directory_is_relative(self) -> None:
+        candidate: str = os.path.join(os.getcwd(), "a", "b.py")
+        self.assertEqual(relative_to_cwd(candidate), os.path.join("a", "b.py"))
+
+    def test_outside_the_working_directory_is_none(self) -> None:
+        candidate: str = os.path.abspath(
+            os.path.join(os.getcwd(), os.pardir, "x.py")
+        )
+        self.assertIsNone(relative_to_cwd(candidate))
+
+    @unittest.skipUnless(os.name == "nt", "drives are a Windows notion")
+    def test_another_drive_is_none(self) -> None:
+        other: str = "Y:" if os.getcwd()[:1].upper() == "Z" else "Z:"
+        self.assertIsNone(relative_to_cwd(other + "\\x.py"))
+
+    def test_the_traversal_placeholder_is_gone(self) -> None:
+        """Defined and never used since global governance replaced blocking
+        with normalization; kept out so the sentinel cannot come back by
+        accident."""
+        self.assertFalse(hasattr(diff_module, "_PATH_TRAVERSAL_PLACEHOLDER"))
 
 
 if __name__ == "__main__":
