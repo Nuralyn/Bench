@@ -23,6 +23,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from cli.commands import (  # noqa: E402
+    _display_path,
     _gh_status,
     _git_refs,
     cmd_constitution,
@@ -636,6 +637,34 @@ class CmdViewerTests(unittest.TestCase):
                 code: int = cmd_viewer()
         self.assertEqual(code, 1)
         self.assertIn("viewer generation failed", err.getvalue())
+
+
+class DisplayPathTests(unittest.TestCase):
+    """Ledger paths are shown relative to the working directory when they
+    can be, absolute otherwise, through the same rule the governance path
+    uses (utils.diff.relative_to_cwd)."""
+
+    def test_dash_and_empty_render_as_dash(self) -> None:
+        self.assertEqual(_display_path("-"), "-")
+        self.assertEqual(_display_path(""), "-")
+
+    def test_a_path_under_the_working_directory_is_relative(self) -> None:
+        raw: str = os.path.join(os.getcwd(), ".bench", "bench-ledger.json")
+        self.assertEqual(
+            _display_path(raw), os.path.join(".bench", "bench-ledger.json")
+        )
+
+    def test_a_path_outside_the_working_directory_is_absolute_and_quiet(
+        self,
+    ) -> None:
+        raw: str = os.path.abspath(
+            os.path.join(os.getcwd(), os.pardir, "elsewhere-ledger.json")
+        )
+        err: io.StringIO = io.StringIO()
+        with redirect_stderr(err):
+            shown: str = _display_path(raw)
+        self.assertEqual(shown, raw)
+        self.assertEqual(err.getvalue(), "")
 
 
 if __name__ == "__main__":

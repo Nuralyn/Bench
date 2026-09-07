@@ -52,6 +52,7 @@ from ledger.retire import (
     execute_retirement,
 )
 from ledger.verify import verify_chain
+from utils.diff import relative_to_cwd
 from pipeline.constitution import (
     ConstitutionError,
     load_governing_constitution,
@@ -117,26 +118,25 @@ def _display_path(raw: str) -> str:
     report, so collapse it to a CWD-relative path when the ledger sits under
     the working directory, and fall back to the absolute path otherwise.
 
-    Mirrors the normalization idiom in ``hooks/pre-tool-use.py``.
+    The rule for "has a relative form" is ``utils.diff.relative_to_cwd``,
+    the same one the governance path applies to file paths, so the two
+    cannot drift. A path with no relative form (outside the working
+    directory, or on another drive) is expected here and shown absolute
+    without comment.
     """
     if not raw or raw == "-":
         return "-"
     try:
-        rel: str = os.path.relpath(os.path.realpath(raw), os.getcwd())
-    except ValueError:
-        # Windows: path on a different drive from CWD, so no relative form
-        # exists. Expected control flow, not a fault.
-        return raw
+        rel: str | None = relative_to_cwd(os.path.realpath(raw))
     except OSError as exc:
-        # An unresolvable path is a genuine fault; do not hide it (C-001).
+        # An unresolvable path or working directory is a genuine fault; do
+        # not hide it (C-001).
         print(
             f"[bench cli] cannot resolve ledger path {raw!r}: {exc}",
             file=sys.stderr,
         )
         return raw
-    if rel == os.pardir or rel.startswith(os.pardir + os.sep):
-        return raw
-    return rel
+    return raw if rel is None else rel
 
 
 def cmd_verify() -> int:

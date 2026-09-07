@@ -53,7 +53,6 @@ _PRESERVED_KINDS: str = "first50+signatures+exception_handlers+last20"
 _FIRST_N: int = 50
 _LAST_N: int = 20
 _MAX_ERROR_MESSAGE_CHARS: int = 500
-_PATH_TRAVERSAL_PLACEHOLDER: str = "[PATH_TRAVERSAL_BLOCKED]"
 
 # Project root resolved from this file's location (utils/diff.py -> repo root),
 # NOT os.getcwd(): the hook can run with a working directory below the repo
@@ -64,27 +63,41 @@ _PROJECT_ROOT: str = os.path.realpath(
 )
 
 
+def relative_to_cwd(candidate: str) -> str | None:
+    """The CWD-relative form of an absolute path, or ``None`` if it has none.
+
+    ``None`` when the path escapes the working directory or lies on another
+    drive (Windows), where ``os.path.relpath`` raises ``ValueError``. This is
+    the one place that rule lives: ``_normalize_relative_to_cwd`` wraps it
+    for the governance path and ``cli.commands._display_path`` calls it to
+    render ledger paths, so the two cannot drift. It is quiet by design; the
+    callers decide whether a missing relative form is worth a line on stderr.
+    An ``OSError`` from ``os.getcwd`` propagates: a vanished working
+    directory is the caller's fault to report (C-001).
+    """
+    cwd: str = os.path.realpath(os.getcwd())
+    try:
+        rel: str = os.path.relpath(candidate, cwd)
+    except ValueError:
+        return None
+    if rel == os.pardir or rel.startswith(os.pardir + os.sep):
+        return None
+    return rel
+
+
 def _normalize_relative_to_cwd(candidate: str) -> str:
     """Normalize path relative to CWD for files outside the Bench repo.
 
     Used by global governance to produce readable, project-relative paths
     for externally governed files. Returns CWD-relative if the file is
     inside the governed project, otherwise returns the absolute path for
-    full transparency in the ledger.
+    full transparency in the ledger, and says so on stderr.
     """
-    try:
-        cwd: str = os.path.realpath(os.getcwd())
-        rel: str = os.path.relpath(candidate, cwd)
-    except ValueError as exc:
+    rel: str | None = relative_to_cwd(candidate)
+    if rel is None:
         print(
-            f"[bench diff] CWD-relative normalization failed for "
-            f"{candidate!r}: {exc}",
-            file=sys.stderr,
-        )
-        return candidate
-    if rel == os.pardir or rel.startswith(os.pardir + os.sep):
-        print(
-            f"[bench diff] path escapes CWD, using absolute: {candidate!r}",
+            f"[bench diff] no CWD-relative form for {candidate!r} (outside "
+            f"the working directory or on another drive); using absolute",
             file=sys.stderr,
         )
         return candidate

@@ -7,10 +7,13 @@ is mocked to prevent real API calls.
 Run: python -m unittest tests.test_hook -v
 """
 
+import contextlib
 import importlib.util
 import io
 import json
+import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -455,6 +458,83 @@ class TestFallbackExternalNormalization(unittest.TestCase):
             )
         self.assertTrue(os.path.isabs(info["file_path"]))
         self.assertTrue(info.get("_path_normalized_external"))
+
+
+class FallbackAgreesWithPrimaryTests(unittest.TestCase):
+    """The hook's fallback normalizers are copies of the utils.diff primaries.
+
+    They exist for the case where utils.diff cannot be imported, so they
+    cannot share its code. This is what keeps them equal instead: the same
+    inputs through both, in-repo and out, relative and absolute, from the
+    repo root and from an external working directory. Both sides print to
+    stderr on the out-of-repo branches; only the values are compared.
+    """
+
+    @staticmethod
+    def _other_drive() -> str:
+        return "Y:" if os.getcwd()[:1].upper() == "Z" else "Z:"
+
+    def _path_cases(self) -> list[str]:
+        repo: str = str(_hook_module._REPO_ROOT)
+        cases: list[str] = [
+            "utils/api.py",
+            os.path.join(repo, "utils", "api.py"),
+            "src/../utils/diff.py",
+            "../sibling.py",
+            "../../../etc/passwd",
+            os.path.abspath(os.path.join(os.sep, "etc", "passwd")),
+        ]
+        if os.name == "nt":
+            cases.append(self._other_drive() + "\\elsewhere\\file.py")
+        return cases
+
+    def test_normalize_path_copies_agree(self) -> None:
+        from utils import diff as diff_module
+
+        for raw in self._path_cases():
+            with (
+                self.subTest(raw=raw),
+                contextlib.redirect_stderr(io.StringIO()),
+            ):
+                self.assertEqual(
+                    _hook_module._fallback_normalize_path(raw)[0],
+                    diff_module._normalize_path(raw),
+                )
+
+    def test_normalize_path_copies_agree_from_an_external_cwd(self) -> None:
+        from utils import diff as diff_module
+
+        with tempfile.TemporaryDirectory() as tmp:
+            external: str = os.path.join(tmp, "app", "main.py")
+            with (
+                contextlib.chdir(tmp),
+                contextlib.redirect_stderr(io.StringIO()),
+            ):
+                fallback: tuple[str, bool] = _hook_module._fallback_normalize_path(
+                    external
+                )
+                primary: str = diff_module._normalize_path(external)
+        self.assertEqual(fallback, (os.path.join("app", "main.py"), True))
+        self.assertEqual(fallback[0], primary)
+
+    def test_cwd_copies_agree(self) -> None:
+        from utils import diff as diff_module
+
+        cases: list[str] = [
+            os.path.join(os.getcwd(), "x.py"),
+            os.path.abspath(os.path.join(os.getcwd(), os.pardir, "y.py")),
+        ]
+        if os.name == "nt":
+            cases.append(self._other_drive() + "\\z.py")
+        for candidate in cases:
+            with (
+                self.subTest(candidate=candidate),
+                contextlib.redirect_stderr(io.StringIO()),
+            ):
+                self.assertEqual(
+                    _hook_module._fallback_normalize_to_cwd(candidate),
+                    diff_module._normalize_relative_to_cwd(candidate),
+                )
 
 
 if __name__ == "__main__":
