@@ -20,8 +20,10 @@ from utils.stats import (  # noqa: E402
     MODEL_NOT_REACHED,
     MODEL_SKIPPED,
     MODEL_UNRECORDED,
+    UNKNOWN_WEEK,
     citations_by_constraint,
     compute_ledger_stats,
+    entries_by_week,
     entry_has_pipeline_error,
     models_by_stage,
     stage_model_label,
@@ -34,6 +36,7 @@ from utils.stats import (  # noqa: E402
     stats_by_scope,
     stats_by_week,
     tokens_by_stage,
+    tokens_by_week,
     tokens_per_entry,
     billed_input,
     billed_tokens_per_entry,
@@ -672,6 +675,120 @@ class SecondsByStageTests(unittest.TestCase):
         summary: dict = seconds_by_stage([])
         for stage in ("challenger", "defender", "oracle", "total"):
             self.assertEqual(summary[stage], {"entries": 0, "median": 0.0, "p90": 0.0})
+
+
+class EntriesByWeekTests(unittest.TestCase):
+    """The one grouping every weekly table is built on."""
+
+    def test_iso_week_boundaries(self) -> None:
+        # ISO weeks run Monday to Sunday. Sunday 2026-01-04 closes 2026-W01
+        # and Monday 2026-01-05 opens W02. The last days of 2025 belong to
+        # 2026-W01, and 2026 has 53 ISO weeks, so New Year's Day 2027 falls
+        # in 2026-W53.
+        entries: list[dict] = [
+            {"timestamp": "2026-01-04T23:59:59+00:00", "id": "sunday"},
+            {"timestamp": "2026-01-05T00:00:00+00:00", "id": "monday"},
+            {"timestamp": "2025-12-29T12:00:00+00:00", "id": "year-end"},
+            {"timestamp": "2027-01-01T00:00:00+00:00", "id": "year-start"},
+        ]
+        groups: dict[str, list[dict]] = entries_by_week(entries)
+        self.assertEqual(
+            {week: [e["id"] for e in rows] for week, rows in groups.items()},
+            {
+                "2026-W01": ["sunday", "year-end"],
+                "2026-W02": ["monday"],
+                "2026-W53": ["year-start"],
+            },
+        )
+
+    def test_unparseable_and_missing_timestamps_bucket_under_unknown(self) -> None:
+        entries: list[dict] = [
+            {"timestamp": "not a date", "id": "bad"},
+            {"id": "missing"},
+            {"timestamp": "2026-01-05T00:00:00+00:00", "id": "good"},
+        ]
+        groups: dict[str, list[dict]] = entries_by_week(entries)
+        self.assertEqual([e["id"] for e in groups[UNKNOWN_WEEK]], ["bad", "missing"])
+        self.assertEqual([e["id"] for e in groups["2026-W02"]], ["good"])
+        # Renderers sort the labels; the unknown bucket sorts after any year.
+        self.assertEqual(sorted(groups)[-1], UNKNOWN_WEEK)
+
+    def test_every_weekly_table_groups_the_same_way(self) -> None:
+        entries: list[dict] = [
+            {"timestamp": "2026-01-05T00:00:00+00:00", "oracle": {"verdict": "PASS", "_seconds": 2.0, "_tokens": {"input": 10, "output": 1}}},
+            {"timestamp": "2026-01-11T00:00:00+00:00", "oracle": {"verdict": "VETO"}},
+            {"timestamp": "2026-01-12T00:00:00+00:00", "oracle": {"verdict": "PASS", "_seconds": 3.0}},
+            {"timestamp": "broken", "oracle": {"verdict": "PASS", "_tokens": {"input": 5, "output": 5}}},
+        ]
+        groups: dict[str, list[dict]] = entries_by_week(entries)
+        tallies: list[dict] = stats_by_week(entries)
+        self.assertEqual([row["week"] for row in tallies], sorted(groups))
+        for row in tallies:
+            self.assertEqual(row["total"], len(groups[row["week"]]))
+        # The other two tables omit weeks with nothing to measure, and every
+        # week they do show is one of the same groups.
+        self.assertEqual([r["week"] for r in latency_by_week(entries)], ["2026-W02", "2026-W03"])
+        self.assertEqual([r["week"] for r in tokens_by_week(entries)], ["2026-W02", UNKNOWN_WEEK])
+        for table in (latency_by_week(entries), tokens_by_week(entries)):
+            self.assertTrue({r["week"] for r in table} <= set(groups))
+
+
+class TokensByWeekTests(unittest.TestCase):
+    """The per-week token distribution the README quotes for a release week."""
+
+    def test_weeks_without_usage_are_omitted_and_malformed_usage_is_skipped(
+        self,
+    ) -> None:
+        entries: list[dict] = [
+            {"timestamp": "2026-01-05T00:00:00+00:00", "oracle": {"_tokens": {"input": 100, "output": 10}}},
+            {
+                "timestamp": "2026-01-06T00:00:00+00:00",
+                "challenger": {"_tokens": {"input": 200, "output": 20}},
+                "oracle": {"_tokens": {"input": 300, "output": 30}},
+            },
+            {"timestamp": "2026-01-07T00:00:00+00:00", "verdict": "PASS"},
+            {"timestamp": "2026-01-12T00:00:00+00:00", "oracle": {"_tokens": {"input": True, "output": "many"}}},
+            {"timestamp": "2026-01-19T00:00:00+00:00", "oracle": {"_tokens": {"input": 1000, "output": 0}}},
+            {"timestamp": "not a date", "oracle": {"_tokens": {"input": 5, "output": 5}}},
+        ]
+        # W02 totals 110 and 550 (the untracked third entry is not counted);
+        # W03 holds only malformed usage and is omitted; W04 is 1000; the
+        # unparseable timestamp lands in the unknown bucket, last.
+        self.assertEqual(
+            tokens_by_week(entries),
+            [
+                {"week": "2026-W02", "entries": 2, "median": 330.0, "p90": 550.0, "billed_median": 330.0, "billed_p90": 550.0},
+                {"week": "2026-W04", "entries": 1, "median": 1000.0, "p90": 1000.0, "billed_median": 1000.0, "billed_p90": 1000.0},
+                {"week": UNKNOWN_WEEK, "entries": 1, "median": 10.0, "p90": 10.0, "billed_median": 10.0, "billed_p90": 10.0},
+            ],
+        )
+
+    def test_cache_reads_are_priced_in_the_billed_figures(self) -> None:
+        entries: list[dict] = [
+            {
+                "timestamp": "2026-01-05T00:00:00+00:00",
+                "oracle": {"_tokens": {"input": 1000, "output": 10, "cache_read": 900, "cache_creation": 0}},
+            }
+        ]
+        row: dict = tokens_by_week(entries)[0]
+        # 100 uncached + 900 at the cached rate + 10 output.
+        self.assertEqual(row["median"], 1010.0)
+        self.assertEqual(row["billed_median"], 200.0)
+
+    def test_a_single_week_agrees_with_the_all_entries_figures(self) -> None:
+        entries: list[dict] = [
+            {"timestamp": "2026-01-05T00:00:00+00:00", "oracle": {"_tokens": {"input": 100, "output": 10}}},
+            {"timestamp": "2026-01-06T00:00:00+00:00", "oracle": {"_tokens": {"input": 400, "output": 40, "cache_read": 200}}},
+            {"timestamp": "2026-01-07T00:00:00+00:00", "oracle": {"_tokens": {"input": 900, "output": 90}}},
+        ]
+        row: dict = tokens_by_week(entries)[0]
+        overall: dict = tokens_per_entry(entries)
+        billed: dict = billed_tokens_per_entry(entries)
+        self.assertEqual((row["entries"], row["median"], row["p90"]), (overall["entries"], overall["median"], overall["p90"]))
+        self.assertEqual((row["billed_median"], row["billed_p90"]), (billed["median"], billed["p90"]))
+
+    def test_empty_ledger(self) -> None:
+        self.assertEqual(tokens_by_week([]), [])
 
 
 class LatencyByWeekTests(unittest.TestCase):

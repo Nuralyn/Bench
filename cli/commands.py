@@ -68,6 +68,7 @@ from utils.stats import (
     normalized_entries,
     pct,
     seconds_by_stage,
+    tokens_by_week,
     tokens_per_entry,
 )
 from utils.owneronly import open_owner_only
@@ -986,6 +987,15 @@ def cmd_stats() -> int:
             f"p90 {int(billed['p90']):,} "
             f"(reads {CACHE_READ_RATE:g}x, writes {CACHE_WRITE_RATE:g}x)"
         )
+        # The same distribution per ISO week, so a release week's figure
+        # can be read off the chain instead of recomputed by hand.
+        print("Tokens by week         :")
+        for row in tokens_by_week(entries):
+            print(
+                f"  {row['week']}: median {int(row['median']):,}, "
+                f"at cached rates {int(row['billed_median']):,} "
+                f"({int(row['entries'])} with usage)"
+            )
     else:
         print("Tokens per edit        : n/a (no entry carries token usage)")
     seconds: dict[str, dict[str, float | int]] = seconds_by_stage(entries)

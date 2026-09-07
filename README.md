@@ -300,40 +300,28 @@ Set `BENCH_PROVIDER=claude_code` to run the pipeline on the subscription that al
 
 ## What It Costs
 
-Every governed `Write`, `Edit`, or `MultiEdit` is three sequential model calls, and Claude Code makes many small edits. The figures below come from Bench's own operational ledger, through the helpers in `utils/stats.py` that `python -m cli stats` and the viewer use. `cli stats` prints the all-entries rows (the "Tokens per edit", "Seconds per edit", and "Seconds by stage" lines) and the viewer's dashboard plots verdicts and latency by week; the per-week token rows come from the same helpers over one week's entries, which this reproduces on any chain:
+Every governed `Write`, `Edit`, or `MultiEdit` is three sequential model calls, and Claude Code makes many small edits. The figures below come from Bench's own operational ledger. `python -m cli stats` prints each of them (the "Tokens per edit", "Tokens by week", "Seconds per edit", and "Seconds by stage" lines), and the viewer's dashboard shows the same distributions, per week and over every entry, so anyone with a chain can reproduce the table for their own ledger rather than take an estimate. Every weekly figure is built on one grouping, `utils.stats.entries_by_week`, so the tables cannot disagree about which week an entry belongs to.
 
-```python
-from collections import defaultdict
-from ledger.chain import load_ledger
-from utils.stats import billed_tokens_per_entry, seconds_by_stage, tokens_per_entry, week_of
+Tokens per governed edit, all stages, by week of the operational chain. This is a fixed snapshot of the chain as it stood at 2026-09-07T06:37:19Z, 2,767 entries of which 2,743 carry usage, not a live weekly value; the release week was still open when it was taken, and the chain has moved on since.
 
-weeks = defaultdict(list)
-for entry in load_ledger():
-    weeks[week_of(entry.get("timestamp", ""))].append(entry)
-for week, entries in sorted(weeks.items()):
-    print(week, tokens_per_entry(entries), billed_tokens_per_entry(entries), seconds_by_stage(entries)["total"])
-```
-
-Tokens per governed edit, all stages, by week of the operational chain, as of 2026-09-07:
-
-| Week | Governed edits | Median tokens | 90th percentile | Median at cached rates |
+| Week | Entries with usage | Median tokens | 90th percentile | Median at cached rates |
 |---|---|---|---|---|
-| 2026-W36, the v2.1 roadmap week | 1,797 | 34,747 | 42,650 | 33,451 |
-| 2026-W37, the release week so far | 80 | 19,483 | 36,811 | 18,124 |
-| Every entry with usage recorded (2,705) | | 34,967 | 44,486 | 33,979 |
+| 2026-W36, the v2.1 roadmap week | 1,777 | 34,747 | 42,650 | 33,451 |
+| 2026-W37, the release week at the snapshot | 118 | 20,383 | 36,811 | 19,085 |
+| Every entry with usage in the snapshot | 2,743 | 34,917 | 44,401 | 33,899 |
 
-The release-week row is the first under every 2.1 cost change together, and it is a small sample of light edits: most were docstring changes, which the Challenger clears in seconds and the Defender then skips. It is not a settled reduction. The roadmap-week row is the number to plan on until the release week fills out, and the roadmap's target of a median under 20,000 tokens stays a target.
+The release-week row is the first under every 2.1 cost change together, and it is a small sample of light edits: most were docstring and test changes, which the Challenger clears in seconds and the Defender then skips. It is not a settled reduction. On the day of the snapshot that median moved from under 20,000 to just over it as heavier edits landed. The roadmap-week row is the number to plan on until a full week of ordinary edits is in, and the roadmap's target of a median under 20,000 tokens stays a target.
 
-Wall time, recorded per stage, on the `claude_code` provider, which cold-starts a `claude` process per stage. Over the 1,635 timed entries:
+Wall time, recorded per stage, on the `claude_code` provider, which cold-starts a `claude` process per stage. Over the 1,673 timed entries in the same snapshot:
 
 | Stage | Median seconds | 90th percentile |
 |---|---|---|
-| Challenger | 21.8 | 38.7 |
-| Defender | 15.8 | 38.6 |
-| Oracle | 23.1 | 34.9 |
-| Whole edit | 61.9 | 107.7 |
+| Challenger | 21.7 | 38.5 |
+| Defender | 15.3 | 38.5 |
+| Oracle | 23.1 | 34.7 |
+| Whole edit | 61.1 | 106.8 |
 
-By week, the whole-edit median was 63.5 seconds in 2026-W36 and 22.0 seconds in 2026-W37, with the same caveat on the second figure.
+By week, the whole-edit median was 63.5 seconds in 2026-W36 and 26.6 seconds in 2026-W37, with the same caveat on the second figure.
 
 The Defender median is low because a CLEAR challenge skips it and records zero seconds. The direct API providers avoid the process start but not the sequential three-call shape. Both tables will drift as the ledger grows; run `python -m cli stats` for the current figures on your own chain, and `python -m cli viewer` for the per-week view.
 

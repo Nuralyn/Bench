@@ -40,6 +40,7 @@ from utils.stats import (
     seconds_by_stage,
     stats_by_week,
     tokens_by_stage,
+    tokens_by_week,
     tokens_per_entry,
     billed_tokens_per_entry,
     CACHE_READ_RATE,
@@ -483,6 +484,16 @@ def _build_dashboard(entries: list[dict], project_root: str) -> str:
     latency_week_rows: list[list[str]] = [
         [str(row.get("week", ""))] + _latency_cells(row) for row in latency_weeks
     ]
+    token_week_rows: list[list[str]] = [
+        [
+            str(row.get("week", "")),
+            f"{int(row.get('entries', 0)):,}",
+            f"{int(row.get('median', 0)):,}",
+            f"{int(row.get('p90', 0)):,}",
+            f"{int(row.get('billed_median', 0)):,}",
+        ]
+        for row in tokens_by_week(entries)
+    ]
 
     week_rows: list[list[str]] = [
         [str(row.get("week", ""))] + _verdict_cells(row) for row in weeks
@@ -595,7 +606,15 @@ def _build_dashboard(entries: list[dict], project_root: str) -> str:
         )
         + "\n  "
         + _token_distribution_line(per_entry, billed_per_entry)
-        + "\n</div>\n"
+        + "\n  "
+        + _table(
+            ["Week", "Entries", "Median tokens", "p90", "Median at cached rates"],
+            token_week_rows, "No token figures recorded.",
+        )
+        + '\n  <p class="fine">Per week, over entries that carry usage, the same '
+        "distribution as the line above for that week alone. A week with no "
+        "usage recorded is omitted rather than shown as zero.</p>\n"
+        "</div>\n"
         '<div class="card" id="dash-latency">\n'
         "  <h2>Seconds by stage</h2>\n  "
         + _table(

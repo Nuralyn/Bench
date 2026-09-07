@@ -219,6 +219,34 @@ class CmdStatsTests(unittest.TestCase):
             text,
         )
 
+    def test_stats_prints_tokens_by_week(self) -> None:
+        entries: list[dict] = _entries()
+        entries[0]["timestamp"] = "2026-01-05T00:00:00+00:00"
+        entries[0]["oracle"] = {
+            **entries[0].get("oracle", {}),
+            "_tokens": {"input": 500, "output": 50},
+        }
+        entries[1]["timestamp"] = "2026-01-12T00:00:00+00:00"
+        entries[1]["oracle"] = {
+            **entries[1].get("oracle", {}),
+            "_tokens": {"input": 1000, "output": 0, "cache_read": 1000, "cache_creation": 0},
+        }
+        out = io.StringIO()
+        with patch("cli.commands.load_ledger", return_value=entries):
+            with patch("cli.commands.verify_chain", return_value=_valid_verify()):
+                with redirect_stdout(out):
+                    code: int = cmd_stats()
+        self.assertEqual(code, 0)
+        text: str = out.getvalue()
+        self.assertIn("Tokens by week         :", text)
+        self.assertIn(
+            "  2026-W02: median 550, at cached rates 550 (1 with usage)", text
+        )
+        # 1,000 input entirely read from cache bills at 100.
+        self.assertIn(
+            "  2026-W03: median 1,000, at cached rates 100 (1 with usage)", text
+        )
+
     def test_stats_prints_models_by_stage_with_override_counts(self) -> None:
         entries: list[dict] = _entries()
         entries[0]["oracle"] = {"verdict": "PASS", "_model": "claude-opus-4-8", "_model_override": False}
