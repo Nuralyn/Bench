@@ -6,19 +6,16 @@ the ledger. C-008 governs the authoritative append-only chain at
 it for writing, and is invalid by definition if the chain fails
 ``verify_chain`` afterwards. What it concerns is a different object.
 
-Before the ledger became private, Bench committed its chain to a public
-repository, and git retained those commits. Those git objects are a
-*publication* of ledger data, not the ledger: nothing reads them, nothing
-appends to them, and `resolve_ledger_path()` has never pointed at them.
-Deleting a published copy is therefore outside C-008's immutability scope
-in the same way that deleting a printed copy of a document is not an edit
-to the document.
+A published copy is a different object from the ledger. Git objects in a
+repository that tracked a chain are a *publication* of ledger data, not the
+ledger: nothing reads them, nothing appends to them, and
+`resolve_ledger_path()` does not point at them. Deleting a published copy is
+therefore outside C-008's immutability scope in the same way that deleting a
+printed copy of a document is not an edit to the document.
 
-Retirement cannot reach them. The chain retired on 2026-07-24 was retired
-because it held unpublishable third-party content, and its anchor records
-that 264 of its entries had already been published. Retirement archived the
-chain and opened a successor; the published copies stayed exactly where
-they were.
+Retirement cannot reach them. It archives a chain and opens a successor, and
+any published copies of the retired chain stay exactly where they were,
+which is the case sanitation exists for.
 
 Being outside C-008's scope is not a licence to act unaccountably, which is
 the whole reason this module exists. A sanitation is recorded in the live
@@ -26,8 +23,7 @@ chain and must satisfy every requirement below, so a reader can check what
 was removed and confirm the chain it spared is intact.
 
 Whole files only. Sanitation never edits, reorders, or partially rewrites an
-entry in any copy. That operation is what C-008 forbids without exception,
-and Bench correctly vetoed it when it was first attempted here.
+entry in any copy. That operation is what C-008 forbids without exception.
 
 Two deliberate differences from retirement's evidence requirements:
 

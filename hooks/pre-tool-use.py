@@ -43,10 +43,10 @@ except Exception as _e:  # pragma: no cover: deferred to fail-closed VETO in mai
     traceback.print_exc(file=sys.stderr)
     run_governance_pipeline = None  # type: ignore[assignment]
 
-# utils.diff (ledger entry 8bc4a3671a13, verdict PASS) provides the
-# hardened extractor: binary detection, truncation with governance-critical
-# line preservation, and change_type labeling. Imported in its own try
-# so the fallback path below can engage independently of pipeline import.
+# utils.diff provides the hardened extractor: binary detection, truncation
+# with governance-critical line preservation, and change_type labeling.
+# Imported in its own try so the fallback path below can engage
+# independently of pipeline import.
 try:
     from utils.diff import build_diff_info as _build_diff_info_hardened
 except Exception as _diff_e:  # pragma: no cover: degrades to the inline fallback below
@@ -91,20 +91,16 @@ def extract_diff_info(tool_name: str, tool_input: dict[str, Any]) -> dict[str, A
     governance on them so the pipeline can decide what to do, but we
     don't fabricate fields.
 
-    Global governance behavior (differs from prior fallback): when a
-    file path resolves outside the Bench repo root (_REPO_ROOT), the
-    fallback no longer returns the sentinel ``[PATH_TRAVERSAL_BLOCKED]``.
-    Instead it delegates to ``_fallback_normalize_to_cwd`` (defined above
-    in this module) which normalizes the path relative to CWD (the
-    governed project's root). This enables governance of edits in
-    external projects without over-blocking. A ``_path_normalized_external``
-    flag is set on the returned dict so pipeline stages (Challenger,
-    Defender, Oracle) can see that the path originated outside the
-    Bench repo and was normalized via CWD heuristics.
+    A file path that resolves outside the Bench repo root (``_REPO_ROOT``)
+    is normalized by ``_fallback_normalize_path`` relative to the working
+    directory, which Claude Code sets to the governed project's root, and
+    the returned dict carries ``_path_normalized_external`` so the pipeline
+    stages can see that the path came from outside the repo.
 
-    C-005 test coverage: both CWD-normalization branches (cross-drive
-    ValueError and escapes-repo-root) are covered by
-    TestFallbackExternalNormalization in tests/test_hook.py.
+    Test coverage, both in tests/test_hook.py: TestFallbackExternalNormalization
+    covers the cross-drive and escapes-repo-root branches, and
+    FallbackAgreesWithPrimaryTests pins the fallback equal to
+    ``utils.diff._normalize_path`` on the same inputs.
     """
     if _build_diff_info_hardened is not None:
         return _build_diff_info_hardened(tool_name, tool_input)

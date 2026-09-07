@@ -211,16 +211,15 @@ def _build_user_content(diff_info: dict, challenger_result: dict) -> str:
     )
 
 
-# Cosmetic drift the operational ledger has recorded in otherwise sound
-# Defender responses (INVALID_DEFENDER_RESPONSE on 2026-07-31, twice, and
-# 2026-08-04, twice), each a fail-closed VETO recorded as a pipeline error,
-# not a ruling. The positions here are the two the system prompt above
-# names as the mistakes to avoid, and each is a plain word for agreeing
-# with a finding, which is what CONCEDE means. No alias maps to REBUT or
-# MITIGATE, and a word that could mean disagreement is never guessed at:
-# CONFIRM_CLEAR, which the ledger also recorded, is the schema's top-level
-# status for a clear assessment and inside a rebuttal can mean the code is
-# clear of the finding, so it stays fail-closed.
+# Cosmetic drift in otherwise sound Defender responses: a rebuttal position
+# written as a plain word for agreeing with a finding, which is what CONCEDE
+# means. Left as written, the response fails validation and the edit is
+# denied as a pipeline error rather than ruled on. The two positions here
+# are the two the system prompt above names as the mistakes to avoid. No
+# alias maps to REBUT or MITIGATE, and a word that could mean disagreement
+# is never guessed at: CONFIRM_CLEAR is the schema's top-level status for a
+# clear assessment and inside a rebuttal can mean the code is clear of the
+# finding, so it stays fail-closed.
 _POSITION_ALIASES: dict[str, str] = {
     "CONFIRM": "CONCEDE",
     "AGREE": "CONCEDE",
@@ -235,16 +234,16 @@ def _normalize_defender_response(
     Two repairs, neither changing the argument made: a ``finding_index``
     given as a digit string becomes the integer, but only when that integer
     names one of the Challenger's findings, so a rebuttal to a finding that
-    does not exist fails closed as it always has; and a position in
-    _POSITION_ALIASES becomes CONCEDE. Any other position, a non-numeric,
-    negative, or out-of-range index, and a missing argument or summary are
-    left for _validate_defender_response to fail closed, exactly as before.
+    does not exist still fails closed; and a position in _POSITION_ALIASES
+    becomes CONCEDE. Any other position, a non-numeric, negative, or
+    out-of-range index, and a missing argument or summary are left for
+    _validate_defender_response to fail closed.
 
     This does not weaken enforcement. A rebuttal's position is an input to
     the Oracle, which reads the argument text and rules on the merits; a
-    response the validator rejected for spelling CONCEDE as CONFIRM was
-    never adjudicated at all, and the VETO it produced was a pipeline
-    error. Mapping an agreement word to CONCEDE sends the Oracle the same
+    response the validator rejects for spelling CONCEDE as CONFIRM is never
+    adjudicated at all, and the VETO it produces is a pipeline error.
+    Mapping an agreement word to CONCEDE sends the Oracle the same
     argument with the position the schema meant, whether the response also
     carries a genuine REBUT or not.
 
@@ -276,7 +275,7 @@ def _normalize_defender_response(
         # superscripts and circled digits that int() rejects, int() refuses
         # very long digit strings, and an exception here would skip the
         # PIPELINE_ERROR receipt the validator writes. An index past the
-        # findings list stays a string and fails closed as it always has.
+        # findings list stays a string and fails closed.
         if (
             isinstance(finding_index, str)
             and finding_index.strip().isascii()
