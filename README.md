@@ -357,13 +357,13 @@ The corollary is worth stating: keeping a ledger out of git also removes git as 
 
 ### Ledger Format
 
-The ledger is stored in two segments, and the split is what lets two branches record verdicts independently.
+The ledger is stored in two segments: a frozen legacy array, and one file per new entry.
 
 `bench-ledger.json` is the **frozen** legacy segment: a hash-chained JSON array that every reader still reads and nothing writes. `ledger-meta.json` is frozen with it, as a permanent pin on that segment's tip hash and entry count. Every new entry is written to its own file at `<ledger_dir>/entries/<entry_hash>.json`.
 
 That shape exists because the original single array was rewritten in full on every append. Two branches appending produced divergent chains with no valid resolution: interleaving breaks the hash links, and rebasing rewrites hashes, which C-008 forbids. The array was frozen rather than migrated for the same reason — C-008 permits no moving or rewriting of an existing entry, and a file that is never written can never conflict.
 
-`previous_hash` therefore holds either a string (legacy entries, one parent) or a sorted list of parent hashes. An append names **every current tip**, so after a `git merge` leaves two heads, the next governed edit names both and the fork reconciles itself. There is no merge command: the reconciliation is an ordinary governed, hash-linked entry.
+`previous_hash` therefore holds either a string (legacy entries, one parent) or a sorted list of parent hashes. An append names **every current tip**, so a chain that comes to have two heads, however it came to have them, is reconciled by the next governed edit, which names both. The ledger is untracked, so a `git merge` never touches it; a fork arises only when entry files reach one directory from more than one source. There is no merge command: the reconciliation is an ordinary governed, hash-linked entry.
 
 Beside `entries/` sits `tip-cache.json`, a derived record of the current tips. It lets an append read and validate only the entries it will link to instead of re-reading the whole chain, so what an append reads does not grow with the chain's length; only a directory listing still does, and that is two orders of magnitude cheaper than reading the chain. It is never authoritative: the cache is keyed to a digest of the entries listing, so any file added or removed outside the writer invalidates it, a missing or doubtful cache falls back to the full scan and is rebuilt from it, and `python -m cli verify` does not read it at all. Deleting it is always safe.
 

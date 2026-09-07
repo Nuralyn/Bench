@@ -2,8 +2,9 @@
 
 All notable changes to Bench. The format follows Keep a Changelog, and the
 project follows semantic versioning. Dates are the merge dates of the release
-tags. Every change listed here landed through Bench's own governance pipeline
-and carries a receipt in the operational ledger.
+tags. Since the runner began recording verdicts, partway through 1.0.0, every
+change has landed through Bench's own governance pipeline and carries a
+receipt in the operational ledger; the earliest 1.0.0 work predates that.
 
 ## [2.1.0] - unreleased
 
@@ -15,8 +16,10 @@ comments.
 
 - `pip install` gives a `bench` command; `bench install --project PATH` writes
   the hook settings with an absolute path, appends `/.bench/` to the project's
-  gitignore, and sets the commit guard; `bench uninstall` reverses exactly what
-  install wrote, from a receipt it keeps at `.bench/install.json`.
+  gitignore, and installs the ledger commit guard as the project's pre-commit
+  hook when it has none, otherwise reporting the existing hook and how to
+  call the guard from it; `bench uninstall` reverses exactly what install
+  wrote, from a receipt it keeps at `.bench/install.json`.
 - Per-stage wall time recorded beside token counts in every entry; the
   dashboard shows median and p90 latency per week and the README quotes the
   ledger's own median tokens and seconds per edit.
@@ -56,9 +59,12 @@ comments.
 
 - The operational ledger lives at `<project>/.bench/` for every governed
   project, Bench included, and is never a tracked artifact: an entry records
-  the full diff body of the change it governs. The legacy array segment is
-  frozen and new entries are written one per file, so two branches that both
-  appended merge as a union and the next governed edit reconciles the fork.
+  the change it governs, up to the diff budget and with binary and
+  out-of-project content reduced to metadata, so a committed ledger publishes
+  source. The legacy array segment is frozen and new entries are written one
+  per file, each named by its hash, so no entry is ever rewritten; an append
+  names every current tip, so a chain that comes to have two tips is
+  reconciled by the next governed edit.
 - Constitution v7 splits each constraint into the rule the models read and
   commentary they do not; prompts carry the rule only.
 - Cosmetic drift in judge output (an empty remediation on PASS, a blank

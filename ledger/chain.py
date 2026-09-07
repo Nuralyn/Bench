@@ -11,12 +11,12 @@ read on every append and never written again, with ``ledger-meta.json`` frozen
 beside it as a permanent pin on that segment's tip and count. New entries are
 written one per file to ``entries/<entry_hash>.json``.
 
-The split is what lets two branches record verdicts independently. A file
-that is never written cannot conflict, and an entry file named by its own
-hash merges as a union, so two branches that both appended combine without
-rewriting any entry, which C-008 forbids. ``previous_hash`` holds a string
-(legacy, one parent) or a sorted list, and an append names every current
-tip, so a fork left by a merge is reconciled by the next governed edit.
+A file that is never written cannot conflict, and an entry file named by
+its own hash is never rewritten, which is what C-008 forbids; a chain
+assembled from more than one source combines as a union of files.
+``previous_hash`` holds a string (legacy, one parent) or a sorted list, and
+an append names every current tip, so a chain that comes to have two tips,
+however it came to have them, is reconciled by the next governed edit.
 
 Writes are atomic via ``os.replace`` on a same-directory temp file, so a crash
 mid-write cannot leave a half-written file on disk.
