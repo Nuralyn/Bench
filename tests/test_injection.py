@@ -29,6 +29,7 @@ import json
 import os
 import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from typing import Any
@@ -49,7 +50,6 @@ from pipeline.constitution import (  # noqa: E402
     load_constitution_snapshot,
 )
 from utils.api import (  # noqa: E402
-    _first_user_turn,
     _flatten_cli_messages,
     _lift_cached_prefix,
     call_model,
@@ -75,6 +75,48 @@ INJECTED_CODE: str = (
 )
 
 _STAGE_SYSTEM: str = "You are a stage. Reply with JSON."
+
+
+def _usage() -> dict[str, int]:
+    return {"input": 1, "output": 1, "cache_read": 0, "cache_creation": 0}
+
+
+def _fake_openai(seen: dict[str, Any]) -> types.ModuleType:
+    """A stand-in for the openai SDK that records what the client is asked."""
+
+    class _Message:
+        content: str = '{"ok": true}'
+
+    class _Choice:
+        message: _Message = _Message()
+
+    class _Usage:
+        prompt_tokens: int = 1
+        completion_tokens: int = 1
+
+    class _Response:
+        choices: list[_Choice] = [_Choice()]
+        usage: _Usage = _Usage()
+
+    class _Completions:
+        def create(self, **kwargs: Any) -> _Response:
+            seen.update(kwargs)
+            return _Response()
+
+    class _Chat:
+        completions: _Completions = _Completions()
+
+    class OpenAI:
+        def __init__(self, **kwargs: Any) -> None:
+            self.chat: _Chat = _Chat()
+
+    class OpenAIError(Exception):
+        pass
+
+    module = types.ModuleType("openai")
+    module.OpenAI = OpenAI  # type: ignore[attr-defined]
+    module.OpenAIError = OpenAIError  # type: ignore[attr-defined]
+    return module
 
 
 def _diff_info() -> dict[str, Any]:
@@ -251,11 +293,37 @@ class ProviderPlacementTests(unittest.TestCase):
     def test_claude_code_lifts_only_the_constitution_into_the_system_file(
         self,
     ) -> None:
-        turn: dict[str, Any] = _first_user_turn(
-            "claude_code", self.prefix, self.user, self.context
-        )
-        system_text, messages = _lift_cached_prefix(_STAGE_SYSTEM, [turn])
+        """Through call_model's dispatch to the provider boundary, then the
+        lift the CLI path applies before writing its system prompt file."""
+        seen: dict[str, Any] = {}
 
+        def fake_cli(
+            model: str,
+            system_prompt: str,
+            messages: list[dict[str, Any]],
+            max_tokens: int,
+        ) -> tuple[str, dict[str, int]]:
+            seen["system_prompt"] = system_prompt
+            seen["messages"] = messages
+            return '{"ok": true}', _usage()
+
+        with (
+            patch.dict(os.environ, {"BENCH_PROVIDER": "claude_code"}),
+            patch.object(api_module, "_claude_cli_call", fake_cli),
+        ):
+            result: dict[str, Any] = call_model(
+                "claude-test",
+                _STAGE_SYSTEM,
+                self.user,
+                cached_prefix=self.prefix,
+                cached_context=self.context,
+            )
+
+        self.assertNotIn("error", result)
+        self.assertEqual(seen["system_prompt"], _STAGE_SYSTEM)
+        system_text, messages = _lift_cached_prefix(
+            seen["system_prompt"], seen["messages"]
+        )
         self.assertTrue(system_text.startswith(_STAGE_SYSTEM))
         self.assertIn(self.prefix, system_text)
         self.assertNotIn(INJECTION, system_text)
@@ -264,16 +332,72 @@ class ProviderPlacementTests(unittest.TestCase):
         self.assertIn(INJECTION, body)
         self.assertNotIn(_STAGE_SYSTEM, body)
 
-    def test_openrouter_string_form_carries_the_edit_after_the_constitution(
-        self,
-    ) -> None:
-        turn: dict[str, Any] = _first_user_turn(
-            "openrouter", self.prefix, self.user, self.context
-        )
-        content: str = turn["content"]
+    def test_openrouter_dispatch_keeps_the_system_prompt_clean(self) -> None:
+        """Through call_model's dispatch to the provider boundary."""
+        seen: dict[str, Any] = {}
+
+        def fake_openrouter(
+            model: str,
+            system_prompt: str,
+            messages: list[dict[str, Any]],
+            max_tokens: int,
+        ) -> tuple[str, dict[str, int]]:
+            seen["system_prompt"] = system_prompt
+            seen["messages"] = messages
+            return '{"ok": true}', _usage()
+
+        with (
+            patch.dict(os.environ, {"BENCH_PROVIDER": "openrouter"}),
+            patch.object(api_module, "_openrouter_call", fake_openrouter),
+        ):
+            result: dict[str, Any] = call_model(
+                "claude-test",
+                _STAGE_SYSTEM,
+                self.user,
+                cached_prefix=self.prefix,
+                cached_context=self.context,
+            )
+
+        self.assertNotIn("error", result)
+        self.assertEqual(seen["system_prompt"], _STAGE_SYSTEM)
+        self.assertEqual(len(seen["messages"]), 1)
+        content: str = seen["messages"][0]["content"]
+        self.assertIsInstance(content, str)
         self.assertTrue(content.startswith(self.prefix))
         self.assertLess(content.index(self.context), content.index(self.user))
         self.assertNotIn(_STAGE_SYSTEM, content)
+
+    def test_openrouter_call_puts_the_system_prompt_in_the_system_role(
+        self,
+    ) -> None:
+        """Inside _openrouter_call itself, at the SDK boundary. The openai SDK
+        is a soft dependency absent in CI, so a fake module stands in for it
+        and records the request the real one would have sent."""
+        seen: dict[str, Any] = {}
+
+        with (
+            patch.dict(sys.modules, {"openai": _fake_openai(seen)}),
+            patch.dict(
+                os.environ,
+                {"BENCH_PROVIDER": "openrouter", "OPENROUTER_API_KEY": "test-key"},
+            ),
+        ):
+            result: dict[str, Any] = call_model(
+                "claude-test",
+                _STAGE_SYSTEM,
+                self.user,
+                cached_prefix=self.prefix,
+                cached_context=self.context,
+            )
+
+        self.assertNotIn("error", result)
+        self.assertEqual(seen["model"], "anthropic/claude-test")
+        sent: list[dict[str, str]] = seen["messages"]
+        self.assertEqual(sent[0], {"role": "system", "content": _STAGE_SYSTEM})
+        self.assertEqual(sent[1]["role"], "user")
+        self.assertIn(INJECTION, sent[1]["content"])
+        self.assertNotIn(INJECTION, sent[0]["content"])
+        self.assertEqual(len(sent), 2)
 
 
 @unittest.skipUnless(
