@@ -300,7 +300,19 @@ Set `BENCH_PROVIDER=claude_code` to run the pipeline on the subscription that al
 
 ## What It Costs
 
-Every governed `Write`, `Edit`, or `MultiEdit` is three sequential model calls, and Claude Code makes many small edits. The figures below come from Bench's own operational ledger. `python -m cli stats` prints each of them (the "Tokens per edit", "Seconds per edit", and "Seconds by stage" lines), and the viewer's dashboard shows the same distributions, so anyone with a chain can reproduce the table for their own ledger rather than take an estimate.
+Every governed `Write`, `Edit`, or `MultiEdit` is three sequential model calls, and Claude Code makes many small edits. The figures below come from Bench's own operational ledger, through the helpers in `utils/stats.py` that `python -m cli stats` and the viewer use. `cli stats` prints the all-entries rows (the "Tokens per edit", "Seconds per edit", and "Seconds by stage" lines) and the viewer's dashboard plots verdicts and latency by week; the per-week token rows come from the same helpers over one week's entries, which this reproduces on any chain:
+
+```python
+from collections import defaultdict
+from ledger.chain import load_ledger
+from utils.stats import billed_tokens_per_entry, seconds_by_stage, tokens_per_entry, week_of
+
+weeks = defaultdict(list)
+for entry in load_ledger():
+    weeks[week_of(entry.get("timestamp", ""))].append(entry)
+for week, entries in sorted(weeks.items()):
+    print(week, tokens_per_entry(entries), billed_tokens_per_entry(entries), seconds_by_stage(entries)["total"])
+```
 
 Tokens per governed edit, all stages, by week of the operational chain, as of 2026-09-07:
 
