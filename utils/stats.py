@@ -156,16 +156,31 @@ def _group_tallies(groups: dict[str, list[dict]], key: str) -> list[dict]:
     return rows
 
 
-def stats_by_week(entries: list[dict]) -> list[dict]:
-    """Verdict tallies per ISO week of entry timestamp, oldest first.
+def entries_by_week(entries: list[dict]) -> dict[str, list[dict]]:
+    """Entries grouped by the ISO week of their timestamp, in ledger order.
 
-    Each row is a _tally_verdicts dict plus "week". Entries whose timestamp
-    does not parse land in the UNKNOWN_WEEK bucket rather than vanishing.
+    The one grouping every per-week figure is built on (verdict tallies,
+    latency, tokens), so no two weekly tables can disagree about which week
+    an entry belongs to. A week is the ISO week, Monday to Sunday, of the
+    timestamp's calendar date, so the days around a year end belong to
+    whichever year's week they fall in. An entry whose timestamp does not
+    parse lands in the UNKNOWN_WEEK bucket rather than vanishing. Keys are
+    in first-seen order; every renderer sorts them, which puts the unknown
+    bucket last.
     """
     groups: dict[str, list[dict]] = {}
     for entry in entries:
         groups.setdefault(week_of(entry.get("timestamp")), []).append(entry)
-    return _group_tallies(groups, "week")
+    return groups
+
+
+def stats_by_week(entries: list[dict]) -> list[dict]:
+    """Verdict tallies per ISO week of entry timestamp, oldest first.
+
+    Each row is a _tally_verdicts dict plus "week", over the groups
+    entries_by_week makes.
+    """
+    return _group_tallies(entries_by_week(entries), "week")
 
 
 def stats_by_scope(entries: list[dict], project_root: str) -> list[dict]:
@@ -558,22 +573,50 @@ def seconds_by_stage(entries: list[dict]) -> dict[str, dict[str, float | int]]:
 def latency_by_week(entries: list[dict]) -> list[dict]:
     """Per-entry total wall time per ISO week, oldest first.
 
-    Each row is a _distribution_summary dict plus "week". Only entries that
-    recorded at least one stage timing contribute, and weeks with none are
-    omitted rather than shown as zero, so the table cannot imply a verdict
-    was instant when it was merely unmeasured.
+    Each row is a _distribution_summary dict plus "week", over the groups
+    entries_by_week makes. Only entries that recorded at least one stage
+    timing contribute, and weeks with none are omitted rather than shown
+    as zero, so the table cannot imply a verdict was instant when it was
+    merely unmeasured.
     """
-    groups: dict[str, list[float]] = {}
-    for entry in entries:
-        seconds: dict[str, float] = _stage_seconds(entry)
-        if not seconds:
-            continue
-        groups.setdefault(week_of(entry.get("timestamp")), []).append(
-            sum(seconds.values())
-        )
     rows: list[dict] = []
+    groups: dict[str, list[dict]] = entries_by_week(entries)
     for label in sorted(groups):
-        row: dict = _distribution_summary(groups[label])
+        totals: list[float] = []
+        for entry in groups[label]:
+            seconds: dict[str, float] = _stage_seconds(entry)
+            if seconds:
+                totals.append(sum(seconds.values()))
+        if not totals:
+            continue
+        row: dict = _distribution_summary(totals)
+        row["week"] = label
+        rows.append(row)
+    return rows
+
+
+def tokens_by_week(entries: list[dict]) -> list[dict]:
+    """Per-entry token totals per ISO week, oldest first.
+
+    Each row is tokens_per_entry over that week's entries plus "week", and
+    "billed_median" and "billed_p90" from billed_tokens_per_entry over the
+    same entries, so a week's row is exactly what the all-entries lines
+    would print for that week alone; the groups are the ones
+    entries_by_week makes. Only entries that recorded usable usage
+    contribute, and weeks with none are omitted rather than shown as zero,
+    so the table cannot imply an edit was free when it was merely
+    unmeasured. This is the row the README quotes for the release week.
+    """
+    rows: list[dict] = []
+    groups: dict[str, list[dict]] = entries_by_week(entries)
+    for label in sorted(groups):
+        summary: dict[str, float | int] = tokens_per_entry(groups[label])
+        if not summary["entries"]:
+            continue
+        billed: dict[str, float | int] = billed_tokens_per_entry(groups[label])
+        row: dict = dict(summary)
+        row["billed_median"] = billed["median"]
+        row["billed_p90"] = billed["p90"]
         row["week"] = label
         rows.append(row)
     return rows

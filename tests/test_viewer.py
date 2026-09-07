@@ -40,6 +40,7 @@ from utils.stats import (  # noqa: E402
     pct,
     stats_by_scope,
     stats_by_week,
+    tokens_by_week,
 )
 from utils.viewer import generate_viewer_html  # noqa: E402
 
@@ -326,6 +327,44 @@ class DashboardTests(unittest.TestCase):
             "At cached rates (reads 0.1x, writes 1.25x): median 200, p90 200.",
             html_out,
         )
+
+    def test_token_table_has_a_row_per_week_with_usage(self) -> None:
+        """The release-week token median the roadmap's R3 asks the dashboard
+        to show, restating utils.stats.tokens_by_week."""
+        chain: list[dict] = _build_valid_chain(3)
+        chain[0]["oracle"]["_tokens"] = {"input": 1000, "output": 10}
+        chain[0]["entry_hash"] = compute_entry_hash(chain[0])
+        chain[1]["previous_hash"] = chain[0]["entry_hash"]
+        chain[1]["timestamp"] = "2026-01-12T00:00:00+00:00"  # ISO week 3
+        chain[1]["oracle"]["_tokens"] = {
+            "input": 3000,
+            "output": 20,
+            "cache_read": 2000,
+            "cache_creation": 0,
+        }
+        chain[1]["entry_hash"] = compute_entry_hash(chain[1])
+        chain[2]["previous_hash"] = chain[1]["entry_hash"]
+        chain[2]["timestamp"] = "2026-01-19T00:00:00+00:00"  # week 4, no usage
+        chain[2]["entry_hash"] = compute_entry_hash(chain[2])
+        html_out: str = self._render(chain)
+
+        rows: list[dict] = tokens_by_week(chain)
+        self.assertEqual([row["week"] for row in rows], ["2026-W01", "2026-W03"])
+        for row in rows:
+            self.assertIn(
+                self._row([
+                    row["week"],
+                    f"{row['entries']:,}",
+                    f"{int(row['median']):,}",
+                    f"{int(row['p90']):,}",
+                    f"{int(row['billed_median']):,}",
+                ]),
+                html_out,
+            )
+        # And in plain figures: 1,010 uncached; 3,020 of which 2,000 read
+        # from cache bills as 1,000 + 200 + 20.
+        self.assertIn(self._row(["2026-W01", "1", "1,010", "1,010", "1,010"]), html_out)
+        self.assertIn(self._row(["2026-W03", "1", "3,020", "3,020", "1,220"]), html_out)
 
     def test_latency_table_restates_seconds_by_stage(self) -> None:
         chain: list[dict] = _build_valid_chain(3)
