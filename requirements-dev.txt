@@ -8,4 +8,4 @@
 # skips itself when playwright is not importable, so the default test run
 # needs none of this. Install the browser with:
 #   python -m playwright install chromium
-playwright==1.60.0
+playwright==1.62.0
