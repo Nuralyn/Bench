@@ -13,7 +13,7 @@ requires-python = ">=3.11"
 authors = [{ name = "Dana Burks", email = "dburks@nuralyn.com" }]
 # Mirrors requirements.txt exactly; tests/test_packaging.py fails if the two
 # drift. The lock files remain the install path CI uses.
-dependencies = ["anthropic==1.2.0"]
+dependencies = ["anthropic==1.4.0"]
 
 [project.urls]
 Repository = "https://github.com/Nuralyn/Bench"
