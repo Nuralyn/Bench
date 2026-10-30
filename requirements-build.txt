@@ -6,4 +6,4 @@
 #     --output-file requirements-build.lock requirements-build.txt
 # and land it the same way: by deliberate human decision after reading the
 # diff (CLAUDE.md rule 1). Not needed to run Bench.
-setuptools==84.0.0
+setuptools==84.2.1
